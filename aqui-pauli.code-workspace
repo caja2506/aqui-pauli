@@ -1,0 +1,37 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+    "emmet.includeLanguages": {
+      "javascript": "javascriptreact"
+    },
+    "tailwindCSS.experimental.classRegex": [
+      "className\\s*=\\s*[\"'`]([^\"'`]*)[\"'`]"
+    ],
+    "files.exclude": {
+      "node_modules": true,
+      "dist": true,
+      ".firebase": true
+    },
+    "search.exclude": {
+      "node_modules": true,
+      "dist": true,
+      "functions/node_modules": true
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode",
+      "bradlc.vscode-tailwindcss",
+      "dsznajder.es7-react-js-snippets",
+      "formulahendry.auto-rename-tag"
+    ]
+  }
+}

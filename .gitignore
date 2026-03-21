@@ -1,0 +1,20 @@
+# Dependencies
+node_modules
+functions/node_modules
+
+# Build
+dist
+
+# Logs
+*.log
+
+# Firebase
+.firebase
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db

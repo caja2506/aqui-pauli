@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users_roles/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return request.auth != null && getUserRole() == 'admin';
+    }
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // --- users_roles ---
+    match /users_roles/{userId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.role == 'cliente';
+      allow update, delete: if isAdmin();
+    }
+
+    // --- Catálogo público (lectura abierta) ---
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+
+      match /variants/{variantId} {
+        allow read: if true;
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    match /brands/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /categories/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- Carrito (solo dueño) ---
+    match /carts/{uid} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // --- Pedidos ---
+    match /orders/{orderId} {
+      allow read: if request.auth != null
+        && (isAdmin() || resource.data.customerUid == request.auth.uid);
+      allow create: if request.auth != null;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+
+      match /items/{itemId} {
+        allow read: if request.auth != null
+          && (isAdmin() || get(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == request.auth.uid);
+        allow create: if request.auth != null;
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // --- CRM (solo admin) ---
+    match /crm_contacts/{contactId} {
+      allow read, write: if isAdmin();
+
+      match /interactions/{interactionId} {
+        allow read, write: if isAdmin();
+      }
+    }
+
+    // --- Automatizaciones (solo admin) ---
+    match /automations/{automationId} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- Zonas de envío (lectura pública, escritura admin) ---
+    match /shipping_zones/{zoneId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // --- Configuración (lectura pública, escritura admin) ---
+    match /config/{configId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}
