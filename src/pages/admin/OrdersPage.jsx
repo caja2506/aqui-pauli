@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../../firebase';
 import { Search, ClipboardList, ChevronDown, MapPin, Package, Phone } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
 import { updateOrderStatus } from '../../services/orderService';
@@ -23,6 +25,7 @@ export default function OrdersPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [expandedOrder, setExpandedOrder] = useState(null);
+  const [loadedItems, setLoadedItems] = useState({}); // cache de items por orderId
 
   const filteredOrders = orders.filter(o => {
     const s = search.toLowerCase();
@@ -35,8 +38,40 @@ export default function OrdersPage() {
     await updateOrderStatus(orderId, newStatus);
   };
 
-  const toggleExpand = (orderId) => {
-    setExpandedOrder(prev => prev === orderId ? null : orderId);
+  // Obtener el total de la orden (soporta ambos formatos)
+  const getOrderTotal = (order) => {
+    if (order.total) return order.total;
+    // Formato viejo: depositTotal + remainingTotal
+    return (order.depositTotal || 0) + (order.remainingTotal || 0) + (order.shippingCost || 0);
+  };
+
+  // Cargar items cuando se expande una orden
+  const toggleExpand = async (orderId) => {
+    if (expandedOrder === orderId) {
+      setExpandedOrder(null);
+      return;
+    }
+    setExpandedOrder(orderId);
+
+    // Si ya tenemos items cargados o la orden tiene itemsSummary, no hacer nada
+    const order = orders.find(o => o.id === orderId);
+    if (loadedItems[orderId] || (order?.itemsSummary && order.itemsSummary.length > 0)) return;
+
+    // Cargar items de la sub-colección
+    try {
+      const itemsSnap = await getDocs(collection(db, 'orders', orderId, 'items'));
+      const items = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setLoadedItems(prev => ({ ...prev, [orderId]: items }));
+    } catch (err) {
+      console.error('Error loading order items:', err);
+    }
+  };
+
+  // Obtener items (de itemsSummary o de sub-colección cargada)
+  const getOrderItems = (order) => {
+    if (order.itemsSummary && order.itemsSummary.length > 0) return order.itemsSummary;
+    if (loadedItems[order.id]) return loadedItems[order.id];
+    return [];
   };
 
   return (
@@ -66,7 +101,9 @@ export default function OrdersPage() {
           {filteredOrders.map(order => {
             const isExpanded = expandedOrder === order.id;
             const addr = order.shippingAddress || {};
-            const items = order.itemsSummary || [];
+            const items = getOrderItems(order);
+            const total = getOrderTotal(order);
+            const itemCount = order.itemCount || items.length;
 
             return (
               <div key={order.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -91,12 +128,12 @@ export default function OrdersPage() {
 
                   <div className="flex items-center gap-1 text-xs text-slate-500">
                     <Package className="w-3 h-3" />
-                    <span>{order.itemCount || items.length} items</span>
+                    <span>{itemCount} item{itemCount !== 1 ? 's' : ''}</span>
                   </div>
 
                   <StatusBadge status={order.status} />
 
-                  <span className="text-sm font-black text-slate-900 min-w-[90px] text-right">{formatCRC(order.total)}</span>
+                  <span className="text-sm font-black text-slate-900 min-w-[90px] text-right">{formatCRC(total)}</span>
 
                   <select
                     value={order.status}
@@ -146,14 +183,17 @@ export default function OrdersPage() {
                             ))}
                           </div>
                         ) : (
-                          <p className="text-xs text-slate-400 bg-white p-3 rounded-xl border">Sin datos de items</p>
+                          <div className="text-xs text-slate-400 bg-white p-3 rounded-xl border flex items-center gap-2">
+                            <div className="animate-spin w-3 h-3 border-2 border-slate-300 border-t-indigo-500 rounded-full" />
+                            Cargando items...
+                          </div>
                         )}
 
                         {/* Totals */}
                         <div className="mt-3 bg-white rounded-xl p-3 border border-slate-200 space-y-1 text-sm">
-                          <div className="flex justify-between"><span className="text-slate-400">Subtotal</span><span>{formatCRC(order.subtotal)}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-400">Envío ({order.shippingType})</span><span>{formatCRC(order.shippingCost)}</span></div>
-                          <div className="flex justify-between font-black text-slate-900 pt-1 border-t"><span>Total</span><span>{formatCRC(order.total)}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-400">Subtotal</span><span>{formatCRC(order.subtotal || order.depositTotal || 0)}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-400">Envío ({order.shippingType || 'normal'})</span><span>{formatCRC(order.shippingCost || 0)}</span></div>
+                          <div className="flex justify-between font-black text-slate-900 pt-1 border-t"><span>Total</span><span>{formatCRC(total)}</span></div>
                           {order.hasBackorder && (
                             <div className="flex justify-between text-amber-600 font-bold text-xs pt-1">
                               <span>Adelanto 20% (bajo pedido)</span><span>{formatCRC(order.backorderDeposit)}</span>
@@ -167,17 +207,17 @@ export default function OrdersPage() {
                         <div>
                           <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Dirección de Envío</h4>
                           <div className="bg-white rounded-xl p-4 border border-slate-200 space-y-2">
-                            {addr.provincia ? (
+                            {addr.provincia || addr.canton ? (
                               <>
                                 <div className="flex items-start gap-2">
                                   <MapPin className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
                                   <div>
-                                    <p className="text-sm font-bold text-slate-900">{addr.provincia}, {addr.canton}</p>
+                                    <p className="text-sm font-bold text-slate-900">{[addr.provincia, addr.canton].filter(Boolean).join(', ')}</p>
                                     <p className="text-xs text-slate-500">{addr.distrito} {addr.codigoPostal ? `(${addr.codigoPostal})` : ''}</p>
                                   </div>
                                 </div>
                                 <div className="pl-6">
-                                  <p className="text-xs text-slate-600 bg-slate-50 rounded-lg p-2">{addr.señas || 'Sin señas adicionales'}</p>
+                                  <p className="text-xs text-slate-600 bg-slate-50 rounded-lg p-2">{addr.señas || addr.senas || 'Sin señas adicionales'}</p>
                                 </div>
                               </>
                             ) : (
