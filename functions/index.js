@@ -12,6 +12,7 @@ const payments = require("./payments");
 const crm = require("./crm");
 const messaging = require("./messaging");
 const schedulers = require("./schedulers");
+const whatsapp = require("./whatsapp/webhook");
 
 // Re-exportar todo
 module.exports = {
@@ -20,4 +21,5 @@ module.exports = {
   ...crm,
   ...messaging,
   ...schedulers,
+  ...whatsapp,
 };

@@ -192,16 +192,18 @@ exports.whatsappWebhook = onRequest(
 
               // 4. Orquestador IA con Gemini: decidir acción
               const contactData = contactId ? (await db.collection("crm_contacts").doc(contactId).get()).data() : null;
-              const decision = await processInboundMessage(text || `[${msgType}]`, contactData);
+              const decision = await processInboundMessage(text || `[${msgType}]`, contactData, { phone: from, contactId });
 
               // 5. Si auto_reply: enviar respuesta por WhatsApp
               if (decision.type === "auto_reply" && decision.reply) {
-                const waToken = whatsappToken.value();
-                const waPhoneId = whatsappPhoneId.value();
+                const waToken = whatsappToken.value().trim();
+                const waPhoneId = whatsappPhoneId.value().trim();
+
+                console.log(`[WA Reply] Token present: ${!!waToken}, PhoneId: ${waPhoneId}, To: ${from}`);
 
                 if (waToken && waPhoneId) {
                   try {
-                    await fetch(`https://graph.facebook.com/v18.0/${waPhoneId}/messages`, {
+                    const replyResponse = await fetch(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, {
                       method: "POST",
                       headers: {
                         "Authorization": `Bearer ${waToken}`,
@@ -215,6 +217,13 @@ exports.whatsappWebhook = onRequest(
                       }),
                     });
 
+                    const replyData = await replyResponse.json();
+                    console.log(`[WA Reply] Status: ${replyResponse.status}, Response: ${JSON.stringify(replyData)}`);
+
+                    if (!replyResponse.ok) {
+                      console.error(`[WA Reply] ERROR: ${JSON.stringify(replyData)}`);
+                    }
+
                     // Log respuesta automática
                     if (contactId) {
                       await saveCrmMessage(contactId, {
@@ -222,15 +231,17 @@ exports.whatsappWebhook = onRequest(
                         direction: "outbound",
                         to: from,
                         content: decision.reply,
-                        status: "sent",
+                        status: replyResponse.ok ? "sent" : "failed",
                         autoReply: true,
                         intent: decision.intent,
                       });
                       await updateCrmOnMessage(contactId, "outbound", "whatsapp");
                     }
                   } catch (replyErr) {
-                    console.error("Error sending auto-reply:", replyErr.message);
+                    console.error("[WA Reply] Exception:", replyErr.message, replyErr.stack);
                   }
+                } else {
+                  console.error("[WA Reply] Missing token or phoneId!");
                 }
               }
 
@@ -393,7 +404,7 @@ exports.telegramWebhook = onRequest(
       const contactData = contactId
         ? (await db.collection("crm_contacts").doc(contactId).get()).data()
         : null;
-      const decision = await processInboundMessage(text, contactData);
+      const decision = await processInboundMessage(text, contactData, { contactId });
 
       // 5. Responder por Telegram
       const botToken = telegramBotToken.value();

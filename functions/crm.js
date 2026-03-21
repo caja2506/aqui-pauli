@@ -157,17 +157,22 @@ async function saveCrmMessage(contactId, messageData) {
 // ==============================================
 // HELPER: Actualizar timestamps y canal en CRM
 // ==============================================
-async function updateCrmOnMessage(contactId, direction, channel) {
+async function updateCrmOnMessage(contactId, direction, channel, messageContent) {
   if (!contactId) return;
   try {
     const now = new Date().toISOString();
     const update = {
       lastInteractionAt: now,
+      lastMessageAt: now,
       updatedAt: now,
+      totalMessages: FieldValue.increment(1),
     };
 
     if (direction === "inbound") {
       update.lastInboundAt = now;
+      if (messageContent) {
+        update.lastMessageContent = messageContent.substring(0, 100);
+      }
     } else if (direction === "outbound") {
       update.lastOutboundAt = now;
     }
@@ -175,6 +180,7 @@ async function updateCrmOnMessage(contactId, direction, channel) {
     // Agregar canal si no existe
     if (channel) {
       update.sourceChannels = FieldValue.arrayUnion(channel);
+      update.lastChannel = channel;
     }
 
     await db.collection("crm_contacts").doc(contactId).update(update);

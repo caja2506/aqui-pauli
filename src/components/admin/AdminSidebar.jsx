@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Tag, FolderTree, Package, ClipboardList,
-  Users, Zap, LogOut, Shield, ShoppingBag, ArrowLeft, Menu, X
+  Users, Zap, LogOut, Shield, ShoppingBag, ArrowLeft, Menu, X, MessageCircle
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRole } from '../../contexts/RoleContext';
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/admin/pedidos', icon: ClipboardList, label: 'Pedidos' },
   { to: '/admin/crm', icon: Users, label: 'CRM' },
   { to: '/admin/automatizaciones', icon: Zap, label: 'Automatizaciones' },
+  { to: '/admin/soporte', icon: MessageCircle, label: 'Soporte' },
 ];
 
 export default function AdminSidebar() {
