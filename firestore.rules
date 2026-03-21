@@ -73,6 +73,10 @@ service cloud.firestore {
       match /interactions/{interactionId} {
         allow read, write: if isAdmin();
       }
+
+      match /messages/{messageId} {
+        allow read, write: if isAdmin();
+      }
     }
 
     // --- Automatizaciones (solo admin) ---
@@ -90,6 +94,11 @@ service cloud.firestore {
     match /config/{configId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // --- Logs de mensajes (solo admin) ---
+    match /message_logs/{logId} {
+      allow read, write: if isAdmin();
     }
   }
 }

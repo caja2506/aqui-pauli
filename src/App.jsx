@@ -8,6 +8,7 @@ import { Loader2 } from 'lucide-react';
 import Navbar from './components/storefront/Navbar';
 import Footer from './components/storefront/Footer';
 import CartDrawer from './components/storefront/CartDrawer';
+import WhatsAppButton from './components/storefront/WhatsAppButton';
 import AdminSidebar from './components/admin/AdminSidebar';
 
 // --- Auth ---
@@ -41,6 +42,7 @@ function StoreLayout() {
         <Outlet />
       </main>
       <Footer />
+      <WhatsAppButton />
     </div>
   );
 }
@@ -56,7 +58,7 @@ function AdminLayout() {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-950">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
+          <Loader2 className="w-10 h-10 text-rose-400 animate-spin" />
           <p className="text-slate-400 text-sm font-bold">Cargando panel admin...</p>
         </div>
       </div>
@@ -69,7 +71,7 @@ function AdminLayout() {
       <div className="text-center">
         <h2 className="text-xl font-black text-slate-900 mb-2">Acceso Denegado</h2>
         <p className="text-sm text-slate-400 mb-4">No tienes permisos de administrador.</p>
-        <a href="/" className="text-sm font-bold text-indigo-600 hover:text-indigo-700">← Ir a la tienda</a>
+        <a href="/" className="text-sm font-bold text-rose-600 hover:text-rose-700">← Ir a la tienda</a>
       </div>
     </div>
   );

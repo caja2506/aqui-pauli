@@ -17,18 +17,18 @@ export default function DashboardPage() {
     { icon: Package, label: 'Productos Activos', value: activeProducts.length, color: 'indigo' },
     { icon: ClipboardList, label: 'Pedidos Pendientes', value: pendingOrders.length, color: 'amber' },
     { icon: DollarSign, label: 'Ingresos Totales', value: formatCRC(totalRevenue), color: 'green' },
-    { icon: ShoppingCart, label: 'Total Pedidos', value: orders.length, color: 'purple' },
+    { icon: ShoppingCart, label: 'Total Pedidos', value: orders.length, color: 'rose' },
     { icon: TrendingUp, label: 'Marcas', value: brands.length, color: 'blue' },
     { icon: Users, label: 'Categorías', value: categories.length, color: 'pink' },
   ];
 
   const colorClasses = {
-    indigo: 'bg-indigo-50 text-indigo-600 border-indigo-100',
+    indigo: 'bg-rose-50 text-rose-600 border-rose-100',
     amber: 'bg-amber-50 text-amber-600 border-amber-100',
     green: 'bg-green-50 text-green-600 border-green-100',
-    purple: 'bg-purple-50 text-purple-600 border-purple-100',
+    purple: 'bg-rose-50 text-rose-600 border-rose-100',
     blue: 'bg-blue-50 text-blue-600 border-blue-100',
-    pink: 'bg-pink-50 text-pink-600 border-pink-100',
+    pink: 'bg-rose-50 text-rose-600 border-rose-100',
   };
 
   return (
@@ -70,7 +70,7 @@ export default function DashboardPage() {
             <tbody className="divide-y divide-slate-100">
               {orders.slice(0, 5).map(order => (
                 <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-4 font-mono font-bold text-indigo-600 text-xs">{order.orderNumber}</td>
+                  <td className="p-4 font-mono font-bold text-rose-600 text-xs">{order.orderNumber}</td>
                   <td className="p-4 text-slate-700">{order.customerName}</td>
                   <td className="p-4">
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">{order.status?.replace(/_/g, ' ')}</span>

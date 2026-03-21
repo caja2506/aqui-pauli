@@ -1,56 +1,80 @@
-import { collection, doc, setDoc, updateDoc, getDocs, writeBatch, query, where } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { generateOrderNumber } from '../utils/formatters';
-import { ORDER_STATUS, BACKORDER_DEPOSIT_PERCENT } from '../utils/constants';
 
 /**
- * Crea un pedido nuevo
+ * Crea un pedido completo:
+ * - Documento principal en orders/ con dirección, totales, cliente
+ * - Sub-colección orders/{id}/items/ con cada producto
+ * - Crea/actualiza contacto en crm_contacts/
  */
 export async function createOrder(orderData) {
   const orderId = doc(collection(db, 'orders')).id;
   const orderNumber = generateOrderNumber();
-
-  const order = {
-    orderNumber,
-    customerUid: orderData.customerUid,
-    customerEmail: orderData.customerEmail,
-    customerName: orderData.customerName,
-    customerPhone: orderData.customerPhone,
-    status: ORDER_STATUS.PENDIENTE_PAGO,
-    paymentStatus: 'pendiente',
-    paymentMethod: orderData.paymentMethod,
-    paymentProofUrl: '',
-    paymentPhone: orderData.paymentPhone || '',
-    paymentTransactionId: '',
-    paymentAmount: 0,
-    paymentDate: '',
-    subtotal: orderData.subtotal,
-    shippingCost: orderData.shippingCost,
-    total: orderData.subtotal + orderData.shippingCost,
-    shippingType: orderData.shippingType || 'normal',
-    shippingAddress: orderData.shippingAddress,
-    trackingNumber: '',
-    trackingUrl: '',
-    hasBackorderItems: orderData.items.some(i => i.supplyType === 'bajo_pedido'),
-    backorderDepositPaid: false,
-    backorderRemainingPaid: false,
-    notes: '',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-
+  const now = new Date().toISOString();
   const batch = writeBatch(db);
 
-  // Crear orden principal
-  batch.set(doc(db, 'orders', orderId), order);
+  // --- 1. Documento principal de la orden ---
+  const orderRef = doc(db, 'orders', orderId);
+  const total = (orderData.subtotal || 0) + (orderData.shippingCost || 0);
 
-  // Crear sub-items
-  for (const item of orderData.items) {
-    const itemRef = doc(collection(db, 'orders', orderId, 'items'));
-    const depositAmount = item.supplyType === 'bajo_pedido'
-      ? Math.round(item.price * item.quantity * BACKORDER_DEPOSIT_PERCENT)
-      : 0;
+  // Calcular si hay productos bajo pedido (backorder)
+  const hasBackorder = orderData.items.some(i => i.supplyType === 'bajo_pedido');
+  const backorderDeposit = hasBackorder ? Math.round(total * 0.2) : 0;
 
+  batch.set(orderRef, {
+    orderNumber,
+    uid: orderData.uid || '',
+    customerName: orderData.customerName,
+    customerEmail: orderData.customerEmail,
+    customerPhone: orderData.customerPhone,
+    // --- DIRECCIÓN COMPLETA ---
+    shippingAddress: {
+      provincia: orderData.shippingAddress?.provincia || '',
+      canton: orderData.shippingAddress?.canton || '',
+      distrito: orderData.shippingAddress?.distrito || '',
+      codigoPostal: orderData.shippingAddress?.codigoPostal || '',
+      señas: orderData.shippingAddress?.señas || '',
+    },
+    // --- TOTALES ---
+    subtotal: orderData.subtotal,
+    shippingCost: orderData.shippingCost,
+    shippingType: orderData.shippingType || 'normal',
+    total,
+    // --- PAGO ---
+    paymentMethod: orderData.paymentMethod,
+    paymentPhone: orderData.paymentPhone || '',
+    paymentStatus: 'pendiente',
+    paymentProofUrl: '',
+    // --- BACKORDER ---
+    hasBackorder,
+    backorderDeposit,
+    // --- ESTADO ---
+    status: 'pendiente_pago',
+    notes: '',
+    trackingNumber: '',
+    trackingUrl: '',
+    // --- ITEMS RESUMEN (para mostrar en la tabla sin sub-query) ---
+    itemsSummary: orderData.items.map(i => ({
+      productId: i.productId,
+      variantId: i.variantId,
+      productName: i.productName,
+      variantName: i.variantName,
+      imageUrl: i.imageUrl || '',
+      price: i.price,
+      quantity: i.quantity,
+      supplyType: i.supplyType || 'stock_propio',
+      lineTotal: i.price * i.quantity,
+    })),
+    itemCount: orderData.items.reduce((sum, i) => sum + i.quantity, 0),
+    // --- TIMESTAMPS ---
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  // --- 2. Sub-colección de items (para queries detallados) ---
+  orderData.items.forEach((item, index) => {
+    const itemRef = doc(db, 'orders', orderId, 'items', `item_${index}`);
     batch.set(itemRef, {
       productId: item.productId,
       variantId: item.variantId,
@@ -59,14 +83,44 @@ export async function createOrder(orderData) {
       imageUrl: item.imageUrl || '',
       price: item.price,
       quantity: item.quantity,
-      subtotal: item.price * item.quantity,
       supplyType: item.supplyType || 'stock_propio',
-      depositAmount,
+      lineTotal: item.price * item.quantity,
     });
+  });
+
+  // --- 3. Crear/actualizar contacto CRM ---
+  if (orderData.uid) {
+    const crmRef = doc(db, 'crm_contacts', orderData.uid);
+    batch.set(crmRef, {
+      uid: orderData.uid,
+      email: orderData.customerEmail,
+      displayName: orderData.customerName,
+      phone: orderData.customerPhone,
+      lastAddress: {
+        provincia: orderData.shippingAddress?.provincia || '',
+        canton: orderData.shippingAddress?.canton || '',
+        distrito: orderData.shippingAddress?.distrito || '',
+        codigoPostal: orderData.shippingAddress?.codigoPostal || '',
+        señas: orderData.shippingAddress?.señas || '',
+      },
+      funnelStage: 'comprador',
+      lastOrderId: orderId,
+      lastOrderDate: now,
+      updatedAt: now,
+    }, { merge: true });
   }
 
   await batch.commit();
+
   return { orderId, orderNumber };
+}
+
+/**
+ * Obtener items de una orden
+ */
+export async function getOrderItems(orderId) {
+  const itemsSnap = await getDocs(collection(db, 'orders', orderId, 'items'));
+  return itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 /**

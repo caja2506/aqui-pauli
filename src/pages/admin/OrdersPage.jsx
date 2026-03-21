@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, ClipboardList } from 'lucide-react';
+import { Search, ClipboardList, ChevronDown, MapPin, Package, Phone } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
 import { updateOrderStatus } from '../../services/orderService';
 import { formatCRC, formatDateTime } from '../../utils/formatters';
@@ -22,6 +22,7 @@ export default function OrdersPage() {
   const { data: orders, loading } = useCollection('orders', { orderByField: 'createdAt', orderDirection: 'desc' });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [expandedOrder, setExpandedOrder] = useState(null);
 
   const filteredOrders = orders.filter(o => {
     const s = search.toLowerCase();
@@ -32,6 +33,10 @@ export default function OrdersPage() {
 
   const handleStatusChange = async (orderId, newStatus) => {
     await updateOrderStatus(orderId, newStatus);
+  };
+
+  const toggleExpand = (orderId) => {
+    setExpandedOrder(prev => prev === orderId ? null : orderId);
   };
 
   return (
@@ -55,48 +60,160 @@ export default function OrdersPage() {
         </select>
       </div>
 
-      {/* Orders Table */}
+      {/* Orders */}
       {filteredOrders.length > 0 ? (
-        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              <tr>
-                <th className="p-5"># Orden</th>
-                <th className="p-5">Cliente</th>
-                <th className="p-5">Fecha</th>
-                <th className="p-5 text-center">Estado</th>
-                <th className="p-5">Pago</th>
-                <th className="p-5 text-right">Total</th>
-                <th className="p-5 text-center">Cambiar Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredOrders.map(order => (
-                <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-5 font-mono font-bold text-indigo-600 text-xs">{order.orderNumber}</td>
-                  <td className="p-5">
-                    <div className="text-slate-900 font-bold">{order.customerName}</div>
-                    <div className="text-[10px] text-slate-400">{order.customerEmail}</div>
-                  </td>
-                  <td className="p-5 text-xs text-slate-500">{formatDateTime(order.createdAt)}</td>
-                  <td className="p-5 text-center"><StatusBadge status={order.status} /></td>
-                  <td className="p-5 text-xs text-slate-500 capitalize">{order.paymentMethod?.replace('_', ' ')}</td>
-                  <td className="p-5 text-right font-black text-slate-900">{formatCRC(order.total)}</td>
-                  <td className="p-5 text-center">
-                    <select
-                      value={order.status}
-                      onChange={e => handleStatusChange(order.id, e.target.value)}
-                      className="text-xs px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
-                    >
-                      {STATUS_FLOW.map(s => (
-                        <option key={s} value={s}>{ORDER_STATUS_LABELS[s]}</option>
-                      ))}
-                    </select>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {filteredOrders.map(order => {
+            const isExpanded = expandedOrder === order.id;
+            const addr = order.shippingAddress || {};
+            const items = order.itemsSummary || [];
+
+            return (
+              <div key={order.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                {/* Header row */}
+                <div
+                  className="flex flex-wrap items-center gap-4 p-5 cursor-pointer hover:bg-slate-50 transition-colors"
+                  onClick={() => toggleExpand(order.id)}
+                >
+                  <button className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                  </button>
+
+                  <div className="min-w-[100px]">
+                    <span className="font-mono font-bold text-indigo-600 text-xs">{order.orderNumber}</span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{formatDateTime(order.createdAt)}</p>
+                  </div>
+
+                  <div className="flex-1 min-w-[150px]">
+                    <p className="font-bold text-slate-900 text-sm">{order.customerName}</p>
+                    <p className="text-[10px] text-slate-400">{order.customerEmail}</p>
+                  </div>
+
+                  <div className="flex items-center gap-1 text-xs text-slate-500">
+                    <Package className="w-3 h-3" />
+                    <span>{order.itemCount || items.length} items</span>
+                  </div>
+
+                  <StatusBadge status={order.status} />
+
+                  <span className="text-sm font-black text-slate-900 min-w-[90px] text-right">{formatCRC(order.total)}</span>
+
+                  <select
+                    value={order.status}
+                    onChange={e => { e.stopPropagation(); handleStatusChange(order.id, e.target.value); }}
+                    onClick={e => e.stopPropagation()}
+                    className="text-xs px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                  >
+                    {STATUS_FLOW.map(s => (
+                      <option key={s} value={s}>{ORDER_STATUS_LABELS[s]}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Expanded Detail */}
+                {isExpanded && (
+                  <div className="border-t border-slate-100 bg-slate-50 p-5 space-y-5 animate-in fade-in duration-200">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      {/* Productos comprados */}
+                      <div>
+                        <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Productos Comprados</h4>
+                        {items.length > 0 ? (
+                          <div className="space-y-2">
+                            {items.map((item, idx) => (
+                              <div key={idx} className="bg-white rounded-xl p-3 border border-slate-200 flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-200 overflow-hidden shrink-0">
+                                  {item.imageUrl ? (
+                                    <img src={item.imageUrl} alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center"><Package className="w-5 h-5 text-slate-200" /></div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-slate-900 truncate">{item.productName}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[10px] text-slate-400">{item.variantName}</span>
+                                    <span className="text-[10px] text-slate-400">× {item.quantity}</span>
+                                    {item.supplyType === 'bajo_pedido' && (
+                                      <span className="text-[9px] font-bold bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded">BAJO PEDIDO</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <p className="text-xs text-slate-400">{formatCRC(item.price)} c/u</p>
+                                  <p className="text-sm font-black text-slate-900">{formatCRC(item.lineTotal || item.price * item.quantity)}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400 bg-white p-3 rounded-xl border">Sin datos de items</p>
+                        )}
+
+                        {/* Totals */}
+                        <div className="mt-3 bg-white rounded-xl p-3 border border-slate-200 space-y-1 text-sm">
+                          <div className="flex justify-between"><span className="text-slate-400">Subtotal</span><span>{formatCRC(order.subtotal)}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-400">Envío ({order.shippingType})</span><span>{formatCRC(order.shippingCost)}</span></div>
+                          <div className="flex justify-between font-black text-slate-900 pt-1 border-t"><span>Total</span><span>{formatCRC(order.total)}</span></div>
+                          {order.hasBackorder && (
+                            <div className="flex justify-between text-amber-600 font-bold text-xs pt-1">
+                              <span>Adelanto 20% (bajo pedido)</span><span>{formatCRC(order.backorderDeposit)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Dirección y datos del cliente */}
+                      <div className="space-y-4">
+                        <div>
+                          <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Dirección de Envío</h4>
+                          <div className="bg-white rounded-xl p-4 border border-slate-200 space-y-2">
+                            {addr.provincia ? (
+                              <>
+                                <div className="flex items-start gap-2">
+                                  <MapPin className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
+                                  <div>
+                                    <p className="text-sm font-bold text-slate-900">{addr.provincia}, {addr.canton}</p>
+                                    <p className="text-xs text-slate-500">{addr.distrito} {addr.codigoPostal ? `(${addr.codigoPostal})` : ''}</p>
+                                  </div>
+                                </div>
+                                <div className="pl-6">
+                                  <p className="text-xs text-slate-600 bg-slate-50 rounded-lg p-2">{addr.señas || 'Sin señas adicionales'}</p>
+                                </div>
+                              </>
+                            ) : (
+                              <p className="text-xs text-slate-400">Sin dirección registrada</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Datos del Cliente</h4>
+                          <div className="bg-white rounded-xl p-4 border border-slate-200 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <Phone className="w-3.5 h-3.5 text-slate-400" />
+                              <span className="text-sm text-slate-700">{order.customerPhone || 'Sin teléfono'}</span>
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              <p>Método de pago: <span className="font-bold text-slate-600 capitalize">{order.paymentMethod?.replace('_', ' ')}</span></p>
+                              {order.paymentPhone && <p>Tel. SINPE: <span className="font-bold text-slate-600">{order.paymentPhone}</span></p>}
+                              <p>Estado de pago: <span className="font-bold text-slate-600 capitalize">{order.paymentStatus || 'pendiente'}</span></p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {order.notes && (
+                          <div>
+                            <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Notas</h4>
+                            <p className="text-xs text-slate-600 bg-white rounded-xl p-3 border border-slate-200">{order.notes}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <EmptyState icon={ClipboardList} title="Sin pedidos" message="Los pedidos aparecerán aquí cuando los clientes compren" />

@@ -1,5 +1,4 @@
-import React from 'react';
-import { ShoppingBag } from 'lucide-react';
+import { ShoppingBag, Instagram } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Footer() {
@@ -10,7 +9,7 @@ export default function Footer() {
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+              <div className="w-8 h-8 bg-gradient-to-br from-rose-500 to-rose-600 rounded-lg flex items-center justify-center">
                 <ShoppingBag className="w-4 h-4 text-white" />
               </div>
               <span className="text-lg font-black tracking-tight">Aquí Pauli</span>
@@ -35,6 +34,15 @@ export default function Footer() {
             <div className="space-y-2 text-sm text-slate-300">
               <p>WhatsApp: +506 0000-0000</p>
               <p>Email: info@aquipauli.com</p>
+              <a
+                href="https://www.instagram.com/aqui.paulina"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-slate-300 hover:text-rose-400 transition-colors"
+              >
+                <Instagram className="w-4 h-4" />
+                @aqui.paulina
+              </a>
               <p>Costa Rica 🇨🇷</p>
             </div>
           </div>

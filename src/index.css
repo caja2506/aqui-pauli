@@ -2,22 +2,42 @@
 
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --color-brand-50: #eef2ff;
-  --color-brand-100: #e0e7ff;
-  --color-brand-200: #c7d2fe;
-  --color-brand-300: #a5b4fc;
-  --color-brand-400: #818cf8;
-  --color-brand-500: #6366f1;
-  --color-brand-600: #4f46e5;
-  --color-brand-700: #4338ca;
-  --color-brand-800: #3730a3;
-  --color-brand-900: #312e81;
-  --color-brand-950: #1e1b4b;
+
+  /* Paleta basada en #F8C8DC */
+  --color-brand-50: #fef5f8;
+  --color-brand-100: #fde8ef;
+  --color-brand-200: #F8C8DC;
+  --color-brand-300: #f0a6c4;
+  --color-brand-400: #e680aa;
+  --color-brand-500: #d4548a;
+  --color-brand-600: #b8366e;
+  --color-brand-700: #932858;
+  --color-brand-800: #722148;
+  --color-brand-900: #5a1b3a;
+  --color-brand-950: #330d20;
+
+  /* Sobreescribir rose de Tailwind con la misma gama */
+  --color-rose-50: #fef5f8;
+  --color-rose-100: #fde8ef;
+  --color-rose-200: #F8C8DC;
+  --color-rose-300: #f0a6c4;
+  --color-rose-400: #e680aa;
+  --color-rose-500: #d4548a;
+  --color-rose-600: #b8366e;
+  --color-rose-700: #932858;
+  --color-rose-800: #722148;
+  --color-rose-900: #5a1b3a;
+  --color-rose-950: #330d20;
 }
 
 /* Smooth scrolling */
 html {
   scroll-behavior: smooth;
+}
+
+body {
+  background: linear-gradient(180deg, #fef5f8 0%, #ffffff 100%);
+  min-height: 100vh;
 }
 
 /* Custom scrollbar */

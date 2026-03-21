@@ -43,7 +43,7 @@ export default function ProductPage() {
   if (!product) return (
     <div className="max-w-7xl mx-auto px-4 py-20 text-center">
       <h2 className="text-xl font-black text-slate-900">Producto no encontrado</h2>
-      <Link to="/catalogo" className="text-sm font-bold text-indigo-600 mt-4 inline-block">← Volver al catálogo</Link>
+      <Link to="/catalogo" className="text-sm font-bold text-rose-600 mt-4 inline-block">← Volver al catálogo</Link>
     </div>
   );
 
@@ -64,7 +64,7 @@ export default function ProductPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <Link to="/catalogo" className="inline-flex items-center gap-1 text-sm font-bold text-indigo-600 hover:text-indigo-700 mb-6">
+      <Link to="/catalogo" className="inline-flex items-center gap-1 text-sm font-bold text-rose-600 hover:text-rose-700 mb-6">
         <ArrowLeft className="w-4 h-4" /> Catálogo
       </Link>
 
@@ -86,7 +86,7 @@ export default function ProductPage() {
                 <button
                   key={i}
                   onClick={() => setSelectedImage(i)}
-                  className={`w-20 h-20 rounded-xl border-2 overflow-hidden flex-shrink-0 transition-all ${selectedImage === i ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-slate-200 hover:border-indigo-300'}`}
+                  className={`w-20 h-20 rounded-xl border-2 overflow-hidden flex-shrink-0 transition-all ${selectedImage === i ? 'border-rose-500 ring-2 ring-rose-200' : 'border-slate-200 hover:border-rose-300'}`}
                 >
                   <img src={img} alt="" className="w-full h-full object-cover" />
                 </button>
@@ -105,9 +105,9 @@ export default function ProductPage() {
           </div>
 
           {/* Price */}
-          <div className="bg-indigo-50 rounded-2xl p-5 border border-indigo-100">
-            <div className="text-3xl font-black text-indigo-600 tracking-tight">{formatCRC(currentPrice)}</div>
-            <p className="text-xs text-indigo-400 mt-1">IVA incluido</p>
+          <div className="bg-rose-50 rounded-2xl p-5 border border-rose-100">
+            <div className="text-3xl font-black text-rose-600 tracking-tight">{formatCRC(currentPrice)}</div>
+            <p className="text-xs text-rose-400 mt-1">IVA incluido</p>
           </div>
 
           {/* Variants */}
@@ -120,8 +120,8 @@ export default function ProductPage() {
                     key={v.id}
                     onClick={() => { setSelectedVariant(v); setQuantity(1); }}
                     className={`px-4 py-2.5 rounded-xl border text-sm font-bold transition-all ${selectedVariant?.id === v.id
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-md'
-                      : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-md'
+                      : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300'
                     } ${v.commercialStatus === 'agotado' ? 'opacity-50 line-through' : ''}`}
                     disabled={v.commercialStatus === 'agotado'}
                   >
@@ -158,7 +158,7 @@ export default function ProductPage() {
                 className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm transition-all shadow-lg active:scale-95 ${
                   addedToCart
                     ? 'bg-green-500 text-white'
-                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                    : 'bg-rose-600 hover:bg-rose-700 text-white'
                 }`}
               >
                 {addedToCart ? (

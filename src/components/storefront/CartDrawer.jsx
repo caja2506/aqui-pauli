@@ -19,7 +19,7 @@ export default function CartDrawer() {
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
           <div className="flex items-center gap-2">
-            <ShoppingBag className="w-5 h-5 text-indigo-600" />
+            <ShoppingBag className="w-5 h-5 text-rose-600" />
             <h2 className="text-lg font-black text-slate-900">Mi Carrito</h2>
             <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{itemCount}</span>
           </div>
@@ -39,7 +39,7 @@ export default function CartDrawer() {
               <Link
                 to="/catalogo"
                 onClick={() => setIsCartOpen(false)}
-                className="text-sm font-bold text-indigo-600 hover:text-indigo-700"
+                className="text-sm font-bold text-rose-600 hover:text-rose-700"
               >
                 Explorar catálogo →
               </Link>
@@ -61,7 +61,7 @@ export default function CartDrawer() {
                 <div className="flex-1 min-w-0">
                   <h4 className="text-sm font-bold text-slate-900 truncate">{item.productName}</h4>
                   <p className="text-[11px] text-slate-400">{item.variantName}</p>
-                  <p className="text-sm font-black text-indigo-600 mt-1">{formatCRC(item.price)}</p>
+                  <p className="text-sm font-black text-rose-600 mt-1">{formatCRC(item.price)}</p>
                   {/* Quantity */}
                   <div className="flex items-center gap-2 mt-2">
                     <button
@@ -101,7 +101,7 @@ export default function CartDrawer() {
             <Link
               to="/checkout"
               onClick={() => setIsCartOpen(false)}
-              className="w-full flex items-center justify-center gap-2 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 text-sm"
+              className="w-full flex items-center justify-center gap-2 py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 text-sm"
             >
               Proceder al Checkout
               <ArrowRight className="w-4 h-4" />

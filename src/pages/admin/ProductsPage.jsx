@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Edit3, Trash2, Package, Search, Eye, EyeOff, X, ChevronDown } from 'lucide-react';
+import { useState } from 'react';
+import { Plus, Edit3, Trash2, Package, Search, Eye, EyeOff, X, ChevronDown, Tag } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
-import { createProduct, updateProduct, deleteProduct, toggleProductActive, createVariant, updateVariant, deleteVariant } from '../../services/productService';
+import { createProduct, updateProduct, deleteProduct, toggleProductActive, createVariant, updateVariant, deleteVariant, createBrand, updateBrand, deleteBrand, createCategory, updateCategory, deleteCategory } from '../../services/productService';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatCRC } from '../../utils/formatters';
-import { COMMERCIAL_STATUS_LABELS, SUPPLY_TYPES } from '../../utils/constants';
+import { COMMERCIAL_STATUS_LABELS } from '../../utils/constants';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -33,6 +33,54 @@ export default function ProductsPage() {
   const [productVariants, setProductVariants] = useState({});
 
   const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
+
+  // Manager modals
+  const [showBrandManager, setShowBrandManager] = useState(false);
+  const [brandEdits, setBrandEdits] = useState([]);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [categoryEdits, setCategoryEdits] = useState([]);
+
+  const openBrandManager = () => {
+    setBrandEdits(brands.map(b => ({ id: b.id, name: b.name, isNew: false, deleted: false })));
+    setShowBrandManager(true);
+  };
+
+  const openCategoryManager = () => {
+    setCategoryEdits(categories.map(c => ({ id: c.id, name: c.name, isNew: false, deleted: false })));
+    setShowCategoryManager(true);
+  };
+
+  const handleSaveBrands = async () => {
+    for (const item of brandEdits) {
+      if (item.deleted && !item.isNew) {
+        await deleteBrand(item.id);
+      } else if (item.isNew && !item.deleted && item.name.trim()) {
+        await createBrand(item.name.trim());
+      } else if (!item.isNew && !item.deleted) {
+        const original = brands.find(b => b.id === item.id);
+        if (original && original.name !== item.name && item.name.trim()) {
+          await updateBrand(item.id, { name: item.name.trim() });
+        }
+      }
+    }
+    setShowBrandManager(false);
+  };
+
+  const handleSaveCategories = async () => {
+    for (const item of categoryEdits) {
+      if (item.deleted && !item.isNew) {
+        await deleteCategory(item.id);
+      } else if (item.isNew && !item.deleted && item.name.trim()) {
+        await createCategory({ name: item.name.trim() });
+      } else if (!item.isNew && !item.deleted) {
+        const original = categories.find(c => c.id === item.id);
+        if (original && original.name !== item.name && item.name.trim()) {
+          await updateCategory(item.id, { name: item.name.trim() });
+        }
+      }
+    }
+    setShowCategoryManager(false);
+  };
 
   const filteredProducts = products.filter(p => {
     if (!showDeleted && p.deleted) return false;
@@ -93,11 +141,22 @@ export default function ProductsPage() {
     setIsProductModal(false);
   };
 
+  // SKU generator
+  const generateSku = (productName, variantName) => {
+    const clean = (s) => (s || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]/g, '').slice(0, 4);
+    const base = clean(productName);
+    const variant = clean(variantName);
+    const rand = String(Math.floor(Math.random() * 900) + 100);
+    return [base, variant, rand].filter(Boolean).join('-');
+  };
+
   // Variant CRUD
   const openNewVariant = (productId) => {
+    const parentProduct = products.find(p => p.id === productId);
+    const autoSku = generateSku(parentProduct?.name, '');
     setVariantParentId(productId);
     setEditingVariant(null);
-    setVariantForm({ name: '', sku: '', price: '', stock: '', imageUrl: '', commercialStatus: 'disponible', supplyType: 'stock_propio' });
+    setVariantForm({ name: '', sku: autoSku, price: parentProduct?.basePrice || '', stock: '', imageUrl: '', commercialStatus: 'disponible', supplyType: 'stock_propio' });
     setIsVariantModal(true);
   };
 
@@ -143,7 +202,7 @@ export default function ProductsPage() {
           <h2 className="font-black text-2xl text-slate-800 tracking-tight">Productos</h2>
           <p className="text-sm text-slate-400 mt-1">{filteredProducts.length} producto{filteredProducts.length !== 1 ? 's' : ''}</p>
         </div>
-        <button onClick={openNewProduct} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg flex items-center justify-center active:scale-95 transition-transform text-sm">
+        <button onClick={openNewProduct} className="bg-rose-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg flex items-center justify-center active:scale-95 transition-transform text-sm">
           <Plus className="mr-2 w-4 h-4" /> Nuevo Producto
         </button>
       </div>
@@ -152,113 +211,110 @@ export default function ProductsPage() {
       <div className="flex gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar productos..." className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white shadow-sm" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar productos..." className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-rose-500 bg-white shadow-sm" />
         </div>
       </div>
 
-      {/* Products Table */}
+      {/* Products */}
       {filteredProducts.length > 0 ? (
-        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              <tr>
-                <th className="p-5 w-10"></th>
-                <th className="p-5 w-16"></th>
-                <th className="p-5">Producto</th>
-                <th className="p-5 text-right">Precio Base</th>
-                <th className="p-5 text-center">Estado</th>
-                <th className="p-5 text-center">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredProducts.map(product => {
-                const variants = productVariants[product.id] || [];
-                const brandName = brands.find(b => b.id === product.brandRef?.id)?.name;
+        <div className="space-y-3">
+          {filteredProducts.map(product => {
+            const variants = productVariants[product.id] || [];
+            const brandName = brands.find(b => b.id === product.brandRef?.id)?.name;
 
-                return (
-                  <React.Fragment key={product.id}>
-                    <tr className={`hover:bg-slate-50 transition-colors ${product.deleted ? 'opacity-50' : ''}`}>
-                      <td className="p-5">
-                        <button onClick={() => toggleExpand(product.id)} className={`transition-transform ${expandedProduct === product.id ? 'rotate-180' : ''}`}>
-                          <ChevronDown className="w-4 h-4 text-slate-400" />
-                        </button>
-                      </td>
-                      <td className="p-3">
-                        <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-200 overflow-hidden">
-                          {product.images?.[0] ? (
-                            <img src={product.images[0]} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center"><Package className="w-5 h-5 text-slate-200" /></div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-5">
-                        <div className="font-bold text-slate-900">{product.name}</div>
-                        {brandName && <span className="text-[10px] font-bold text-slate-400">{brandName}</span>}
-                      </td>
-                      <td className="p-5 text-right font-black text-slate-900">{formatCRC(product.basePrice)}</td>
-                      <td className="p-5 text-center">
-                        <button
-                          onClick={() => toggleProductActive(product.id, !product.active)}
-                          className={`p-2 rounded-lg transition-all ${product.active ? 'text-green-600 bg-green-50' : 'text-slate-400 bg-slate-100'}`}
-                          title={product.active ? 'Activo' : 'Inactivo'}
-                        >
-                          {product.active ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                        </button>
-                      </td>
-                      <td className="p-5 text-center">
-                        <div className="flex justify-center gap-1">
-                          <button onClick={() => openEditProduct(product)} className="p-2 text-amber-500 bg-amber-50 rounded-lg hover:bg-amber-100"><Edit3 className="w-4 h-4" /></button>
-                          <button onClick={() => setConfirmDelete({ isOpen: true, title: 'Eliminar Producto', message: `¿Eliminar "${product.name}"?`, onConfirm: () => deleteProduct(product.id) })} className="p-2 text-red-500 bg-red-50 rounded-lg hover:bg-red-100"><Trash2 className="w-4 h-4" /></button>
-                        </div>
-                      </td>
-                    </tr>
-                    {/* Variants */}
-                    {expandedProduct === product.id && (
-                      <tr>
-                        <td colSpan={6} className="bg-slate-50 p-5">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest">Variantes</h4>
-                            <button onClick={() => openNewVariant(product.id)} className="text-xs font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-700">
-                              <Plus className="w-3 h-3" /> Agregar
-                            </button>
-                          </div>
-                          {variants.length > 0 ? (
-                            <div className="space-y-2">
-                              {variants.map(v => (
-                                <div key={v.id} className="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-between">
-                                  <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-lg bg-slate-50 border overflow-hidden">
-                                      {v.imageUrl ? <img src={v.imageUrl} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full" />}
-                                    </div>
-                                    <div>
-                                      <span className="font-bold text-slate-900 text-sm">{v.name || 'Sin nombre'}</span>
-                                      <div className="flex items-center gap-2 mt-0.5">
-                                        <span className="text-xs text-slate-400">SKU: {v.sku || '—'}</span>
-                                        <span className="text-xs font-bold text-indigo-600">{formatCRC(v.price)}</span>
-                                        <span className="text-xs text-slate-400">Stock: {v.stock}</span>
-                                        <StatusBadge status={v.commercialStatus} type="commercial" />
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex gap-1">
-                                    <button onClick={() => openEditVariant(product.id, v)} className="p-1.5 text-amber-500 bg-amber-50 rounded-lg hover:bg-amber-100"><Edit3 className="w-3.5 h-3.5" /></button>
-                                    <button onClick={() => { setConfirmDelete({ isOpen: true, title: 'Eliminar Variante', message: `¿Eliminar "${v.name}"?`, onConfirm: async () => { await deleteVariant(product.id, v.id); await loadVariants(product.id); } }); }} className="p-1.5 text-red-500 bg-red-50 rounded-lg hover:bg-red-100"><Trash2 className="w-3.5 h-3.5" /></button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-slate-400 text-center py-4">No hay variantes. Agrega al menos una para poder vender este producto.</p>
-                          )}
-                        </td>
-                      </tr>
+            return (
+              <div key={product.id} className={`bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden ${product.deleted ? 'opacity-50' : ''}`}>
+                {/* Product row */}
+                <div className="flex items-center gap-3 p-4">
+                  {/* Expand toggle */}
+                  <button onClick={() => toggleExpand(product.id)} className={`shrink-0 transition-transform ${expandedProduct === product.id ? 'rotate-180' : ''}`}>
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                  </button>
+
+                  {/* Image */}
+                  <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-200 overflow-hidden shrink-0">
+                    {product.images?.[0] ? (
+                      <img src={product.images[0]} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center"><Package className="w-5 h-5 text-slate-200" /></div>
                     )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
+                  </div>
+
+                  {/* Info */}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-slate-900 text-sm truncate">{product.name}</div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {brandName && <span className="text-[10px] font-bold text-slate-400">{brandName}</span>}
+                      <span className="text-xs font-black text-rose-600">{formatCRC(product.basePrice)}</span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => toggleProductActive(product.id, !product.active)}
+                      className={`p-2 rounded-lg transition-all ${product.active ? 'text-green-600 bg-green-50' : 'text-slate-400 bg-slate-100'}`}
+                      title={product.active ? 'Activo' : 'Inactivo'}
+                    >
+                      {product.active ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                    </button>
+                    <button onClick={() => openEditProduct(product)} className="p-2 text-amber-500 bg-amber-50 rounded-lg hover:bg-amber-100">
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete({
+                        isOpen: true,
+                        title: 'Eliminar Producto',
+                        message: `¿Eliminar "${product.name}"? Esta acción no se puede deshacer.`,
+                        onConfirm: () => deleteProduct(product.id),
+                      })}
+                      className="p-2 text-red-500 bg-red-50 rounded-lg hover:bg-red-100"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Variants (expanded) */}
+                {expandedProduct === product.id && (
+                  <div className="bg-slate-50 border-t border-slate-100 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest">Variantes</h4>
+                      <button onClick={() => openNewVariant(product.id)} className="text-xs font-bold text-rose-600 flex items-center gap-1 hover:text-rose-700">
+                        <Plus className="w-3 h-3" /> Agregar
+                      </button>
+                    </div>
+                    {variants.length > 0 ? (
+                      <div className="space-y-2">
+                        {variants.map(v => (
+                          <div key={v.id} className="bg-white p-3 rounded-xl border border-slate-200 flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-slate-50 border overflow-hidden shrink-0">
+                              {v.imageUrl ? <img src={v.imageUrl} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full" />}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <span className="font-bold text-slate-900 text-sm truncate block">{v.name || 'Sin nombre'}</span>
+                              <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                                <span className="text-[10px] text-slate-400">SKU: {v.sku || '—'}</span>
+                                <span className="text-xs font-bold text-rose-600">{formatCRC(v.price)}</span>
+                                <span className="text-[10px] text-slate-400">Stock: {v.stock}</span>
+                                <StatusBadge status={v.commercialStatus} type="commercial" />
+                              </div>
+                            </div>
+                            <div className="flex gap-1 shrink-0">
+                              <button onClick={() => openEditVariant(product.id, v)} className="p-1.5 text-amber-500 bg-amber-50 rounded-lg hover:bg-amber-100"><Edit3 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => { setConfirmDelete({ isOpen: true, title: 'Eliminar Variante', message: `¿Eliminar "${v.name}"?`, onConfirm: async () => { await deleteVariant(product.id, v.id); await loadVariants(product.id); } }); }} className="p-1.5 text-red-500 bg-red-50 rounded-lg hover:bg-red-100"><Trash2 className="w-3.5 h-3.5" /></button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 text-center py-4">No hay variantes. Agrega al menos una para poder vender este producto.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <EmptyState icon={Package} title="Sin productos" message="Crea el primer producto de tu catálogo" />
@@ -275,30 +331,40 @@ export default function ProductsPage() {
             <form onSubmit={handleSaveProduct} className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Nombre *</label>
-                <input value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} className="w-full p-4 border border-slate-200 rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 font-bold" required />
+                <input value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} className="w-full p-4 border border-slate-200 rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-rose-500 font-bold" required />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Descripción</label>
-                <textarea value={productForm.description} onChange={e => setProductForm({ ...productForm, description: e.target.value })} className="w-full p-4 border border-slate-200 rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500" rows={3} />
+                <textarea value={productForm.description} onChange={e => setProductForm({ ...productForm, description: e.target.value })} className="w-full p-4 border border-slate-200 rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-rose-500" rows={3} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Marca</label>
-                  <select value={productForm.brandId} onChange={e => setProductForm({ ...productForm, brandId: e.target.value })} className="w-full p-3 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-400 uppercase">Marca</label>
+                    <button type="button" onClick={openBrandManager} className="text-[10px] font-bold text-rose-600 hover:text-rose-700 flex items-center gap-0.5">
+                      <Plus className="w-3 h-3" /> Nueva
+                    </button>
+                  </div>
+                  <select value={productForm.brandId} onChange={e => setProductForm({ ...productForm, brandId: e.target.value })} className="w-full p-3 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-rose-500">
                     <option value="">Sin marca</option>
                     {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Precio Base (₡)</label>
-                  <input type="number" value={productForm.basePrice} onChange={e => setProductForm({ ...productForm, basePrice: e.target.value })} className="w-full p-3 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <input type="number" value={productForm.basePrice} onChange={e => setProductForm({ ...productForm, basePrice: e.target.value })} className="w-full p-3 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
                 </div>
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Categorías</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase">Categorías</label>
+                  <button type="button" onClick={openCategoryManager} className="text-[10px] font-bold text-rose-600 hover:text-rose-700 flex items-center gap-0.5">
+                    <Plus className="w-3 h-3" /> Nueva
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {categories.map(cat => (
-                    <label key={cat.id} className={`px-3 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-all ${productForm.categoryIds.includes(cat.id) ? 'bg-indigo-50 border-indigo-300 text-indigo-600' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                    <label key={cat.id} className={`px-3 py-1.5 rounded-lg border text-xs font-bold cursor-pointer transition-all ${productForm.categoryIds.includes(cat.id) ? 'bg-rose-50 border-rose-300 text-rose-600' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
                       <input type="checkbox" className="hidden" checked={productForm.categoryIds.includes(cat.id)}
                         onChange={() => setProductForm(prev => ({
                           ...prev,
@@ -313,9 +379,9 @@ export default function ProductsPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">URLs de Imágenes (una por línea)</label>
-                <textarea value={productForm.images} onChange={e => setProductForm({ ...productForm, images: e.target.value })} placeholder="https://ejemplo.com/imagen1.jpg" className="w-full p-4 border border-slate-200 rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-xs" rows={3} />
+                <textarea value={productForm.images} onChange={e => setProductForm({ ...productForm, images: e.target.value })} placeholder="https://ejemplo.com/imagen1.jpg" className="w-full p-4 border border-slate-200 rounded-2xl bg-slate-50 outline-none focus:ring-2 focus:ring-rose-500 font-mono text-xs" rows={3} />
               </div>
-              <button type="submit" className="w-full p-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg hover:bg-indigo-700 active:scale-95 transition-all">
+              <button type="submit" className="w-full p-4 bg-rose-600 text-white rounded-2xl font-black shadow-lg hover:bg-rose-700 active:scale-95 transition-all">
                 {editingProduct ? 'Actualizar' : 'Crear Producto'}
               </button>
             </form>
@@ -335,33 +401,39 @@ export default function ProductsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Nombre</label>
-                  <input value={variantForm.name} onChange={e => setVariantForm({ ...variantForm, name: e.target.value })} placeholder="Rojo / XL" className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <input value={variantForm.name} onChange={e => {
+                    const newName = e.target.value;
+                    const parentProduct = products.find(p => p.id === variantParentId);
+                    const updates = { ...variantForm, name: newName };
+                    if (!editingVariant) updates.sku = generateSku(parentProduct?.name, newName);
+                    setVariantForm(updates);
+                  }} placeholder="Rojo / XL" className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">SKU</label>
-                  <input value={variantForm.sku} onChange={e => setVariantForm({ ...variantForm, sku: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <input value={variantForm.sku} onChange={e => setVariantForm({ ...variantForm, sku: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Precio (₡)</label>
-                  <input type="number" value={variantForm.price} onChange={e => setVariantForm({ ...variantForm, price: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <input type="number" value={variantForm.price} onChange={e => setVariantForm({ ...variantForm, price: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Stock</label>
-                  <input type="number" value={variantForm.stock} onChange={e => setVariantForm({ ...variantForm, stock: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <input type="number" value={variantForm.stock} onChange={e => setVariantForm({ ...variantForm, stock: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Estado Comercial</label>
-                  <select value={variantForm.commercialStatus} onChange={e => setVariantForm({ ...variantForm, commercialStatus: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                  <select value={variantForm.commercialStatus} onChange={e => setVariantForm({ ...variantForm, commercialStatus: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500">
                     {Object.entries(COMMERCIAL_STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Abastecimiento</label>
-                  <select value={variantForm.supplyType} onChange={e => setVariantForm({ ...variantForm, supplyType: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500">
+                  <select value={variantForm.supplyType} onChange={e => setVariantForm({ ...variantForm, supplyType: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500">
                     <option value="stock_propio">Stock Propio</option>
                     <option value="bajo_pedido">Bajo Pedido</option>
                   </select>
@@ -369,9 +441,9 @@ export default function ProductsPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">URL Imagen</label>
-                <input value={variantForm.imageUrl} onChange={e => setVariantForm({ ...variantForm, imageUrl: e.target.value })} placeholder="https://..." className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                <input value={variantForm.imageUrl} onChange={e => setVariantForm({ ...variantForm, imageUrl: e.target.value })} placeholder="https://..." className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
               </div>
-              <button type="submit" className="w-full p-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg hover:bg-indigo-700 active:scale-95 transition-all">
+              <button type="submit" className="w-full p-4 bg-rose-600 text-white rounded-2xl font-black shadow-lg hover:bg-rose-700 active:scale-95 transition-all">
                 {editingVariant ? 'Actualizar' : 'Crear Variante'}
               </button>
             </form>
@@ -380,6 +452,94 @@ export default function ProductsPage() {
       )}
 
       <ConfirmDialog {...confirmDelete} onClose={() => setConfirmDelete({ isOpen: false, onConfirm: null })} />
+
+      {/* Gestionar Marcas */}
+      {showBrandManager && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in duration-150 max-h-[85vh] flex flex-col">
+            <div className="flex items-center gap-3 mb-6">
+              <Tag className="w-5 h-5 text-rose-400" />
+              <h3 className="font-black text-lg text-white">Gestionar Marcas</h3>
+            </div>
+            <div className="space-y-2 overflow-y-auto flex-1 pr-1 mb-4">
+              {brandEdits.filter(b => !b.deleted).map((item, idx) => (
+                <div key={item.id || `new-${idx}`} className="flex items-center gap-2">
+                  <input
+                    value={item.name}
+                    onChange={e => setBrandEdits(prev => prev.map((b, i) => i === idx || b.id === item.id ? { ...b, name: e.target.value } : b))}
+                    className="flex-1 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white outline-none focus:ring-2 focus:ring-rose-500 font-medium"
+                    placeholder="Nombre de la marca"
+                  />
+                  <button
+                    onClick={() => setBrandEdits(prev => prev.map(b => b === item ? { ...b, deleted: true } : b))}
+                    className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setBrandEdits(prev => [...prev, { id: `new-${Date.now()}`, name: '', isNew: true, deleted: false }])}
+              className="w-full p-3 border border-dashed border-amber-500/50 rounded-xl text-amber-400 text-sm font-bold hover:bg-amber-500/10 transition-colors mb-4 flex items-center justify-center gap-1"
+            >
+              <Plus className="w-4 h-4" /> Agregar otro
+            </button>
+            <div className="flex gap-3">
+              <button onClick={() => setShowBrandManager(false)} className="flex-1 p-3 bg-slate-800 text-slate-300 rounded-xl font-bold text-sm hover:bg-slate-700 transition-colors">
+                Cancelar
+              </button>
+              <button onClick={handleSaveBrands} className="flex-1 p-3 bg-indigo-600 text-white rounded-xl font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all shadow-lg">
+                Guardar Cambios
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gestionar Categorías */}
+      {showCategoryManager && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in duration-150 max-h-[85vh] flex flex-col">
+            <div className="flex items-center gap-3 mb-6">
+              <Tag className="w-5 h-5 text-rose-400" />
+              <h3 className="font-black text-lg text-white">Gestionar Categorías</h3>
+            </div>
+            <div className="space-y-2 overflow-y-auto flex-1 pr-1 mb-4">
+              {categoryEdits.filter(c => !c.deleted).map((item, idx) => (
+                <div key={item.id || `new-${idx}`} className="flex items-center gap-2">
+                  <input
+                    value={item.name}
+                    onChange={e => setCategoryEdits(prev => prev.map((c, i) => i === idx || c.id === item.id ? { ...c, name: e.target.value } : c))}
+                    className="flex-1 p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white outline-none focus:ring-2 focus:ring-rose-500 font-medium"
+                    placeholder="Nombre de la categoría"
+                  />
+                  <button
+                    onClick={() => setCategoryEdits(prev => prev.map(c => c === item ? { ...c, deleted: true } : c))}
+                    className="p-2 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setCategoryEdits(prev => [...prev, { id: `new-${Date.now()}`, name: '', isNew: true, deleted: false }])}
+              className="w-full p-3 border border-dashed border-amber-500/50 rounded-xl text-amber-400 text-sm font-bold hover:bg-amber-500/10 transition-colors mb-4 flex items-center justify-center gap-1"
+            >
+              <Plus className="w-4 h-4" /> Agregar otro
+            </button>
+            <div className="flex gap-3">
+              <button onClick={() => setShowCategoryManager(false)} className="flex-1 p-3 bg-slate-800 text-slate-300 rounded-xl font-bold text-sm hover:bg-slate-700 transition-colors">
+                Cancelar
+              </button>
+              <button onClick={handleSaveCategories} className="flex-1 p-3 bg-indigo-600 text-white rounded-xl font-black text-sm hover:bg-indigo-700 active:scale-95 transition-all shadow-lg">
+                Guardar Cambios
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

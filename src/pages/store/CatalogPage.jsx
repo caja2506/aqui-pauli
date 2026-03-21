@@ -49,21 +49,21 @@ export default function CatalogPage() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Buscar productos..."
-            className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white shadow-sm"
+            className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-rose-500 bg-white shadow-sm"
           />
         </div>
         <button
           onClick={() => setShowFilters(!showFilters)}
           className={`flex items-center gap-2 px-4 py-3 rounded-2xl border text-sm font-bold transition-all ${
             showFilters || hasActiveFilters
-              ? 'bg-indigo-50 border-indigo-200 text-indigo-600'
+              ? 'bg-rose-50 border-rose-200 text-rose-600'
               : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
           }`}
         >
           <SlidersHorizontal className="w-4 h-4" />
           Filtros
           {hasActiveFilters && (
-            <span className="w-5 h-5 bg-indigo-600 text-white text-[10px] font-black rounded-full flex items-center justify-center">
+            <span className="w-5 h-5 bg-rose-600 text-white text-[10px] font-black rounded-full flex items-center justify-center">
               {[search, selectedBrand, selectedCategory].filter(Boolean).length}
             </span>
           )}
@@ -84,7 +84,7 @@ export default function CatalogPage() {
               <select
                 value={selectedBrand}
                 onChange={e => setSelectedBrand(e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
               >
                 <option value="">Todas las marcas</option>
                 {brands.filter(b => b.active !== false).map(b => (
@@ -97,7 +97,7 @@ export default function CatalogPage() {
               <select
                 value={selectedCategory}
                 onChange={e => setSelectedCategory(e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500"
               >
                 <option value="">Todas las categorías</option>
                 {categories.filter(c => c.active !== false).map(c => (
@@ -130,7 +130,7 @@ export default function CatalogPage() {
           title="No se encontraron productos"
           message={hasActiveFilters ? 'Intenta cambiar los filtros de búsqueda' : 'Aún no hay productos publicados'}
           action={hasActiveFilters ? (
-            <button onClick={clearFilters} className="text-sm font-bold text-indigo-600 hover:text-indigo-700">
+            <button onClick={clearFilters} className="text-sm font-bold text-rose-600 hover:text-rose-700">
               Limpiar filtros
             </button>
           ) : null}

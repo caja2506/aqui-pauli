@@ -1,0 +1,18 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Comprobantes de pago: el dueño del pedido puede subir, admin puede leer todo
+    match /payment_proofs/{orderId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Todo lo demás: solo admin
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
