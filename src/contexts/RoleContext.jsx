@@ -3,6 +3,12 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from './AuthContext';
 
+// Emails que reciben rol de admin automáticamente al registrarse
+const ADMIN_EMAILS = [
+  'caja2506@gmail.com',
+  'pamesank61@gmail.com',
+];
+
 const RoleContext = createContext(null);
 
 export function useRole() {
@@ -30,17 +36,17 @@ export function RoleProvider({ children }) {
       if (snap.exists()) {
         setRole(snap.data().role || 'cliente');
       } else {
-        // Nuevo usuario: siempre empieza como 'cliente'
-        // Solo un admin puede promover usuarios
+        // Auto-asignar admin si el email está en la lista
+        const autoRole = ADMIN_EMAILS.includes(user.email?.toLowerCase()) ? 'admin' : 'cliente';
         await setDoc(userRoleRef, {
           email: user.email,
           displayName: user.displayName || '',
           photoURL: user.photoURL || '',
           phone: '',
-          role: 'cliente',
+          role: autoRole,
           createdAt: new Date().toISOString(),
         });
-        setRole('cliente');
+        setRole(autoRole);
       }
       setRoleLoading(false);
     });
