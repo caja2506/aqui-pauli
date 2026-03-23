@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingBag, ShoppingCart, User, LogOut, Shield, Menu, X } from 'lucide-react';
+import { ShoppingBag, ShoppingCart, User, LogOut, Shield, Menu, X, ClipboardList } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRole } from '../../contexts/RoleContext';
 import { useCart } from '../../contexts/CartContext';
@@ -115,6 +115,14 @@ export default function Navbar() {
                         </Link>
                       )}
 
+                      <Link
+                        to="/mi-cuenta"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+                      >
+                        <ClipboardList className="w-4 h-4" /> Mis Pedidos
+                      </Link>
+
                       <button
                         onClick={handleSignOut}
                         className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors"
@@ -157,6 +165,11 @@ export default function Navbar() {
             {isAdmin && (
               <Link to="/admin" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm font-bold text-rose-600 hover:bg-rose-50 rounded-xl">
                 <Shield className="w-4 h-4" /> Panel Admin
+              </Link>
+            )}
+            {user && (
+              <Link to="/mi-cuenta" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-xl">
+                <ClipboardList className="w-4 h-4" /> Mis Pedidos
               </Link>
             )}
           </div>

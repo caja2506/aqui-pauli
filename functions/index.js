@@ -13,6 +13,8 @@ const crm = require("./crm");
 const messaging = require("./messaging");
 const schedulers = require("./schedulers");
 const whatsapp = require("./whatsapp/webhook");
+const catalogSync = require("./whatsapp/catalogSync");
+const catalogBatch = require("./whatsapp/catalogBatchSync");
 
 // Re-exportar todo
 module.exports = {
@@ -22,4 +24,6 @@ module.exports = {
   ...messaging,
   ...schedulers,
   ...whatsapp,
+  ...catalogSync,
+  ...catalogBatch,
 };

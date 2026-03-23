@@ -1,16 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { ShoppingCart, Eye, Check } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ShoppingCart, Eye } from 'lucide-react';
 import { formatCRC } from '../../utils/formatters';
-import { useCart } from '../../contexts/CartContext';
 import StatusBadge from '../ui/StatusBadge';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 export default function ProductCard({ product }) {
-  const { addItem } = useCart();
+  const navigate = useNavigate();
   const [mainVariant, setMainVariant] = useState(null);
-  const [addedToCart, setAddedToCart] = useState(false);
   const [loadingVariant, setLoadingVariant] = useState(true);
 
   useEffect(() => {
@@ -30,13 +28,10 @@ export default function ProductCard({ product }) {
   const commercialStatus = mainVariant?.commercialStatus || 'disponible';
   const canBuy = mainVariant && (commercialStatus === 'disponible' || commercialStatus === 'bajo_pedido');
 
-  const handleAddToCart = (e) => {
-    e.preventDefault(); // evitar navegación del Link
+  const handleViewOptions = (e) => {
+    e.preventDefault();
     e.stopPropagation();
-    if (!mainVariant || addedToCart) return;
-    addItem(product, mainVariant, 1);
-    setAddedToCart(true);
-    setTimeout(() => setAddedToCart(false), 1500);
+    navigate(`/producto/${product.id}`);
   };
 
   return (
@@ -87,18 +82,10 @@ export default function ProductCard({ product }) {
         {/* Add to Cart button */}
         {canBuy && !loadingVariant && (
           <button
-            onClick={handleAddToCart}
-            className={`mt-3 w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-bold text-xs transition-all active:scale-95 ${
-              addedToCart
-                ? 'bg-green-500 text-white'
-                : 'bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-600 hover:text-white'
-            }`}
+            onClick={handleViewOptions}
+            className="mt-3 w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-bold text-xs transition-all active:scale-95 bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-600 hover:text-white"
           >
-            {addedToCart ? (
-              <><Check className="w-3.5 h-3.5" /> ¡Agregado!</>
-            ) : (
-              <><ShoppingCart className="w-3.5 h-3.5" /> Agregar al Carrito</>
-            )}
+            <ShoppingCart className="w-3.5 h-3.5" /> Ver opciones
           </button>
         )}
       </div>

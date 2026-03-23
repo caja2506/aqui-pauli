@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, CreditCard, Smartphone, Building, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -8,6 +8,8 @@ import { PAYMENT_METHOD_LABELS } from '../../utils/constants';
 import { getProvincias, getCantones, getDistritos, buscarPorCodigoPostal } from '../../data/costaRicaTerritorial';
 import { calculateShippingCost, getShippingOptions } from '../../services/shippingService';
 import { createOrder } from '../../services/orderService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
 export default function CheckoutPage() {
@@ -19,6 +21,7 @@ export default function CheckoutPage() {
     name: user?.displayName || '',
     email: user?.email || '',
     phone: '',
+    cedula: '',
     provincia: '',
     canton: '',
     distrito: '',
@@ -30,6 +33,39 @@ export default function CheckoutPage() {
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [loadingCrm, setLoadingCrm] = useState(true);
+
+  // Cargar datos del CRM para pre-llenar
+  useEffect(() => {
+    if (!user?.uid) { setLoadingCrm(false); return; }
+    const loadCrmData = async () => {
+      try {
+        const crmDoc = await getDoc(doc(db, 'crm_contacts', user.uid));
+        if (crmDoc.exists()) {
+          const crm = crmDoc.data();
+          setForm(prev => ({
+            ...prev,
+            name: crm.displayName || prev.name,
+            email: crm.email || prev.email,
+            phone: crm.phone || prev.phone,
+            cedula: crm.cedula || '',
+            provincia: crm.lastAddress?.provincia || '',
+            canton: crm.lastAddress?.canton || '',
+            distrito: crm.lastAddress?.distrito || '',
+            codigoPostal: crm.lastAddress?.codigoPostal || '',
+            señas: crm.lastAddress?.señas || '',
+            paymentMethod: crm.preferredPaymentMethod || '',
+            paymentPhone: crm.paymentPhone || '',
+          }));
+        }
+      } catch (err) {
+        console.error('Error loading CRM data:', err);
+      } finally {
+        setLoadingCrm(false);
+      }
+    };
+    loadCrmData();
+  }, [user?.uid]);
 
   // Redirect if not logged in
   if (!user) {
@@ -131,6 +167,7 @@ export default function CheckoutPage() {
         customerEmail: form.email,
         customerName: form.name,
         customerPhone: form.phone,
+        customerCedula: form.cedula,
         paymentMethod: form.paymentMethod,
         paymentPhone: form.paymentPhone,
         subtotal,
@@ -196,9 +233,18 @@ export default function CheckoutPage() {
                 {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
               </div>
               <div>
+                <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Cédula</label>
+                <input value={form.cedula} onChange={e => handleChange('cedula', e.target.value)} placeholder="0-0000-0000" className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 ${errors.cedula ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
+                {errors.cedula && <p className="text-xs text-red-500 mt-1">{errors.cedula}</p>}
+              </div>
+              <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Teléfono</label>
                 <input value={form.phone} onChange={e => handleChange('phone', e.target.value)} placeholder="8888-8888" className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 ${errors.phone ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
                 {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone}</p>}
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label>
+                <input value={form.email} type="email" onChange={e => handleChange('email', e.target.value)} className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
               </div>
             </div>
           </div>
@@ -305,6 +351,17 @@ export default function CheckoutPage() {
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Teléfono SINPE (el mismo con que pagarás)</label>
                 <input value={form.paymentPhone} onChange={e => handleChange('paymentPhone', e.target.value)} placeholder="8888-8888" className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 ${errors.paymentPhone ? 'border-red-300' : 'border-slate-200'}`} />
+                <p className="text-[10px] text-slate-400 mt-1">SINPE Móvil al 7095-6070</p>
+              </div>
+            )}
+            {form.paymentMethod === 'transferencia' && (
+              <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 space-y-2">
+                <p className="text-xs font-bold text-blue-700">Datos para transferencia:</p>
+                <div className="space-y-1">
+                  <p className="text-sm text-blue-900"><span className="font-bold">IBAN:</span> CR15081400011020004961</p>
+                  <p className="text-sm text-blue-900"><span className="font-bold">SINPE Móvil:</span> 7095-6070</p>
+                </div>
+                <p className="text-[10px] text-blue-500">Subí tu comprobante después de realizar el pago</p>
               </div>
             )}
           </div>

@@ -402,8 +402,75 @@ async function findOrCreateContactByTelegram(chatId, extraData = {}) {
   }
 }
 
+// ==============================================
+// CALLABLE: Limpiar historial de mensajes de un contacto
+// Usa Admin SDK — bypasea reglas de seguridad
+// ==============================================
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+
+exports.clearChatHistory = onCall(async (request) => {
+  // Verificar autenticación
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Debés estar logueado");
+  }
+
+  // Verificar que es admin
+  const roleSnap = await db.collection("users_roles").doc(request.auth.uid).get();
+  if (!roleSnap.exists || roleSnap.data().role !== "admin") {
+    throw new HttpsError("permission-denied", "Solo admin puede limpiar historial");
+  }
+
+  const contactId = request.data.contactId;
+  if (!contactId) {
+    throw new HttpsError("invalid-argument", "contactId requerido");
+  }
+
+  try {
+    const msgsSnap = await db.collection("crm_contacts").doc(contactId)
+      .collection("messages").get();
+
+    if (msgsSnap.empty) {
+      return { success: true, deleted: 0 };
+    }
+
+    // Firestore batch max 500, usar chunks
+    const chunks = [];
+    for (let i = 0; i < msgsSnap.docs.length; i += 450) {
+      chunks.push(msgsSnap.docs.slice(i, i + 450));
+    }
+
+    let totalDeleted = 0;
+    for (const chunk of chunks) {
+      const batch = db.batch();
+      chunk.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      totalDeleted += chunk.length;
+    }
+
+    // También borrar la sesión del bot para que no tenga contexto anterior
+    const contactSnap = await db.collection("crm_contacts").doc(contactId).get();
+    if (contactSnap.exists) {
+      const phone = contactSnap.data().phone;
+      if (phone) {
+        const sessionBatch = db.batch();
+        sessionBatch.delete(db.collection("bot_sessions").doc(`${phone}_whatsapp`));
+        sessionBatch.delete(db.collection("bot_sessions").doc(`${phone}_telegram`));
+        await sessionBatch.commit();
+        console.log(`[Admin] Sesiones del bot borradas para ${phone}`);
+      }
+    }
+
+    console.log(`[Admin] ${request.auth.uid} limpió historial de ${contactId}: ${totalDeleted} mensajes`);
+    return { success: true, deleted: totalDeleted };
+  } catch (err) {
+    console.error("Error clearing chat history:", err);
+    throw new HttpsError("internal", "Error al limpiar: " + err.message);
+  }
+});
+
 module.exports = {
   onUserRoleCreated: exports.onUserRoleCreated,
+  clearChatHistory: exports.clearChatHistory,
   CRM_DEFAULT_FIELDS,
   findOrCreateContactByPhone,
   findOrCreateContactByTelegram,

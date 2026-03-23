@@ -32,7 +32,8 @@ export default function ProductPage() {
         .filter(v => v.active)
         .sort((a, b) => (a.order || 0) - (b.order || 0));
       setVariants(vars);
-      if (vars.length > 0) setSelectedVariant(vars[0]);
+      // Si solo hay 1 variante, auto-seleccionar; si hay más, el usuario debe elegir
+      if (vars.length === 1) setSelectedVariant(vars[0]);
       setLoading(false);
     });
 
@@ -177,6 +178,9 @@ export default function ProductPage() {
               <p className="text-xs font-bold text-slate-700">Envío a todo Costa Rica</p>
               <p className="text-[10px] text-slate-400">Correos de Costa Rica · Normal y Express (Grecia)</p>
             </div>
+            {!selectedVariant && variants.length > 1 && (
+              <p className="text-xs font-bold text-amber-600 mt-2 animate-pulse">⬆️ Seleccioná una variante para agregar al carrito</p>
+            )}
           </div>
         </div>
       </div>

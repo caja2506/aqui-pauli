@@ -20,6 +20,7 @@ import CatalogPage from './pages/store/CatalogPage';
 import ProductPage from './pages/store/ProductPage';
 import CheckoutPage from './pages/store/CheckoutPage';
 import OrderConfirmation from './pages/store/OrderConfirmation';
+import MyOrdersPage from './pages/store/MyOrdersPage';
 
 // --- Admin Pages ---
 import DashboardPage from './pages/admin/DashboardPage';
@@ -30,6 +31,7 @@ import OrdersPage from './pages/admin/OrdersPage';
 import CrmPage from './pages/admin/CrmPage';
 import AutomationsPage from './pages/admin/AutomationsPage';
 import SoportePage from './pages/admin/SoportePage';
+import ShippingPage from './pages/admin/ShippingPage';
 
 // ========================================
 // Layout: Storefront (public)
@@ -104,6 +106,7 @@ export default function App() {
           <Route path="/producto/:productId" element={<ProductPage />} />
           <Route path="/checkout" element={<CheckoutPage />} />
           <Route path="/orden-confirmada/:orderId" element={<OrderConfirmation />} />
+          <Route path="/mi-cuenta" element={<MyOrdersPage />} />
         </Route>
 
         {/* Admin */}
@@ -116,6 +119,7 @@ export default function App() {
           <Route path="crm" element={<CrmPage />} />
           <Route path="automatizaciones" element={<AutomationsPage />} />
           <Route path="soporte" element={<SoportePage />} />
+          <Route path="envios" element={<ShippingPage />} />
         </Route>
 
         {/* Fallback */}

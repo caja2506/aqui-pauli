@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Plus, Edit3, Trash2, Package, Search, Eye, EyeOff, X, ChevronDown, Tag } from 'lucide-react';
+import { Plus, Edit3, Trash2, Package, Search, Eye, EyeOff, X, ChevronDown, Tag, RefreshCw } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
 import { createProduct, updateProduct, deleteProduct, toggleProductActive, createVariant, updateVariant, deleteVariant, createBrand, updateBrand, deleteBrand, createCategory, updateCategory, deleteCategory } from '../../services/productService';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatCRC } from '../../utils/formatters';
 import { COMMERCIAL_STATUS_LABELS } from '../../utils/constants';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
@@ -39,6 +40,26 @@ export default function ProductsPage() {
   const [brandEdits, setBrandEdits] = useState([]);
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [categoryEdits, setCategoryEdits] = useState([]);
+
+  // WhatsApp catalog sync
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+
+  const handleSyncCatalog = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const functions = getFunctions();
+      const syncFn = httpsCallable(functions, 'syncCatalogBatch');
+      const result = await syncFn();
+      setSyncResult(result.data);
+      setTimeout(() => setSyncResult(null), 8000);
+    } catch (err) {
+      setSyncResult({ success: false, message: err.message });
+      setTimeout(() => setSyncResult(null), 8000);
+    }
+    setSyncing(false);
+  };
 
   const openBrandManager = () => {
     setBrandEdits(brands.map(b => ({ id: b.id, name: b.name, isNew: false, deleted: false })));
@@ -202,10 +223,33 @@ export default function ProductsPage() {
           <h2 className="font-black text-2xl text-slate-800 tracking-tight">Productos</h2>
           <p className="text-sm text-slate-400 mt-1">{filteredProducts.length} producto{filteredProducts.length !== 1 ? 's' : ''}</p>
         </div>
-        <button onClick={openNewProduct} className="bg-rose-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg flex items-center justify-center active:scale-95 transition-transform text-sm">
-          <Plus className="mr-2 w-4 h-4" /> Nuevo Producto
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSyncCatalog}
+            disabled={syncing}
+            className={`px-4 py-3 rounded-2xl font-bold text-sm flex items-center gap-2 transition-all ${
+              syncing
+                ? 'bg-green-100 text-green-600 cursor-wait'
+                : 'bg-green-50 text-green-700 hover:bg-green-100 active:scale-95 border border-green-200'
+            }`}
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Sincronizando...' : 'Sync WhatsApp'}
+          </button>
+          <button onClick={openNewProduct} className="bg-rose-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg flex items-center justify-center active:scale-95 transition-transform text-sm">
+            <Plus className="mr-2 w-4 h-4" /> Nuevo Producto
+          </button>
+        </div>
       </div>
+
+      {/* Sync result banner */}
+      {syncResult && (
+        <div className={`p-4 rounded-2xl text-sm font-bold animate-in fade-in duration-300 ${
+          syncResult.success ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
+        }`}>
+          {syncResult.success ? '✅' : '❌'} {syncResult.message}
+        </div>
+      )}
 
       {/* Search */}
       <div className="flex gap-3">

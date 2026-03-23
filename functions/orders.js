@@ -302,3 +302,65 @@ exports.onOrderStatusChange = onDocumentUpdated(
     }
   }
 );
+
+// ==============================================
+// CALLABLE: Eliminar pedido (admin)
+// ==============================================
+exports.deleteOrder = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Debés estar logueado");
+  }
+
+  const roleSnap = await db.collection("users_roles").doc(request.auth.uid).get();
+  if (!roleSnap.exists || roleSnap.data().role !== "admin") {
+    throw new HttpsError("permission-denied", "Solo admin puede eliminar pedidos");
+  }
+
+  const { orderId } = request.data;
+  if (!orderId) {
+    throw new HttpsError("invalid-argument", "orderId requerido");
+  }
+
+  try {
+    const orderRef = db.collection("orders").doc(orderId);
+    const orderSnap = await orderRef.get();
+    if (!orderSnap.exists) {
+      throw new HttpsError("not-found", "Pedido no encontrado");
+    }
+
+    const orderData = orderSnap.data();
+
+    // Liberar stock reservado si estaba pendiente de pago
+    if (orderData.status === "pendiente_pago") {
+      const itemsSnap = await orderRef.collection("items").get();
+      const batch = db.batch();
+      for (const itemDoc of itemsSnap.docs) {
+        const item = itemDoc.data();
+        if (item.supplyType === "stock_propio") {
+          const variantRef = db.collection("products").doc(item.productId)
+            .collection("variants").doc(item.variantId);
+          batch.update(variantRef, {
+            reservedStock: FieldValue.increment(-item.quantity),
+          });
+        }
+        batch.delete(itemDoc.ref);
+      }
+      batch.delete(orderRef);
+      await batch.commit();
+    } else {
+      // Solo eliminar items y order
+      const itemsSnap = await orderRef.collection("items").get();
+      const batch = db.batch();
+      itemsSnap.docs.forEach(d => batch.delete(d.ref));
+      batch.delete(orderRef);
+      await batch.commit();
+    }
+
+    console.log(`[Admin] ${request.auth.uid} eliminó pedido ${orderData.orderNumber || orderId}`);
+    return { success: true, orderNumber: orderData.orderNumber };
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    console.error("Error deleting order:", err);
+    throw new HttpsError("internal", "Error al eliminar: " + err.message);
+  }
+});

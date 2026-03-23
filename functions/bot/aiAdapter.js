@@ -1,0 +1,234 @@
+// ==============================================
+// AI ADAPTER — Adaptador de Gemini con salida estructurada
+// Garantiza JSON válido, retry con fallback
+// ==============================================
+
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
+/**
+ * Schema de respuesta esperado de Gemini.
+ * Se usa con responseSchema para forzar estructura.
+ */
+const RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    intent: {
+      type: "string",
+      enum: [
+        "greeting", "product_inquiry", "price_check", "purchase",
+        "order_status", "payment_info", "complaint", "clarification",
+        "confirmation", "other",
+      ],
+    },
+    replyText: { type: "string" },
+    needsClarification: { type: "boolean" },
+    clarificationQuestion: { type: "string" },
+    detectedEntities: {
+      type: "object",
+      properties: {
+        customerName: { type: "string" },
+        selectedProduct: { type: "string" },
+        selectedVariant: { type: "string" },
+        quantity: { type: "integer" },
+        address: { type: "string" },
+        paymentMethod: { type: "string" },
+      },
+    },
+    toolToCall: {
+      type: "string",
+      enum: [
+        "none", "getProductCatalog", "getProductBySku", "checkStock",
+        "getCustomerProfile", "saveCustomerAddress", "createOrUpdateCart",
+        "createOrderDraft", "getOrderStatus", "handoffToHuman",
+      ],
+    },
+    toolPayload: { type: "object" },
+    shouldAdvanceStage: { type: "boolean" },
+    nextStage: { type: "string" },
+    confidence: { type: "number" },
+    hallucinationRisk: { type: "string", enum: ["low", "medium", "high"] },
+    internalReasoningSummary: { type: "string" },
+  },
+  required: ["intent", "replyText", "confidence", "hallucinationRisk"],
+};
+
+// ⚠️ REGLA INQUEBRANTABLE: NO cambiar este modelo. Definido por el dueño del negocio.
+const GEMINI_MODEL = "gemini-2.5-flash-lite";
+
+/**
+ * Llamar a Gemini con contexto estructurado
+ *
+ * @param {string} apiKey — API key de Gemini
+ * @param {string} systemInstruction — instrucción del sistema
+ * @param {string} contextPrompt — contexto construido por turno
+ * @param {string} userMessage — mensaje del usuario
+ * @returns {Object} — respuesta estructurada parseada
+ */
+async function callGemini(apiKey, systemInstruction, contextPrompt, userMessage) {
+  if (!apiKey) {
+    return _buildFallbackResponse("No hay API key configurada", "error");
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+
+  // Intento 1: Con schema estricto
+  try {
+    const result = await _callWithSchema(genAI, systemInstruction, contextPrompt, userMessage);
+    if (result) return result;
+  } catch (err) {
+    console.warn("[AI] Intento 1 (schema) falló:", err.message);
+  }
+
+  // Intento 2: Sin schema, solo responseMimeType JSON
+  try {
+    const result = await _callJsonMode(genAI, systemInstruction, contextPrompt, userMessage);
+    if (result) return result;
+  } catch (err) {
+    console.warn("[AI] Intento 2 (JSON mode) falló:", err.message);
+  }
+
+  // Fallback: respuesta segura
+  console.error("[AI] Todos los intentos fallaron. Usando fallback.");
+  return _buildFallbackResponse("Error procesando con IA", "error");
+}
+
+/**
+ * Intento 1: Con responseSchema (más restrictivo)
+ */
+async function _callWithSchema(genAI, systemInstruction, contextPrompt, userMessage) {
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_MODEL,
+    systemInstruction,
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 800,
+      responseMimeType: "application/json",
+      responseSchema: RESPONSE_SCHEMA,
+    },
+  });
+
+  const prompt = `${contextPrompt}\n\n[MENSAJE DEL CLIENTE]\n${userMessage}`;
+  const result = await model.generateContent(prompt);
+  const text = result.response.text().trim();
+
+  return _parseResponse(text);
+}
+
+/**
+ * Intento 2: Solo JSON mode (más flexible)
+ */
+async function _callJsonMode(genAI, systemInstruction, contextPrompt, userMessage) {
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_MODEL,
+    systemInstruction,
+    generationConfig: {
+      temperature: 0.4,
+      maxOutputTokens: 800,
+      responseMimeType: "application/json",
+    },
+  });
+
+  const prompt = `${contextPrompt}\n\n[MENSAJE DEL CLIENTE]\n${userMessage}`;
+  const result = await model.generateContent(prompt);
+  const text = result.response.text().trim();
+
+  return _parseResponse(text);
+}
+
+/**
+ * Parsear respuesta de Gemini a estructura esperada
+ */
+function _parseResponse(text) {
+  if (!text) return null;
+
+  let parsed;
+  try {
+    // Limpiar markdown si se cuela
+    let clean = text;
+    if (clean.startsWith("```")) {
+      clean = clean.replace(/```json?\n?/g, "").replace(/```$/g, "").trim();
+    }
+    const jsonMatch = clean.match(/\{[\s\S]*\}/);
+    if (jsonMatch) clean = jsonMatch[0];
+    parsed = JSON.parse(clean);
+  } catch {
+    console.warn("[AI] JSON inválido:", text.substring(0, 200));
+    return null;
+  }
+
+  // Normalizar campos
+  return {
+    intent: parsed.intent || "other",
+    replyText: parsed.replyText || parsed.reply || "",
+    needsClarification: !!parsed.needsClarification,
+    clarificationQuestion: parsed.clarificationQuestion || "",
+    detectedEntities: _normalizeEntities(parsed.detectedEntities),
+    toolToCall: parsed.toolToCall || "none",
+    toolPayload: parsed.toolPayload || {},
+    shouldAdvanceStage: !!parsed.shouldAdvanceStage,
+    nextStage: parsed.nextStage || "",
+    confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
+    hallucinationRisk: parsed.hallucinationRisk || "medium",
+    internalReasoningSummary: parsed.internalReasoningSummary || "",
+  };
+}
+
+/**
+ * Normalizar entidades extraídas
+ */
+function _normalizeEntities(entities) {
+  if (!entities || typeof entities !== "object") {
+    return {
+      customerName: "",
+      selectedProduct: "",
+      selectedVariant: "",
+      quantity: 0,
+      address: "",
+      paymentMethod: "",
+    };
+  }
+
+  return {
+    customerName: entities.customerName || "",
+    selectedProduct: entities.selectedProduct || "",
+    selectedVariant: entities.selectedVariant || "",
+    quantity: parseInt(entities.quantity) || 0,
+    address: entities.address || "",
+    paymentMethod: entities.paymentMethod || "",
+  };
+}
+
+/**
+ * Respuesta fallback segura
+ */
+function _buildFallbackResponse(reason, intent) {
+  return {
+    intent: intent || "other",
+    replyText: "¡Hola! 😊 Disculpá, tuve un problemita. ¿Me podés repetir qué necesitás?",
+    needsClarification: true,
+    clarificationQuestion: "",
+    detectedEntities: _normalizeEntities(null),
+    toolToCall: "none",
+    toolPayload: {},
+    shouldAdvanceStage: false,
+    nextStage: "",
+    confidence: 0,
+    hallucinationRisk: "high",
+    internalReasoningSummary: `Fallback: ${reason}`,
+    _isFallback: true,
+  };
+}
+
+/**
+ * Obtener instancia de GoogleGenerativeAI para uso externo (e.g. summaryManager)
+ */
+function getGenAIInstance(apiKey) {
+  return new GoogleGenerativeAI(apiKey);
+}
+
+module.exports = {
+  callGemini,
+  getGenAIInstance,
+  GEMINI_MODEL,
+  RESPONSE_SCHEMA,
+};

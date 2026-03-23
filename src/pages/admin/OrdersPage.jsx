@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { Search, ClipboardList, ChevronDown, MapPin, Package, Phone, Image, CheckCircle, XCircle, Eye } from 'lucide-react';
+import { db, functions } from '../../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { Search, ClipboardList, ChevronDown, MapPin, Package, Phone, Image, CheckCircle, XCircle, Eye, Trash2, Edit3 } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
 import { updateOrderStatus } from '../../services/orderService';
 import { formatCRC, formatDateTime } from '../../utils/formatters';
 import { ORDER_STATUS_LABELS, ORDER_STATUS } from '../../utils/constants';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 
 const STATUS_FLOW = [
   ORDER_STATUS.PENDIENTE_PAGO,
@@ -27,6 +29,23 @@ export default function OrdersPage() {
   const [expandedOrder, setExpandedOrder] = useState(null);
   const [loadedItems, setLoadedItems] = useState({});
   const [proofModal, setProofModal] = useState(null);
+  const [editingOrder, setEditingOrder] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
+
+  // Aprobar/rechazar pago manualmente
+  const handlePaymentAction = async (orderId, action) => {
+    try {
+      const ref = doc(db, 'orders', orderId);
+      if (action === 'approve') {
+        await updateDoc(ref, { paymentStatus: 'verificado', status: 'pagado', updatedAt: new Date().toISOString() });
+      } else {
+        await updateDoc(ref, { paymentStatus: 'rechazado', updatedAt: new Date().toISOString() });
+      }
+    } catch (err) {
+      console.error('Error actualizando pago:', err);
+    }
+  };
+  const [editForm, setEditForm] = useState({});
 
   const filteredOrders = orders.filter(o => {
     const s = search.toLowerCase();
@@ -79,6 +98,52 @@ export default function OrdersPage() {
     });
   };
 
+  const handleDeleteOrder = (orderId, orderNumber) => {
+    setConfirmDelete({
+      isOpen: true,
+      title: 'Eliminar Pedido',
+      message: `¿Eliminar pedido ${orderNumber}? Esta acción no se puede deshacer.`,
+      onConfirm: async () => {
+        try {
+          const deleteOrderFn = httpsCallable(functions, 'deleteOrder');
+          await deleteOrderFn({ orderId });
+          if (expandedOrder === orderId) setExpandedOrder(null);
+        } catch (err) {
+          console.error('Error deleting order:', err);
+          alert('Error al eliminar: ' + (err.message || err));
+        }
+      },
+    });
+  };
+
+  const handleEditOrder = (order) => {
+    setEditForm({
+      customerName: order.customerName || '',
+      customerPhone: order.customerPhone || '',
+      customerEmail: order.customerEmail || '',
+      address: order.shippingAddress?.señas || order.shippingAddress?.senas || '',
+      notes: order.notes || '',
+    });
+    setEditingOrder(order.id);
+  };
+
+  const handleSaveEdit = async () => {
+    try {
+      await updateDoc(doc(db, 'orders', editingOrder), {
+        customerName: editForm.customerName,
+        customerPhone: editForm.customerPhone,
+        customerEmail: editForm.customerEmail,
+        'shippingAddress.señas': editForm.address,
+        notes: editForm.notes,
+        updatedAt: new Date().toISOString(),
+      });
+      setEditingOrder(null);
+    } catch (err) {
+      console.error('Error updating order:', err);
+      alert('Error al guardar: ' + err.message);
+    }
+  };
+
   const paymentStatusColors = {
     pendiente: 'bg-yellow-100 text-yellow-700',
     verificando: 'bg-blue-100 text-blue-700',
@@ -88,6 +153,15 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Confirm Delete Modal */}
+      <ConfirmDialog
+        isOpen={confirmDelete.isOpen}
+        title={confirmDelete.title}
+        message={confirmDelete.message}
+        onConfirm={confirmDelete.onConfirm}
+        onClose={() => setConfirmDelete({ isOpen: false, title: '', message: '', onConfirm: null })}
+      />
+
       {/* Proof Modal */}
       {proofModal && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setProofModal(null)}>
@@ -97,6 +171,43 @@ export default function OrdersPage() {
               <button onClick={() => setProofModal(null)} className="text-slate-400 hover:text-slate-600 text-lg font-bold">×</button>
             </div>
             <img src={proofModal} alt="Comprobante" className="max-h-[80vh] w-auto" />
+          </div>
+        </div>
+      )}
+
+      {/* Edit Order Modal */}
+      {editingOrder && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setEditingOrder(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b flex items-center justify-between">
+              <span className="text-sm font-bold text-slate-700">Editar Pedido</span>
+              <button onClick={() => setEditingOrder(null)} className="text-slate-400 hover:text-slate-600 text-lg font-bold">×</button>
+            </div>
+            <div className="p-4 space-y-3">
+              {[{label: 'Nombre', key: 'customerName'}, {label: 'Teléfono', key: 'customerPhone'}, {label: 'Email', key: 'customerEmail'}, {label: 'Dirección/Señas', key: 'address'}].map(f => (
+                <div key={f.key}>
+                  <label className="text-xs font-bold text-slate-500 block mb-1">{f.label}</label>
+                  <input
+                    value={editForm[f.key] || ''}
+                    onChange={e => setEditForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">Notas</label>
+                <textarea
+                  value={editForm.notes || ''}
+                  onChange={e => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
+                  rows={2}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+            </div>
+            <div className="p-4 border-t flex justify-end gap-2">
+              <button onClick={() => setEditingOrder(null)} className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-xl">Cancelar</button>
+              <button onClick={handleSaveEdit} className="px-4 py-2 text-sm bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700">Guardar</button>
+            </div>
           </div>
         </div>
       )}
@@ -144,11 +255,28 @@ export default function OrdersPage() {
                   </div>
                   <div className="flex items-center gap-1 text-xs text-slate-500"><Package className="w-3 h-3" /><span>{itemCount} item{itemCount !== 1 ? 's' : ''}</span></div>
                   {order.paymentProofUrl && <span className="text-[9px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full flex items-center gap-1"><Image className="w-3 h-3" />Comprobante</span>}
+                  {order.paymentStatus === 'verificado' && <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">✅ Verificado</span>}
+                  {order.paymentStatus === 'verificando' && <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ Verificando</span>}
+                  {order.paymentStatus === 'revision_humana' && (
+                    <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      👁️ SINPE - Revisión
+                      <button onClick={e => { e.stopPropagation(); handlePaymentAction(order.id, 'approve'); }} className="ml-1 bg-emerald-500 text-white px-1.5 py-0.5 rounded-full hover:bg-emerald-600 text-[8px]" title="Aprobar pago">✓</button>
+                      <button onClick={e => { e.stopPropagation(); handlePaymentAction(order.id, 'reject'); }} className="bg-red-500 text-white px-1.5 py-0.5 rounded-full hover:bg-red-600 text-[8px]" title="Rechazar pago">✗</button>
+                    </span>
+                  )}
+                  {order.paymentStatus === 'rechazado' && <span className="text-[9px] font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">❌ Rechazado</span>}
+                  {(order.paymentStatus === 'pendiente' || !order.paymentStatus) && !order.paymentProofUrl && <span className="text-[9px] font-bold bg-red-50 text-red-500 px-2 py-0.5 rounded-full">💳 Pago pendiente</span>}
                   <StatusBadge status={order.status} />
                   <span className="text-sm font-black text-slate-900 min-w-[90px] text-right">{formatCRC(total)}</span>
                   <select value={order.status} onChange={e => { e.stopPropagation(); handleStatusChange(order.id, e.target.value); }} onClick={e => e.stopPropagation()} className="text-xs px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold">
                     {STATUS_FLOW.map(s => (<option key={s} value={s}>{ORDER_STATUS_LABELS[s]}</option>))}
                   </select>
+                  <button onClick={e => { e.stopPropagation(); handleEditOrder(order); }} className="p-2 hover:bg-blue-50 rounded-xl transition-colors" title="Editar pedido">
+                    <Edit3 className="w-4 h-4 text-blue-500" />
+                  </button>
+                  <button onClick={e => { e.stopPropagation(); e.preventDefault(); handleDeleteOrder(order.id, order.orderNumber); }} className="p-2 hover:bg-red-50 rounded-xl transition-colors" title="Eliminar pedido">
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                  </button>
                 </div>
 
                 {isExpanded && (

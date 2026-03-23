@@ -10,10 +10,13 @@ const fetch = require("node-fetch");
 const { extractPaymentData } = require("../ocr/paymentReader");
 const { verifyWithGmail } = require("../gmail/verifier");
 const { sendPaymentReceived } = require("./sender");
+const { transcribeAudio } = require("./audioTranscriber");
+const { processWhatsAppOrder } = require("./processWhatsAppOrder");
 
 const WHATSAPP_TOKEN = defineSecret("WHATSAPP_TOKEN");
 const WHATSAPP_VERIFY_TOKEN = defineSecret("WHATSAPP_VERIFY_TOKEN");
 const WHATSAPP_PHONE_ID = defineSecret("WHATSAPP_PHONE_ID");
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 
 const db = getFirestore();
 
@@ -22,7 +25,7 @@ const db = getFirestore();
  * POST — Recibe mensajes entrantes de WhatsApp
  */
 const whatsappWebhook = onRequest(
-  { secrets: [WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_ID], cors: true },
+  { secrets: [WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_ID, GEMINI_API_KEY], cors: true, invoker: "public" },
   async (req, res) => {
     // --- GET: Verificación del webhook ---
     if (req.method === "GET") {
@@ -58,6 +61,10 @@ const whatsappWebhook = onRequest(
 
           if (message.type === "image" || message.type === "document") {
             await processPaymentProof(message, phoneClean);
+          } else if (message.type === "audio") {
+            await processAudioMessage(message, phoneClean);
+          } else if (message.type === "order") {
+            await processOrderMessage(message, phoneClean);
           } else if (message.type === "text") {
             // Podría ser un número de orden o mensaje de seguimiento
             await processTextMessage(message, phoneClean);
@@ -107,33 +114,56 @@ async function processPaymentProof(message, phone) {
     }
 
     // 4. Buscar orden pendiente de este teléfono
-    const order = await findPendingOrder(phone, ocrData?.amount);
+    let order = null;
+    try {
+      order = await findPendingOrder(phone, ocrData?.amount);
+    } catch (findErr) {
+      console.error("⚠️ Error buscando orden:", findErr.message);
+    }
 
     if (order) {
-      // 5. Actualizar la orden con el comprobante
-      await db.collection("orders").doc(order.id).update({
-        paymentProofUrl: publicUrl,
-        paymentStatus: "verificando",
-        ocrData: ocrData || {},
-        whatsappPhone: phone,
-        proofReceivedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      // Clasificar tipo de pago del comprobante
+      const paymentType = ocrData?.bank === 'SINPE' || 
+        (ocrData?.rawText || '').toUpperCase().includes('SINPE') ? 'sinpe' : 'transferencia';
+      
+      console.log(`💳 Tipo de pago detectado: ${paymentType}`);
 
-      console.log(`✅ Orden ${order.orderNumber} actualizada con comprobante`);
+      if (paymentType === 'sinpe') {
+        // SINPE Móvil → Revisión humana (el banco NO envía email)
+        await db.collection("orders").doc(order.id).update({
+          paymentProofUrl: publicUrl,
+          paymentStatus: "revision_humana",
+          paymentType: "sinpe",
+          ocrData: ocrData || {},
+          whatsappPhone: phone,
+          proofReceivedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        console.log(`👁️ Orden ${order.orderNumber}: SINPE → revisión humana`);
+        await sendPaymentReceived(phone, order.orderNumber);
+      } else {
+        // Transferencia bancaria → Verificación automática vía Gmail
+        await db.collection("orders").doc(order.id).update({
+          paymentProofUrl: publicUrl,
+          paymentStatus: "verificando",
+          paymentType: "transferencia",
+          ocrData: ocrData || {},
+          whatsappPhone: phone,
+          proofReceivedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        console.log(`🏦 Orden ${order.orderNumber}: Transferencia → verificando con Gmail`);
 
-      // 6. Disparar verificación Gmail (si tenemos # transacción)
-      if (ocrData?.transactionId) {
-        try {
-          await verifyWithGmail(order.id, ocrData);
-        } catch (gmailErr) {
-          console.error("⚠️ Gmail verification falló:", gmailErr.message);
-          // No es crítico, el admin puede verificar manualmente
+        // Intentar verificación con Gmail
+        if (ocrData?.transactionId || ocrData?.amount) {
+          try {
+            await verifyWithGmail(order.id, ocrData);
+          } catch (gmailErr) {
+            console.error("⚠️ Gmail verification falló:", gmailErr.message);
+          }
         }
+        await sendPaymentReceived(phone, order.orderNumber);
       }
-
-      // 7. Responder al cliente
-      await sendPaymentReceived(phone, order.orderNumber);
     } else {
       // No encontramos orden — guardar como comprobante huérfano
       await db.collection("orphan_proofs").add({
@@ -144,9 +174,23 @@ async function processPaymentProof(message, phone) {
         status: "sin_orden",
       });
       console.log(`⚠️ Comprobante sin orden asociada para ${phone}`);
+      
+      // Responder al usuario que recibimos su comprobante
+      await sendWhatsAppMessage(phone, 
+        "📸 ¡Recibimos tu comprobante! Nuestro equipo lo va a revisar. " +
+        "Si tenés un número de pedido (AP-XXXXXX), envialo por este chat para vincularlo más rápido. 😊"
+      );
     }
   } catch (error) {
     console.error("❌ Error procesando comprobante:", error);
+    // Aún así intentar notificar al usuario
+    try {
+      await sendWhatsAppMessage(phone, 
+        "📸 Recibimos tu imagen. Hubo un problema procesándola pero nuestro equipo la va a revisar. ¡Gracias por tu paciencia! 😊"
+      );
+    } catch (msgErr) {
+      console.error("❌ No se pudo enviar respuesta:", msgErr.message);
+    }
   }
 }
 
@@ -154,20 +198,289 @@ async function processPaymentProof(message, phone) {
  * Procesa mensajes de texto (podría ser número de orden)
  */
 async function processTextMessage(message, phone) {
-  const text = (message.text?.body || "").trim().toUpperCase();
+  const text = (message.text?.body || "").trim();
+  const textUpper = text.toUpperCase();
 
   // Si parece un número de orden (AP-XXXXXX-XXXX)
-  if (text.startsWith("AP-")) {
+  if (textUpper.startsWith("AP-")) {
     const orderSnap = await db.collection("orders")
-      .where("orderNumber", "==", text)
+      .where("orderNumber", "==", textUpper)
       .limit(1)
       .get();
 
     if (!orderSnap.empty) {
       const order = orderSnap.docs[0];
-      // Actualizar teléfono de WhatsApp en la orden
       await order.ref.update({ whatsappPhone: phone });
     }
+  }
+
+  // Buscar o crear contacto CRM
+  let contactId = null;
+  let contact = null;
+  const phoneVariants = getPhoneVariants(phone);
+
+  for (const pv of phoneVariants) {
+    const snap = await db.collection("crm_contacts")
+      .where("phone", "==", pv)
+      .limit(1)
+      .get();
+    if (!snap.empty) {
+      contactId = snap.docs[0].id;
+      contact = snap.docs[0].data();
+      break;
+    }
+  }
+
+  if (!contactId) {
+    // Crear contacto nuevo
+    const newRef = db.collection("crm_contacts").doc();
+    contactId = newRef.id;
+    contact = {
+      phone,
+      displayName: "",
+      funnelStage: "interesado",
+      lastChannel: "whatsapp",
+      totalOrders: 0,
+      totalSpent: 0,
+      createdAt: new Date().toISOString(),
+    };
+    await newRef.set(contact);
+  }
+
+  // Guardar mensaje entrante
+  const isTranscribed = message._isTranscribed || false;
+  await db.collection("crm_contacts").doc(contactId).collection("messages").add({
+    content: isTranscribed ? `🎤 ${text}` : text,
+    direction: "inbound",
+    channel: "whatsapp",
+    phone,
+    autoReply: false,
+    isAudioTranscription: isTranscribed,
+    createdAt: new Date().toISOString(),
+  });
+
+  // Actualizar contacto
+  await db.collection("crm_contacts").doc(contactId).update({
+    lastChannel: "whatsapp",
+    lastMessageAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  // Procesar con IA
+  try {
+    const { processInboundMessage } = require("../conversation");
+    const aiResult = await processInboundMessage(text, contact, { phone, contactId });
+
+    console.log("AI result:", aiResult.type, "intent:", aiResult.intent);
+
+    if (aiResult.reply) {
+      // Enviar respuesta por WhatsApp
+      await sendWhatsAppMessage(phone, aiResult.reply);
+
+      // Guardar respuesta del bot
+      await db.collection("crm_contacts").doc(contactId).collection("messages").add({
+        content: aiResult.reply,
+        direction: "outbound",
+        channel: "whatsapp",
+        autoReply: true,
+        intent: aiResult.intent,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    // Si se escaló, marcar contacto
+    if (aiResult.needsHumanReview) {
+      await db.collection("crm_contacts").doc(contactId).update({
+        unresolvedAttentionRequired: true,
+        lastIntent: aiResult.intent,
+      });
+    }
+  } catch (aiErr) {
+    console.error("Error en IA:", aiErr);
+  }
+}
+
+/**
+ * Procesa notas de voz / audios de WhatsApp
+ * Descarga → Transcribe con Gemini → Procesa como texto
+ */
+async function processAudioMessage(message, phone) {
+  const mediaId = message.audio?.id;
+  if (!mediaId) return;
+
+  const mimeType = message.audio?.mime_type || "audio/ogg";
+  console.log(`🎤 Audio recibido de ${phone}, mime: ${mimeType}, id: ${mediaId}`);
+
+  try {
+    // 1. Descargar audio de WhatsApp
+    const mediaUrl = await getMediaUrl(mediaId);
+    const audioBuffer = await downloadMedia(mediaUrl);
+    console.log(`🎤 Audio descargado: ${audioBuffer.length} bytes`);
+
+    // 2. Transcribir con Gemini
+    const transcription = await transcribeAudio(audioBuffer, mimeType);
+
+    if (!transcription || transcription === "[audio vacío]") {
+      await sendWhatsAppMessage(phone,
+        "🎤 Recibí tu audio pero no logré entender lo que decís. ¿Podrías repetirlo o escribirme? 😊"
+      );
+      return;
+    }
+
+    console.log(`🎤 Transcripción: "${transcription.substring(0, 100)}..."`);
+
+    // 3. Procesar como mensaje de texto normal
+    // Creamos un mensaje virtual con el texto transcrito
+    const virtualMessage = {
+      text: { body: transcription },
+      type: "text",
+      _isTranscribed: true,
+      _originalType: "audio",
+    };
+
+    await processTextMessage(virtualMessage, phone);
+
+  } catch (err) {
+    console.error("❌ Error procesando audio:", err);
+    await sendWhatsAppMessage(phone,
+      "🎤 Recibí tu nota de voz pero tuve un problemita procesándola. ¿Podrías escribirme tu mensaje? 😊"
+    );
+  }
+}
+
+/**
+ * Procesa carrito enviado desde el catálogo nativo de WhatsApp
+ */
+async function processOrderMessage(message, phone) {
+  console.log(`🛒 Carrito WA recibido de ${phone}`);
+
+  try {
+    // Buscar o crear contacto CRM
+    let contactId = null;
+    let contact = null;
+    const phoneVariants = getPhoneVariants(phone);
+
+    for (const pv of phoneVariants) {
+      const snap = await db.collection("crm_contacts")
+        .where("phone", "==", pv)
+        .limit(1)
+        .get();
+      if (!snap.empty) {
+        contactId = snap.docs[0].id;
+        contact = snap.docs[0].data();
+        break;
+      }
+    }
+
+    if (!contactId) {
+      const newRef = db.collection("crm_contacts").doc();
+      contactId = newRef.id;
+      contact = {
+        phone,
+        displayName: "",
+        funnelStage: "comprador",
+        lastChannel: "whatsapp",
+        totalOrders: 0,
+        createdAt: new Date().toISOString(),
+      };
+      await newRef.set(contact);
+    }
+
+    // Procesar el carrito
+    const result = await processWhatsAppOrder(message, phone, contactId, contact);
+
+    if (result.success) {
+      // Confirmación con datos de pago
+      const itemsList = result.items.map(i =>
+        `• ${i.productName} x${i.quantity} — ₡${i.price.toLocaleString()}`
+      ).join('\n');
+
+      let reply = `✅ *¡Pedido confirmado!*\n\n` +
+        `🔖 *Número:* ${result.orderNumber}\n\n` +
+        `📦 *Productos:*\n${itemsList}\n\n` +
+        `🚚 *Envío:* ₡${result.shippingCost.toLocaleString()}\n` +
+        `💰 *Total:* ₡${result.total.toLocaleString()}\n\n` +
+        `💳 *Pago:* SINPE Móvil / Transferencia\n` +
+        `📱 *SINPE:* 7095-6070\n` +
+        `🏦 *IBAN:* CR15081400011020004961\n\n` +
+        `Enviame el comprobante cuando lo hagás 😊🎉`;
+
+      if (result.stockWarnings) {
+        reply += `\n\n⚠️ *Nota:* ${result.stockWarnings.join(". ")}`;
+      }
+
+      await sendWhatsAppMessage(phone, reply);
+
+      // Guardar en historial
+      await db.collection("crm_contacts").doc(contactId).collection("messages").add({
+        content: `🛒 Carrito WA: ${result.orderNumber}`,
+        direction: "inbound",
+        channel: "whatsapp",
+        phone,
+        isCartOrder: true,
+        autoReply: false,
+        createdAt: new Date().toISOString(),
+      });
+      await db.collection("crm_contacts").doc(contactId).collection("messages").add({
+        content: reply,
+        direction: "outbound",
+        channel: "whatsapp",
+        autoReply: true,
+        createdAt: new Date().toISOString(),
+      });
+    } else {
+      await sendWhatsAppMessage(phone,
+        `😔 ${result.error || "No pudimos procesar tu carrito"}. ¿Podrías intentar de nuevo o escribirnos qué necesitás? 😊`
+      );
+    }
+
+    // Actualizar contacto
+    await db.collection("crm_contacts").doc(contactId).update({
+      lastChannel: "whatsapp",
+      funnelStage: "comprador",
+      lastMessageAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("❌ Error procesando carrito WA:", err);
+    await sendWhatsAppMessage(phone,
+      "Recibí tu carrito pero tuve un problemita procesándolo. Nuestro equipo te va a contactar. 🙏"
+    );
+  }
+}
+
+/**
+ * Envía mensaje de texto por WhatsApp
+ */
+async function sendWhatsAppMessage(to, text) {
+  try {
+    const token = WHATSAPP_TOKEN.value().replace(/^Bearer\s+/i, '').trim();
+    const phoneId = WHATSAPP_PHONE_ID.value().trim();
+    console.log(`📤 Enviando WA a ${to} via phoneId=${phoneId}, texto="${text.substring(0, 50)}..."`);
+    const url = `https://graph.facebook.com/v22.0/${phoneId}/messages`;
+    const body = {
+      messaging_product: "whatsapp",
+      to,
+      type: "text",
+      text: { body: text },
+    };
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    console.log(`📤 WA API status=${resp.status}, response:`, JSON.stringify(data));
+    if (data.error) {
+      console.error("❌ Error enviando WhatsApp:", JSON.stringify(data.error));
+    } else {
+      console.log("✅ Mensaje enviado OK, messageId:", data.messages?.[0]?.id);
+    }
+  } catch (err) {
+    console.error("❌ Error enviando WhatsApp:", err.message || err);
   }
 }
 
@@ -189,12 +502,16 @@ async function findPendingOrder(phone, ocrAmount) {
 
     if (snap.empty) {
       // Buscar por paymentPhone (SINPE)
-      snap = await db.collection("orders")
-        .where("paymentPhone", "==", phoneVar)
-        .where("paymentStatus", "in", ["pendiente", "verificando"])
-        .orderBy("createdAt", "desc")
-        .limit(5)
-        .get();
+      try {
+        snap = await db.collection("orders")
+          .where("paymentPhone", "==", phoneVar)
+          .where("paymentStatus", "in", ["pendiente", "verificando"])
+          .orderBy("createdAt", "desc")
+          .limit(5)
+          .get();
+      } catch (e) {
+        console.warn("⚠️ Query paymentPhone falló (posible índice faltante):", e.message);
+      }
     }
 
     if (!snap.empty) {
@@ -245,11 +562,19 @@ function normalizePhone(phone) {
 }
 
 /**
+ * Obtiene el token limpio (sin prefijo Bearer duplicado)
+ */
+function getCleanToken() {
+  const raw = WHATSAPP_TOKEN.value();
+  return raw.replace(/^Bearer\s+/i, '').trim();
+}
+
+/**
  * Obtiene URL de descarga de media de WhatsApp
  */
 async function getMediaUrl(mediaId) {
   const resp = await fetch(`https://graph.facebook.com/v22.0/${mediaId}`, {
-    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN.value()}` },
+    headers: { Authorization: `Bearer ${getCleanToken()}` },
   });
   const data = await resp.json();
   return data.url;
@@ -260,7 +585,7 @@ async function getMediaUrl(mediaId) {
  */
 async function downloadMedia(url) {
   const resp = await fetch(url, {
-    headers: { Authorization: `Bearer ${WHATSAPP_TOKEN.value()}` },
+    headers: { Authorization: `Bearer ${getCleanToken()}` },
   });
   return resp.buffer();
 }

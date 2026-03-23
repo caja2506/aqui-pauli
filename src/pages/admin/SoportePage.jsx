@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { MessageCircle, Send, Bot, User, Search, Phone, ChevronLeft } from 'lucide-react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { MessageCircle, Send, Bot, User, Search, Phone, ChevronLeft, Trash2 } from 'lucide-react';
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db, functions } from '../../firebase';
 import { useCollection } from '../../hooks/useCollection';
 import { httpsCallable } from 'firebase/functions';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 
 const CHANNEL_COLORS = {
   whatsapp: 'bg-green-500',
@@ -26,6 +27,7 @@ export default function SoportePage() {
   const [channelFilter, setChannelFilter] = useState('all');
   const [showMobileChat, setShowMobileChat] = useState(false);
   const messagesEndRef = useRef(null);
+  const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
 
   // Filtrar contactos con mensajes
   const activeContacts = contacts
@@ -154,20 +156,16 @@ export default function SoportePage() {
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)] md:h-[calc(100vh-6rem)] flex flex-col">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="p-2.5 bg-rose-100 rounded-xl">
-          <MessageCircle className="w-6 h-6 text-rose-600" />
-        </div>
-        <div>
-          <h1 className="text-xl font-black text-slate-900">Soporte</h1>
-          <p className="text-xs text-slate-500">
-            {activeContacts.length} conversaciones{unresolvedCount > 0 ? ` · ${unresolvedCount} sin responder` : ''}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex-1 flex bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mt-4">
+    <div className="h-[calc(100vh-4rem)] md:h-[calc(100vh-2rem)] flex flex-col">
+      {/* Confirm Delete Modal */}
+      <ConfirmDialog
+        isOpen={confirmDelete.isOpen}
+        title={confirmDelete.title}
+        message={confirmDelete.message}
+        onConfirm={confirmDelete.onConfirm}
+        onClose={() => setConfirmDelete({ isOpen: false, title: '', message: '', onConfirm: null })}
+      />
+      <div className="flex-1 flex bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {/* === LISTA DE CONTACTOS (izquierda) === */}
         <div className={`w-full md:w-96 border-r border-slate-200 flex flex-col ${showMobileChat ? 'hidden md:flex' : 'flex'}`}>
           {/* Search + Filter */}
@@ -208,10 +206,11 @@ export default function SoportePage() {
               </div>
             ) : (
               activeContacts.map(contact => (
-                <button
+                <div
                   key={contact.id}
                   onClick={() => handleSelectContact(contact)}
-                  className={`w-full flex items-start gap-3 p-3 border-b border-slate-50 hover:bg-slate-50 transition-all text-left ${
+                  role="button"
+                  className={`group w-full flex items-start gap-3 p-3 border-b border-slate-50 hover:bg-slate-50 transition-all text-left cursor-pointer ${
                     selectedContact?.id === contact.id ? 'bg-rose-50 border-l-4 border-l-rose-500' : ''
                   }`}
                 >
@@ -251,7 +250,57 @@ export default function SoportePage() {
                   {contact.unresolvedAttentionRequired && (
                     <div className="w-3 h-3 bg-rose-500 rounded-full shrink-0 mt-1 animate-pulse" />
                   )}
-                </button>
+                  {/* Eliminar conversación */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setConfirmDelete({
+                        isOpen: true,
+                        title: 'Eliminar Conversación',
+                        message: `¿Eliminar conversación con ${contact.displayName || contact.phone}? Se borrarán también sus mensajes.`,
+                        onConfirm: async () => {
+                          try {
+                            // Solo borrar mensajes, NUNCA el contacto CRM
+                            const msgsSnap = await getDocs(collection(db, 'crm_contacts', contact.id, 'messages'));
+                            const batch = writeBatch(db);
+                            msgsSnap.docs.forEach(d => batch.delete(d.ref));
+                            // Resetear campos de conversación pero mantener datos del contacto
+                            batch.update(doc(db, 'crm_contacts', contact.id), {
+                              lastMessageAt: null,
+                              lastMessageContent: null,
+                              lastIntent: null,
+                              unresolvedAttentionRequired: false,
+                              updatedAt: new Date().toISOString(),
+                            });
+                            // También borrar la sesión del bot para que no tenga contexto anterior
+                            if (contact.phone) {
+                              const sessionIds = [
+                                `${contact.phone}_whatsapp`,
+                                `${contact.phone}_telegram`,
+                              ];
+                              for (const sid of sessionIds) {
+                                batch.delete(doc(db, 'bot_sessions', sid));
+                              }
+                            }
+                            await batch.commit();
+                            if (selectedContact?.id === contact.id) {
+                              setSelectedContact(null);
+                              setShowMobileChat(false);
+                            }
+                          } catch (err) {
+                            console.error('Error deleting conversation:', err);
+                            alert('Error al eliminar: ' + err.message);
+                          }
+                        },
+                      });
+                    }}
+                    className="p-1 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    title="Eliminar conversación"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-400 hover:text-red-600" />
+                  </button>
+                </div>
               ))
             )}
           </div>
@@ -288,11 +337,35 @@ export default function SoportePage() {
                     {selectedContact.displayName || selectedContact.phone || 'Desconocido'}
                   </p>
                   <p className="text-xs text-slate-400">
-                    {selectedContact.phone && `${selectedContact.phone} · `}
+                    {selectedContact.displayName && selectedContact.phone && `${selectedContact.phone} · `}
                     {CHANNEL_LABELS[selectedContact.lastChannel] || 'Chat'}
                     {selectedContact.totalOrders > 0 && ` · ${selectedContact.totalOrders} pedido(s)`}
                   </p>
                 </div>
+                {/* Botón Limpiar Historial */}
+                <button
+                  onClick={() => {
+                    setConfirmDelete({
+                      isOpen: true,
+                      title: 'Limpiar Historial',
+                      message: `¿Limpiar historial de ${selectedContact.displayName || selectedContact.phone}?\n\nEsto borra los mensajes pero mantiene el contacto y sus datos.`,
+                      onConfirm: async () => {
+                        try {
+                          const clearHistory = httpsCallable(functions, 'clearChatHistory');
+                          const result = await clearHistory({ contactId: selectedContact.id });
+                          alert(`✅ ${result.data.deleted} mensajes eliminados`);
+                        } catch (err) {
+                          console.error('Error clearing history:', err);
+                          alert('Error: ' + (err.message || err));
+                        }
+                      },
+                    });
+                  }}
+                  className="p-2 hover:bg-amber-50 rounded-xl transition-all group/clear"
+                  title="Limpiar historial de mensajes"
+                >
+                  <Trash2 className="w-4 h-4 text-amber-400 group-hover/clear:text-amber-600" />
+                </button>
               </div>
 
               {/* Messages */}

@@ -1,13 +1,66 @@
 import { GAM_CANTONES, EXPRESS_CANTONES } from '../utils/constants';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 /**
- * Precios de envío (CRC) — configurables, se podrían mover a Firestore config/shipping
+ * Precios de envío por defecto (CRC)
  */
-const SHIPPING_PRICES = {
+const DEFAULT_SHIPPING_PRICES = {
   normalGAM: 3500,
   normalOutside: 5500,
   expressGrecia: 2000,
 };
+
+// Cache en memoria
+let cachedPrices = null;
+let cacheTimestamp = 0;
+const CACHE_TTL = 60000; // 1 minuto
+
+/**
+ * Obtener precios de envío desde Firestore (con cache)
+ */
+export async function getShippingPrices() {
+  const now = Date.now();
+  if (cachedPrices && (now - cacheTimestamp) < CACHE_TTL) {
+    return cachedPrices;
+  }
+
+  try {
+    const snap = await getDoc(doc(db, 'config', 'shipping'));
+    if (snap.exists()) {
+      cachedPrices = { ...DEFAULT_SHIPPING_PRICES, ...snap.data() };
+    } else {
+      cachedPrices = { ...DEFAULT_SHIPPING_PRICES };
+    }
+  } catch (err) {
+    console.error('Error cargando precios de envío:', err);
+    cachedPrices = { ...DEFAULT_SHIPPING_PRICES };
+  }
+  cacheTimestamp = now;
+  return cachedPrices;
+}
+
+/**
+ * Guardar precios de envío en Firestore (admin)
+ */
+export async function saveShippingPrices(prices) {
+  await setDoc(doc(db, 'config', 'shipping'), {
+    normalGAM: prices.normalGAM,
+    normalOutside: prices.normalOutside,
+    expressGrecia: prices.expressGrecia,
+    updatedAt: new Date().toISOString(),
+  });
+  // Invalidar cache
+  cachedPrices = null;
+  cacheTimestamp = 0;
+}
+
+/**
+ * Precios síncronos (usa cache o defaults)
+ */
+function getPricesSync() {
+  return cachedPrices || DEFAULT_SHIPPING_PRICES;
+}
 
 /**
  * Determina si un cantón está dentro del GAM
@@ -33,26 +86,29 @@ export function hasExpressAvailable(canton) {
  * Calcula el costo de envío según cantón y tipo
  */
 export function calculateShippingCost(canton, shippingType = 'normal') {
+  const prices = getPricesSync();
+
   if (shippingType === 'express' && hasExpressAvailable(canton)) {
-    return SHIPPING_PRICES.expressGrecia;
+    return prices.expressGrecia;
   }
 
   if (isInGAM(canton)) {
-    return SHIPPING_PRICES.normalGAM;
+    return prices.normalGAM;
   }
 
-  return SHIPPING_PRICES.normalOutside;
+  return prices.normalOutside;
 }
 
 /**
  * Retorna las opciones de envío disponibles para un cantón
  */
 export function getShippingOptions(canton) {
+  const prices = getPricesSync();
   const options = [
     {
       type: 'normal',
       label: 'Envío Normal (Correos de Costa Rica)',
-      price: isInGAM(canton) ? SHIPPING_PRICES.normalGAM : SHIPPING_PRICES.normalOutside,
+      price: isInGAM(canton) ? prices.normalGAM : prices.normalOutside,
       estimatedDays: isInGAM(canton) ? '2-4 días hábiles' : '4-7 días hábiles',
     },
   ];
@@ -61,7 +117,7 @@ export function getShippingOptions(canton) {
     options.unshift({
       type: 'express',
       label: 'Envío Express (Solo Grecia)',
-      price: SHIPPING_PRICES.expressGrecia,
+      price: prices.expressGrecia,
       estimatedDays: '1-2 días hábiles',
     });
   }

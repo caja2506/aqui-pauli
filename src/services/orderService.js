@@ -96,6 +96,7 @@ export async function createOrder(orderData) {
       email: orderData.customerEmail,
       displayName: orderData.customerName,
       phone: orderData.customerPhone,
+      cedula: orderData.customerCedula || '',
       lastAddress: {
         provincia: orderData.shippingAddress?.provincia || '',
         canton: orderData.shippingAddress?.canton || '',
@@ -103,6 +104,8 @@ export async function createOrder(orderData) {
         codigoPostal: orderData.shippingAddress?.codigoPostal || '',
         señas: orderData.shippingAddress?.señas || '',
       },
+      preferredPaymentMethod: orderData.paymentMethod || '',
+      paymentPhone: orderData.paymentPhone || '',
       funnelStage: 'comprador',
       lastOrderId: orderId,
       lastOrderDate: now,
