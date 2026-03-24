@@ -103,7 +103,7 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
     // ================================================
     // 3. CONSTRUIR CONTEXTO
     // ================================================
-    const { systemInstruction, contextPrompt } = buildConversationContext(
+    const { systemInstruction, contextPrompt } = await buildConversationContext(
       session,
       messageText,
       contact,
@@ -225,15 +225,34 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
         await updateEntities(session.id, { orderNumber: toolResult.data.orderNumber });
       }
 
-      // Inyectar resultado de tool en el contexto de la respuesta (SIN doble call a Gemini)
-      // El replyText de Gemini ya fue generado antes de la tool. Si la tool trajo datos
-      // relevantes y Gemini no pudo usarlos, inyectamos un resumen en la respuesta.
+      // Re-llamar a Gemini con el resultado de la tool para generar respuesta inteligente
+      // Esto es CRÍTICO para la calidad conversacional — Gemini necesita ver los datos
+      // de la tool para generar una respuesta natural y útil.
       if (toolResult.success && !["createOrderDraft", "handoffToHuman"].includes(aiResponse.toolToCall)) {
-        // Si el replyText es genérico o muy corto, enriquecerlo con datos de la tool
-        if (aiResponse.replyText.length < 50 || !aiResponse.replyText.includes("₡")) {
-          const toolSummary = _summarizeToolResult(aiResponse.toolToCall, toolResult.data);
-          if (toolSummary) {
-            aiResponse.replyText = aiResponse.replyText + "\n\n" + toolSummary;
+        try {
+          const toolDataStr = JSON.stringify(toolResult.data || {}).substring(0, 3000);
+          const followUpPrompt = `${contextPrompt}\n\n[RESULTADO DE TOOL: ${aiResponse.toolToCall}]\n${toolDataStr}\n\n[INSTRUCCIÓN]\nEl cliente preguntó: "${messageText}"\nUsá los datos de la tool para dar una respuesta natural, útil y en ESPAÑOL.\nSi hay productos, mencioná los más relevantes con su precio.\nSi es bajo pedido, explicá las condiciones.\nNO repitas el saludo. NO listes TODOS los productos, solo los relevantes.`;
+
+          const { callGemini: callGeminiFollowUp } = require("./aiAdapter");
+          const followUp = await callGeminiFollowUp(
+            apiKey,
+            systemInstruction,
+            followUpPrompt,
+            messageText,
+          );
+
+          if (followUp && followUp.replyText && followUp.replyText.length > 20 && !followUp._isFallback) {
+            aiResponse.replyText = followUp.replyText;
+            console.log("[Orchestrator] Segunda llamada Gemini exitosa — respuesta enriquecida con datos de tool");
+          }
+        } catch (err) {
+          console.warn("[Orchestrator] Segunda llamada Gemini falló, usando template:", err.message);
+          // Fallback: usar template si la segunda llamada falla
+          if (aiResponse.replyText.length < 50 || !aiResponse.replyText.includes("₡")) {
+            const toolSummary = _summarizeToolResult(aiResponse.toolToCall, toolResult.data);
+            if (toolSummary) {
+              aiResponse.replyText = aiResponse.replyText + "\n\n" + toolSummary;
+            }
           }
         }
       }
