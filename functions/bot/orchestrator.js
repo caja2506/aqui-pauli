@@ -490,6 +490,32 @@ function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProduc
   const toolData = lastTool?.result?.data || null;
   const toolSuccess = lastTool?.result?.success || false;
 
+  // ── PRIORIDAD 0: Botones de ACCIÓN según estado del flujo de compra ──
+  // Si ya tenemos producto + variante + dirección → el cliente está listo para confirmar
+  const entities = session.extractedEntities || {};
+  const hasProduct = !!entities.selectedProduct;
+  const hasVariant = !!entities.selectedVariant;
+  const hasAddress = !!entities.address;
+  const currentIntent = session.lastIntent || "";
+
+  // Si estamos en flujo de compra avanzado (dirección confirmada o intent de compra)
+  if (hasProduct && hasVariant && hasAddress) {
+    return [
+      { id: "action_confirm_order", title: "Confirmar Pedido ✅" },
+      { id: "action_change_address", title: "Cambiar dirección" },
+      { id: "action_view_catalog", title: "Ver más productos" },
+    ];
+  }
+
+  // Si tenemos producto y variante pero falta dirección → pedir dirección o confirmar
+  if (hasProduct && hasVariant && !hasAddress && ["purchase", "confirmation"].includes(currentIntent)) {
+    return [
+      { id: "action_confirm", title: "Confirmar ✅" },
+      { id: "action_change_product", title: "Cambiar producto" },
+      { id: "action_view_catalog", title: "Ver Catálogo 📋" },
+    ];
+  }
+
   // ── PRIORIDAD 1: Botones generados por datos de TOOL ──
   // Variantes reales de getProductBySku
   if (toolName === "getProductBySku" && toolSuccess && toolData?.variants) {
