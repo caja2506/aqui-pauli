@@ -8,6 +8,7 @@ const {
   getStagesForPrompt,
   getAllowedTools,
 } = require("./stateMachine");
+const { getRulesForPrompt } = require("./businessRules");
 
 /**
  * Construye el contexto completo para enviar a Gemini.
@@ -21,7 +22,7 @@ const {
  * @param {Array} chatHistory — últimos 15 mensajes de la conversación
  * @returns {Object} — { systemInstruction, contextPrompt }
  */
-function buildConversationContext(
+async function buildConversationContext(
   session,
   userMessage,
   contact,
@@ -35,7 +36,7 @@ function buildConversationContext(
   const turnCount = session.turnCount || 0;
 
   // ========== SYSTEM INSTRUCTION (fija) ==========
-  const systemInstruction = buildSystemInstruction(stage);
+  const systemInstruction = await buildSystemInstruction(stage);
 
   // ========== CONTEXT PROMPT (dinámico por turno) ==========
   const contextBlocks = [];
@@ -99,7 +100,10 @@ function buildConversationContext(
 /**
  * System instruction fija (personalidad, reglas, formato)
  */
-function buildSystemInstruction(currentStage) {
+async function buildSystemInstruction(currentStage) {
+  // Cargar reglas de negocio desde Firestore (con cache 5min)
+  const businessRulesBlock = await getRulesForPrompt();
+
   return `[ROL]
 Sos Paulina, vendedora de Aquí Pauli — tienda online de ropa, calzado y accesorios en Costa Rica.
 
@@ -116,17 +120,14 @@ Estás actualmente en la etapa: ${currentStage}
 [ETAPAS DISPONIBLES]
 ${getStagesForPrompt()}
 
-[REGLAS CRÍTICAS]
+${businessRulesBlock}
+
+[REGLAS CRÍTICAS ADICIONALES]
 - SOLO usá precios del catálogo proporcionado. NUNCA inventes precios.
 - NUNCA inventes números de pedido, stock, tiempos de entrega, ni promociones.
-- Cuando crees un pedido con createOrderDraft, SIEMPRE compartí el número de orden (AP-XXXXXX) con el cliente.
-- NUNCA confirmes pagos — solo el sistema puede confirmar pagos.
+- Cuando crees un pedido con createOrderDraft, SIEMPRE compartí el número de orden con el cliente.
 - Si no tenés un dato, preguntá o usá la tool correspondiente.
 - Si el cliente ya confirmó un dato, NUNCA lo pidas de nuevo.
-- NUNCA pidas teléfono (ya lo tenés de WhatsApp).
-- Métodos de pago: SINPE Móvil 7095-6070 / IBAN: CR15081400011020004961 / PayPal
-- Envío estándar: el costo de envío lo calcula el sistema automáticamente al crear la orden.
-- Si un producto es "bajo_pedido": anticipo del 20% del subtotal, entrega en 15-20 días hábiles. El sistema calcula el monto de anticipo y saldo automáticamente.
 
 [REGLA DE CATÁLOGO — MUY IMPORTANTE]
 - NUNCA listes productos como texto plano en tu respuesta (ej: "Opción 1: Producto X ₡5,000").

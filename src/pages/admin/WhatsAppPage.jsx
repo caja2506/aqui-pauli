@@ -3,7 +3,7 @@ import {
   MessageCircle, Activity, AlertTriangle, Settings, Bug, FlaskConical,
   RefreshCw, ChevronRight, Zap, Shield, Database, Eye, Filter,
   Clock, TrendingUp, TrendingDown, ArrowUpRight, Layers, GitBranch,
-  CheckCircle2, XCircle, AlertCircle, Search, ChevronDown
+  CheckCircle2, XCircle, AlertCircle, Search, ChevronDown, BookOpen, Save
 } from 'lucide-react';
 import { collection, query, orderBy, limit, getDocs, where, doc, setDoc, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -55,6 +55,7 @@ export default function WhatsAppPage() {
     { id: 'dashboard', label: 'Resumen', icon: Activity },
     { id: 'stateMachine', label: 'Máquina de Estados', icon: GitBranch },
     { id: 'logs', label: 'Trazabilidad', icon: Eye },
+    { id: 'rules', label: 'Reglas de Negocio', icon: BookOpen },
     { id: 'changelog', label: 'Changelog', icon: Clock },
     { id: 'bugs', label: 'Bugs', icon: Bug },
     { id: 'config', label: 'Configuración', icon: Settings },
@@ -158,6 +159,7 @@ export default function WhatsAppPage() {
         {activeTab === 'dashboard' && <DashboardTab sessions={sessions} logs={logs} bugs={bugs} />}
         {activeTab === 'stateMachine' && <StateMachineTab sessions={sessions} />}
         {activeTab === 'logs' && <LogsTab logs={logs} />}
+        {activeTab === 'rules' && <BusinessRulesTab />}
         {activeTab === 'changelog' && <ChangelogTab changelog={changelog} onRefresh={loadChangelog} />}
         {activeTab === 'bugs' && <BugsTab bugs={bugs} onRefresh={loadBugs} />}
         {activeTab === 'config' && <ConfigTab />}
@@ -875,6 +877,273 @@ function BugsTab({ bugs, onRefresh }) {
 }
 
 // ════════════════════════════════════════════
+// TAB: BUSINESS RULES (Reglas de Negocio)
+// ════════════════════════════════════════════
+function BusinessRulesTab() {
+  const [rules, setRules] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => { loadRules(); }, []);
+
+  async function loadRules() {
+    setLoading(true);
+    try {
+      const docRef = doc(db, 'whatsapp_config', 'business_rules');
+      const snap = await getDocs(query(collection(db, 'whatsapp_config')));
+      const rulesDoc = snap.docs.find(d => d.id === 'business_rules');
+      if (rulesDoc) {
+        setRules(rulesDoc.data());
+      } else {
+        // Defaults
+        setRules({
+          payment: { methods: [
+            { id: 'sinpe', label: 'SINPE Móvil', number: '7095-6070', enabled: true },
+            { id: 'transfer', label: 'Transferencia', iban: 'CR15081400011020004961', enabled: true },
+            { id: 'paypal', label: 'PayPal', email: '', enabled: false },
+          ], requireProof: true },
+          shipping: { standardCost: 2500, estimatedDays: '2-5 días hábiles', coverage: 'Todo Costa Rica', freeShippingThreshold: 0 },
+          bajoPedido: { enabled: true, depositPercent: 20, deliveryEstimate: '15-20 días hábiles', requireDeposit: true },
+          orders: { prefix: 'AP', confirmationRequired: true, requireAddress: true, requireName: true },
+          catalog: { showPricesInChat: true, preferCatalogButton: true, maxProductsInMessage: 0 },
+          escalation: { maxLowConfidenceStreak: 3, maxTurnsBeforeEscalation: 15 },
+          bot: { name: 'Pauli', greeting: '¡Hola! Soy Pauli, tu asistente de Aquí Pauli 🛍️' },
+          systemMessages: {
+            errorFallback: 'Disculpá, tuve un problemita. ¿Me podés repetir? 😊',
+            outOfStock: 'Lo siento, ese producto no está disponible.',
+            farewell: '¡Gracias por contactarnos! 😊💕',
+          },
+        });
+      }
+    } catch (err) {
+      console.error('Error loading rules:', err);
+    } finally { setLoading(false); }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await setDoc(doc(db, 'whatsapp_config', 'business_rules'), {
+        ...rules,
+        updatedAt: new Date().toISOString(),
+        updatedBy: 'admin',
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      console.error('Error saving rules:', err);
+    } finally { setSaving(false); }
+  }
+
+  function updateNested(path, value) {
+    setRules(prev => {
+      const copy = JSON.parse(JSON.stringify(prev));
+      const parts = path.split('.');
+      let obj = copy;
+      for (let i = 0; i < parts.length - 1; i++) obj = obj[parts[i]];
+      obj[parts[parts.length - 1]] = value;
+      return copy;
+    });
+  }
+
+  if (loading) return <div className="text-center py-12 text-slate-500">Cargando reglas...</div>;
+  if (!rules) return <div className="text-center py-12 text-red-500">Error cargando reglas</div>;
+
+  const inputClass = 'bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-full';
+  const labelClass = 'text-xs font-bold text-slate-400 mb-1 block';
+  const sectionClass = 'bg-slate-900 rounded-2xl p-5 border border-slate-800';
+
+  return (
+    <div className="space-y-6">
+      {/* Save Bar */}
+      <div className="flex items-center justify-between bg-slate-900 rounded-2xl p-4 border border-slate-800 sticky top-0 z-10">
+        <div>
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <BookOpen className="w-4 h-4" /> Reglas de Negocio
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">Estas reglas controlan el comportamiento del bot. Los cambios se aplican en ~5 minutos.</p>
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className={`px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${
+            saved ? 'bg-emerald-600 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+          } disabled:opacity-50`}
+        >
+          {saved ? <><CheckCircle2 className="w-4 h-4" /> Guardado</> : saving ? 'Guardando...' : <><Save className="w-4 h-4" /> Guardar Cambios</>}
+        </button>
+      </div>
+
+      {/* ── PAGOS ── */}
+      <div className={sectionClass}>
+        <h4 className="text-sm font-black text-white mb-4 flex items-center gap-2">💳 Métodos de Pago</h4>
+        <div className="space-y-3">
+          {(rules.payment?.methods || []).map((method, i) => (
+            <div key={method.id} className="flex items-center gap-3 bg-slate-800 rounded-xl p-3">
+              <button
+                onClick={() => {
+                  const methods = [...rules.payment.methods];
+                  methods[i] = { ...methods[i], enabled: !methods[i].enabled };
+                  updateNested('payment.methods', methods);
+                }}
+                className={`w-10 h-6 rounded-full transition-all ${method.enabled ? 'bg-emerald-500' : 'bg-slate-600'} relative`}
+              >
+                <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${method.enabled ? 'right-1' : 'left-1'}`} />
+              </button>
+              <span className="text-xs font-bold text-white w-24">{method.label}</span>
+              {method.id === 'sinpe' && (
+                <input className={inputClass} value={method.number || ''} onChange={e => {
+                  const methods = [...rules.payment.methods];
+                  methods[i] = { ...methods[i], number: e.target.value };
+                  updateNested('payment.methods', methods);
+                }} placeholder="Número SINPE" />
+              )}
+              {method.id === 'transfer' && (
+                <input className={inputClass} value={method.iban || ''} onChange={e => {
+                  const methods = [...rules.payment.methods];
+                  methods[i] = { ...methods[i], iban: e.target.value };
+                  updateNested('payment.methods', methods);
+                }} placeholder="IBAN" />
+              )}
+              {method.id === 'paypal' && (
+                <input className={inputClass} value={method.email || ''} onChange={e => {
+                  const methods = [...rules.payment.methods];
+                  methods[i] = { ...methods[i], email: e.target.value };
+                  updateNested('payment.methods', methods);
+                }} placeholder="Email PayPal" />
+              )}
+            </div>
+          ))}
+          <label className="flex items-center gap-3 text-xs text-slate-400">
+            <input type="checkbox" checked={rules.payment?.requireProof || false} onChange={e => updateNested('payment.requireProof', e.target.checked)} className="accent-emerald-500" />
+            Requerir comprobante de pago
+          </label>
+        </div>
+      </div>
+
+      {/* ── ENVÍOS ── */}
+      <div className={sectionClass}>
+        <h4 className="text-sm font-black text-white mb-4 flex items-center gap-2">🚚 Envíos</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className={labelClass}>Costo estándar (₡)</label>
+            <input type="number" className={inputClass} value={rules.shipping?.standardCost || 0} onChange={e => updateNested('shipping.standardCost', parseInt(e.target.value) || 0)} />
+          </div>
+          <div>
+            <label className={labelClass}>Envío gratis desde (₡, 0=nunca)</label>
+            <input type="number" className={inputClass} value={rules.shipping?.freeShippingThreshold || 0} onChange={e => updateNested('shipping.freeShippingThreshold', parseInt(e.target.value) || 0)} />
+          </div>
+          <div>
+            <label className={labelClass}>Tiempo estimado</label>
+            <input className={inputClass} value={rules.shipping?.estimatedDays || ''} onChange={e => updateNested('shipping.estimatedDays', e.target.value)} />
+          </div>
+          <div>
+            <label className={labelClass}>Cobertura</label>
+            <input className={inputClass} value={rules.shipping?.coverage || ''} onChange={e => updateNested('shipping.coverage', e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── BAJO PEDIDO ── */}
+      <div className={`${sectionClass} ${rules.bajoPedido?.enabled ? 'border-amber-500/30' : ''}`}>
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="text-sm font-black text-white flex items-center gap-2">⏳ Bajo Pedido</h4>
+          <button
+            onClick={() => updateNested('bajoPedido.enabled', !rules.bajoPedido?.enabled)}
+            className={`w-12 h-7 rounded-full transition-all ${rules.bajoPedido?.enabled ? 'bg-amber-500' : 'bg-slate-600'} relative`}
+          >
+            <div className={`w-5 h-5 bg-white rounded-full absolute top-1 transition-all ${rules.bajoPedido?.enabled ? 'right-1' : 'left-1'}`} />
+          </button>
+        </div>
+        {rules.bajoPedido?.enabled && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className={labelClass}>Anticipo (%)</label>
+              <input type="number" className={inputClass} value={rules.bajoPedido?.depositPercent || 20} onChange={e => updateNested('bajoPedido.depositPercent', parseInt(e.target.value) || 0)} />
+            </div>
+            <div>
+              <label className={labelClass}>Tiempo de entrega estimado</label>
+              <input className={inputClass} value={rules.bajoPedido?.deliveryEstimate || ''} onChange={e => updateNested('bajoPedido.deliveryEstimate', e.target.value)} />
+            </div>
+            <label className="flex items-center gap-3 text-xs text-slate-400 col-span-full">
+              <input type="checkbox" checked={rules.bajoPedido?.requireDeposit || false} onChange={e => updateNested('bajoPedido.requireDeposit', e.target.checked)} className="accent-amber-500" />
+              Requerir anticipo antes de procesar
+            </label>
+          </div>
+        )}
+        {!rules.bajoPedido?.enabled && (
+          <p className="text-xs text-slate-500">Los productos bajo pedido están deshabilitados. El bot rechazará pedidos de productos sin stock.</p>
+        )}
+      </div>
+
+      {/* ── PEDIDOS ── */}
+      <div className={sectionClass}>
+        <h4 className="text-sm font-black text-white mb-4 flex items-center gap-2">📋 Pedidos</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className={labelClass}>Prefijo de orden</label>
+            <input className={inputClass} value={rules.orders?.prefix || 'AP'} onChange={e => updateNested('orders.prefix', e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <label className="flex items-center gap-3 text-xs text-slate-400">
+              <input type="checkbox" checked={rules.orders?.confirmationRequired || false} onChange={e => updateNested('orders.confirmationRequired', e.target.checked)} className="accent-emerald-500" />
+              Pedir confirmación antes de crear pedido
+            </label>
+            <label className="flex items-center gap-3 text-xs text-slate-400">
+              <input type="checkbox" checked={rules.orders?.requireAddress || false} onChange={e => updateNested('orders.requireAddress', e.target.checked)} className="accent-emerald-500" />
+              Requerir dirección de envío
+            </label>
+            <label className="flex items-center gap-3 text-xs text-slate-400">
+              <input type="checkbox" checked={rules.orders?.requireName || false} onChange={e => updateNested('orders.requireName', e.target.checked)} className="accent-emerald-500" />
+              Requerir nombre del cliente
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* ── ESCALAMIENTO ── */}
+      <div className={sectionClass}>
+        <h4 className="text-sm font-black text-white mb-4 flex items-center gap-2">🚨 Escalamiento a Humano</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className={labelClass}>Máx. intentos antes de escalar</label>
+            <input type="number" className={inputClass} value={rules.escalation?.maxLowConfidenceStreak || 3} onChange={e => updateNested('escalation.maxLowConfidenceStreak', parseInt(e.target.value) || 3)} />
+          </div>
+          <div>
+            <label className={labelClass}>Máx. turnos por conversación</label>
+            <input type="number" className={inputClass} value={rules.escalation?.maxTurnsBeforeEscalation || 15} onChange={e => updateNested('escalation.maxTurnsBeforeEscalation', parseInt(e.target.value) || 15)} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── MENSAJES DEL SISTEMA ── */}
+      <div className={sectionClass}>
+        <h4 className="text-sm font-black text-white mb-4 flex items-center gap-2">💬 Mensajes del Sistema</h4>
+        <div className="space-y-3">
+          <div>
+            <label className={labelClass}>Saludo inicial</label>
+            <input className={inputClass} value={rules.bot?.greeting || ''} onChange={e => updateNested('bot.greeting', e.target.value)} />
+          </div>
+          <div>
+            <label className={labelClass}>Error / Fallback</label>
+            <input className={inputClass} value={rules.systemMessages?.errorFallback || ''} onChange={e => updateNested('systemMessages.errorFallback', e.target.value)} />
+          </div>
+          <div>
+            <label className={labelClass}>Despedida</label>
+            <input className={inputClass} value={rules.systemMessages?.farewell || ''} onChange={e => updateNested('systemMessages.farewell', e.target.value)} />
+          </div>
+          <div>
+            <label className={labelClass}>Sin stock</label>
+            <input className={inputClass} value={rules.systemMessages?.outOfStock || ''} onChange={e => updateNested('systemMessages.outOfStock', e.target.value)} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
 // TAB: CONFIGURATION
 // ════════════════════════════════════════════
 function ConfigTab() {
@@ -911,7 +1180,6 @@ function ConfigTab() {
 
   return (
     <div className="space-y-6">
-      {/* Global Mode */}
       <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800">
         <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2">
           <Settings className="w-4 h-4" /> Modo de Operación Global
@@ -935,7 +1203,6 @@ function ConfigTab() {
         </div>
       </div>
 
-      {/* Submodule Modes */}
       <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800">
         <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2">
           <Layers className="w-4 h-4" /> Modo por Submódulo
