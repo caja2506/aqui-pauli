@@ -53,18 +53,27 @@ async function executeTool(toolName, payload, sessionContext) {
 async function getProductCatalog({ query, limit: maxResults } = {}) {
   try {
     let ref = db.collection("products").where("active", "==", true);
-    if (query) {
-      // Firestore no tiene full-text search, así que traemos y filtramos
-      // En producción esto se podría mejorar con Algolia/Typesense
-    }
 
-    const snap = await ref.limit(maxResults || 15).get();
+    // Si hay query, traemos más documentos para filtrar en memoria
+    // (Firestore no tiene full-text search)
+    const fetchLimit = query ? 100 : (maxResults || 15);
+    const snap = await ref.limit(fetchLimit).get();
     if (snap.empty) return { success: true, data: { products: [], message: "No hay productos disponibles." } };
 
     const products = [];
     for (const doc of snap.docs) {
       const p = doc.data();
       if (p.deleted) continue;
+
+      // Si hay query, filtrar ANTES de cargar variantes (más eficiente)
+      if (query) {
+        const q = query.toLowerCase();
+        const nameMatch = (p.name || "").toLowerCase().includes(q);
+        const catMatch = (p.category || "").toLowerCase().includes(q);
+        const subCatMatch = (p.subcategory || "").toLowerCase().includes(q);
+        const tagMatch = (p.tags || []).some(t => (t || "").toLowerCase().includes(q));
+        if (!nameMatch && !catMatch && !subCatMatch && !tagMatch) continue;
+      }
 
       const variantsSnap = await db.collection("products").doc(doc.id)
         .collection("variants").limit(5).get();
@@ -90,14 +99,6 @@ async function getProductCatalog({ query, limit: maxResults } = {}) {
           };
         })
         .filter(Boolean);
-
-      // Si hay query, filtrar por nombre
-      if (query) {
-        const q = query.toLowerCase();
-        const nameMatch = (p.name || "").toLowerCase().includes(q);
-        const catMatch = (p.category || "").toLowerCase().includes(q);
-        if (!nameMatch && !catMatch) continue;
-      }
 
       products.push({
         id: doc.id,
