@@ -56,6 +56,7 @@ export default function WhatsAppPage() {
     { id: 'stateMachine', label: 'Máquina de Estados', icon: GitBranch },
     { id: 'logs', label: 'Trazabilidad', icon: Eye },
     { id: 'rules', label: 'Reglas de Negocio', icon: BookOpen },
+    { id: 'experiments', label: 'Experimentos', icon: FlaskConical },
     { id: 'changelog', label: 'Changelog', icon: Clock },
     { id: 'bugs', label: 'Bugs', icon: Bug },
     { id: 'config', label: 'Configuración', icon: Settings },
@@ -160,6 +161,7 @@ export default function WhatsAppPage() {
         {activeTab === 'stateMachine' && <StateMachineTab sessions={sessions} />}
         {activeTab === 'logs' && <LogsTab logs={logs} />}
         {activeTab === 'rules' && <BusinessRulesTab />}
+        {activeTab === 'experiments' && <ExperimentsTab />}
         {activeTab === 'changelog' && <ChangelogTab changelog={changelog} onRefresh={loadChangelog} />}
         {activeTab === 'bugs' && <BugsTab bugs={bugs} onRefresh={loadBugs} />}
         {activeTab === 'config' && <ConfigTab />}
@@ -1138,6 +1140,220 @@ function BusinessRulesTab() {
             <input className={inputClass} value={rules.systemMessages?.outOfStock || ''} onChange={e => updateNested('systemMessages.outOfStock', e.target.value)} />
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════
+// TAB: EXPERIMENTS & METRICS
+// ════════════════════════════════════════════
+function ExperimentsTab() {
+  const [experiments, setExperiments] = useState([]);
+  const [metrics, setMetrics] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({
+    name: '', hypothesis: '', module: '', status: 'draft',
+    controlDescription: '', treatmentDescription: '',
+    splitPercent: 50, startDate: '', endDate: '',
+    successMetric: 'conversion_rate', currentResult: '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { loadData(); }, []);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [expSnap, metSnap] = await Promise.all([
+        getDocs(query(collection(db, 'whatsapp_experiments'), orderBy('createdAt', 'desc'), limit(30))),
+        getDocs(query(collection(db, 'whatsapp_metrics_daily'), orderBy('date', 'desc'), limit(14))),
+      ]);
+      setExperiments(expSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setMetrics(metSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      console.error('Error loading experiments:', err);
+    } finally { setLoading(false); }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await addDoc(collection(db, 'whatsapp_experiments'), {
+        ...form,
+        createdAt: new Date().toISOString(),
+        createdBy: 'admin',
+        conclusion: '',
+        rollbackApplied: false,
+      });
+      setShowForm(false);
+      setForm({ name: '', hypothesis: '', module: '', status: 'draft', controlDescription: '', treatmentDescription: '', splitPercent: 50, startDate: '', endDate: '', successMetric: 'conversion_rate', currentResult: '' });
+      loadData();
+    } catch (err) { console.error('Error saving experiment:', err); }
+    finally { setSaving(false); }
+  }
+
+  async function updateStatus(id, newStatus) {
+    try {
+      await setDoc(doc(db, 'whatsapp_experiments', id), { status: newStatus, updatedAt: new Date().toISOString() }, { merge: true });
+      loadData();
+    } catch (err) { console.error(err); }
+  }
+
+  const statusColors = {
+    draft: 'text-slate-400 bg-slate-500/10',
+    running: 'text-blue-400 bg-blue-500/10',
+    completed: 'text-emerald-400 bg-emerald-500/10',
+    archived: 'text-slate-500 bg-slate-600/10',
+    failed: 'text-red-400 bg-red-500/10',
+  };
+
+  const inputClass = 'bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 w-full';
+
+  if (loading) return <div className="text-center py-12 text-slate-500">Cargando...</div>;
+
+  return (
+    <div className="space-y-6">
+      {/* ── Daily Metrics ── */}
+      <div className="bg-slate-900 rounded-2xl p-5 border border-slate-800">
+        <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2">
+          <TrendingUp className="w-4 h-4" /> Métricas Diarias (últimos 14 días)
+        </h3>
+        {metrics.length > 0 ? (
+          <div className="overflow-x-auto">
+            <div className="flex gap-2 min-w-[700px]">
+              {[...metrics].reverse().map(m => {
+                const maxConv = Math.max(...metrics.map(x => x.totalConversations || 1));
+                const pct = ((m.totalConversations || 0) / maxConv) * 100;
+                return (
+                  <div key={m.id} className="flex-1 flex flex-col items-center gap-1">
+                    <div className="w-full h-32 bg-slate-800 rounded-lg relative overflow-hidden flex items-end">
+                      <div className="w-full bg-gradient-to-t from-purple-500 to-purple-600 rounded-t-md transition-all" style={{ height: `${Math.max(pct, 5)}%` }} />
+                    </div>
+                    <span className="text-[10px] font-bold text-white">{m.totalConversations || 0}</span>
+                    <span className="text-[10px] text-slate-600">{(m.date || '').slice(5)}</span>
+                    <div className="flex gap-1 mt-1">
+                      {m.errorRate > 5 && <span className="w-2 h-2 rounded-full bg-red-500" title={`Errores: ${m.errorRate}%`} />}
+                      {m.escalationRate > 10 && <span className="w-2 h-2 rounded-full bg-orange-500" title={`Escalados: ${m.escalationRate}%`} />}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-4 mt-3 text-[10px] text-slate-500">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> Conversaciones</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> Error rate &gt;5%</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> Escalation &gt;10%</span>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-8 text-slate-600">
+            <TrendingDown className="w-6 h-6 mx-auto mb-2 opacity-50" />
+            <p className="text-xs">Sin métricas diarias aún. Se generan automáticamente cada noche.</p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Experiments ── */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
+          <FlaskConical className="w-4 h-4" /> Experimentos Activos
+        </h3>
+        <button onClick={() => setShowForm(!showForm)} className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-xl text-xs font-bold transition-all">
+          + Nuevo Experimento
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-slate-900 rounded-2xl p-5 border border-purple-500/30 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input className={inputClass} placeholder="Nombre del experimento" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            <input className={inputClass} placeholder="Módulo afectado (ej: orchestrator, guardrails)" value={form.module} onChange={e => setForm({ ...form, module: e.target.value })} />
+          </div>
+          <textarea className={`${inputClass} h-16`} placeholder="Hipótesis: Si cambio X, entonces Y debería mejorar porque Z" value={form.hypothesis} onChange={e => setForm({ ...form, hypothesis: e.target.value })} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-slate-400 mb-1 block">Control (A)</label>
+              <input className={inputClass} placeholder="Comportamiento actual" value={form.controlDescription} onChange={e => setForm({ ...form, controlDescription: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-400 mb-1 block">Tratamiento (B)</label>
+              <input className={inputClass} placeholder="Nuevo comportamiento" value={form.treatmentDescription} onChange={e => setForm({ ...form, treatmentDescription: e.target.value })} />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-bold text-slate-400 mb-1 block">Split % (tratamiento)</label>
+              <input type="number" className={inputClass} min={0} max={100} value={form.splitPercent} onChange={e => setForm({ ...form, splitPercent: parseInt(e.target.value) || 50 })} />
+            </div>
+            <select className={inputClass} value={form.successMetric} onChange={e => setForm({ ...form, successMetric: e.target.value })}>
+              <option value="conversion_rate">Tasa de conversión</option>
+              <option value="escalation_rate">Tasa de escalamiento</option>
+              <option value="response_time">Tiempo de respuesta</option>
+              <option value="error_rate">Tasa de error</option>
+              <option value="satisfaction">Satisfacción</option>
+            </select>
+            <select className={inputClass} value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+              <option value="draft">Borrador</option>
+              <option value="running">En ejecución</option>
+            </select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowForm(false)} className="px-4 py-2 bg-slate-800 rounded-xl text-xs font-bold text-slate-400">Cancelar</button>
+            <button onClick={handleSave} disabled={saving || !form.name || !form.hypothesis} className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-xl text-xs font-bold disabled:opacity-50">
+              {saving ? 'Guardando...' : 'Crear Experimento'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Experiment List */}
+      <div className="space-y-2">
+        {experiments.map(exp => (
+          <div key={exp.id} className={`bg-slate-900 rounded-xl border p-4 ${exp.status === 'running' ? 'border-blue-500/30' : 'border-slate-800'}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColors[exp.status] || statusColors.draft}`}>
+                    {exp.status?.toUpperCase()}
+                  </span>
+                  {exp.module && <span className="text-[10px] text-slate-500 font-mono">{exp.module}</span>}
+                  <span className="text-[10px] text-slate-600">{exp.successMetric?.replace(/_/g, ' ')}</span>
+                </div>
+                <p className="text-sm font-bold text-white">{exp.name}</p>
+                <p className="text-xs text-slate-400 mt-1">{exp.hypothesis}</p>
+                {exp.controlDescription && (
+                  <div className="flex gap-3 mt-2 text-[10px]">
+                    <span className="text-slate-500">A: {exp.controlDescription}</span>
+                    <span className="text-purple-400">B: {exp.treatmentDescription}</span>
+                    <span className="text-slate-600">{exp.splitPercent}% split</span>
+                  </div>
+                )}
+                {exp.conclusion && <p className="text-xs text-emerald-400 mt-2">📊 {exp.conclusion}</p>}
+              </div>
+              <div className="flex flex-col gap-1 shrink-0">
+                <span className="text-[10px] text-slate-600">{exp.createdAt ? new Date(exp.createdAt).toLocaleDateString() : ''}</span>
+                {exp.status === 'draft' && (
+                  <button onClick={() => updateStatus(exp.id, 'running')} className="text-[10px] text-blue-400 hover:text-blue-300">▶ Iniciar</button>
+                )}
+                {exp.status === 'running' && (
+                  <button onClick={() => updateStatus(exp.id, 'completed')} className="text-[10px] text-emerald-400 hover:text-emerald-300">✓ Completar</button>
+                )}
+                {exp.status === 'completed' && (
+                  <button onClick={() => updateStatus(exp.id, 'archived')} className="text-[10px] text-slate-400 hover:text-slate-300">📦 Archivar</button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+        {experiments.length === 0 && (
+          <div className="text-center py-12 text-slate-500">
+            <FlaskConical className="w-8 h-8 mx-auto mb-3 opacity-50" />
+            <p className="text-sm font-bold">Sin experimentos</p>
+            <p className="text-xs text-slate-600 mt-1">Creá un experimento para rastrear el impacto de cada cambio</p>
+          </div>
+        )}
       </div>
     </div>
   );
