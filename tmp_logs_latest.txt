@@ -1,0 +1,178 @@
+﻿2026-03-24T06:10:09.552099062Z N whatsappWebhook: {"@type":"type.googleapis.com/google.cloud.audit.AuditLog","status":{},"authenticationInfo":{"principalEmail":"caja2506@gmail.com","principalSubject":"user:caja2506@gmail.com","oauthInfo":{"oauthClientId":"563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"}},"requestMetadata":{"callerIp":"186.151.98.78","callerSuppliedUserAgent":"FirebaseCLI/15.8.0 agent-name/antigravity,gzip(gfe),gzip(gfe)","requestAttributes":{"time":"2026-03-24T06:10:08.833259661Z","auth":{}},"destinationAttributes":{}},"serviceName":"cloudfunctions.googleapis.com","methodName":"google.cloud.functions.v2.FunctionService.UpdateFunction","authorizationInfo":[{"resource":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","permission":"cloudfunctions.functions.update","granted":true,"resourceAttributes":{"service":"cloudfunctions.googleapis.com","name":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","type":"cloudfunctions.googleapis.com/Function"},"permissionType":"ADMIN_WRITE"}],"resourceName":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","request":{"function":{"labels":{"firebase-functions-hash":"5d40c2a58a218f45c061e629d16f844720473eec","deployment-tool":"cli-firebase"},"service_config":{"secret_environment_variables":[{"version":"7","project_id":"aqui-pauli","key":"WHATSAPP_TOKEN","secret":"WHATSAPP_TOKEN"},{"secret":"WHATSAPP_VERIFY_TOKEN","project_id":"aqui-pauli","key":"WHATSAPP_VERIFY_TOKEN","version":"4"},{"secret":"WHATSAPP_PHONE_ID","project_id":"aqui-pauli","key":"WHATSAPP_PHONE_ID","version":"6"},{"secret":"GEMINI_API_KEY","key":"GEMINI_API_KEY","version":"2","project_id":"aqui-pauli"}],"available_memory":"256Mi","available_cpu":"1","max_instance_request_concurrency":80},"name":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","build_config":{"entry_point":"whatsappWebhook","source_token":"Clhwcm9qZWN0cy8xMDMwODkwNTY4ODc4L2xvY2F0aW9ucy91cy1jZW50cmFsMS9idWlsZHMvMTQ1Yzg2MDAtYzIxZC00MjJmLWJjZTItMTA3NjUxMGFhNzA4EnZ1cy1jZW50cmFsMS1kb2NrZXIucGtnLmRldi9hcXVpLXBhdWxpL2djZi1hcnRpZmFjdHMvYXF1aS0tcGF1bGlfX3VzLS1jZW50cmFsMV9fY3JlYXRlX29yZGVyX3dpdGhfcmVzZXJ2YXRpb246dmVyc2lvbl8xGK759q6AHiJOcHJvamVjdHMvYXF1aS1wYXVsaS9sb2NhdGlvbnMvdXMtY2VudHJhbDEvZnVuY3Rpb25zL2NyZWF0ZU9yZGVyV2l0aFJlc2VydmF0aW9uKgwIttWIzgYQuOK3iQIyCG5vZGVqczIwOnYKI2djci5pby9nYWUtcnVudGltZXMvbm9kZWpzMjA6c3RhYmxlEk91cy1jZW50cmFsMS1kb2NrZXIucGtnLmRldi9zZXJ2ZXJsZXNzLXJ1bnRpbWVzL2dvb2dsZS0yMi1mdWxsL3J1bnRpbWVzL25vZGVqczIwQAE=","source":{},"runtime":"nodejs20"}},"@type":"type.googleapis.com/google.cloud.functions.v2.UpdateFunctionRequest","update_mask":{"paths":["name","build_config.runtime","build_config.entry_point","build_config.source.storage_source.bucket","build_config.source.storage_source.object","build_config.environment_variables","build_config.source_token","service_config.environment_variables","service_config.secret_environment_variables","service_config.ingress_settings","service_config.timeout_seconds","service_config.service_account_email","service_config.available_memory","service_config.min_instance_count","service_config.max_instance_count","service_config.max_instance_request_concurrency","service_config.available_cpu","service_config.vpc_connector","service_config.vpc_connector_egress_settings","labels"]}},"response":{"@type":"type.googleapis.com/google.longrunning.Operation"},"resourceLocation":{"currentLocations":["us-central1"]}}
+2026-03-24T06:10:20.167249Z I whatsappwebhook: Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+2026-03-24T06:10:28.444679Z I whatsappwebhook: Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+2026-03-24T06:10:30.641436465Z N whatsappWebhook: {"@type":"type.googleapis.com/google.cloud.audit.AuditLog","status":{},"authenticationInfo":{"principalEmail":"caja2506@gmail.com","principalSubject":"user:caja2506@gmail.com","oauthInfo":{"oauthClientId":"563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"}},"requestMetadata":{"requestAttributes":{},"destinationAttributes":{}},"serviceName":"cloudfunctions.googleapis.com","methodName":"google.cloud.functions.v2.FunctionService.UpdateFunction","resourceName":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","response":{"url":"https://us-central1-aqui-pauli.cloudfunctions.net/whatsappWebhook","buildConfig":{"entryPoint":"whatsappWebhook","automaticUpdatePolicy":{},"dockerRegistry":"ARTIFACT_REGISTRY","source":{},"serviceAccount":"projects/aqui-pauli/serviceAccounts/1030890568878-compute@developer.gserviceaccount.com","dockerRepository":"projects/aqui-pauli/locations/us-central1/repositories/gcf-artifacts","runtime":"nodejs20"},"labels":{"firebase-functions-hash":"5d40c2a58a218f45c061e629d16f844720473eec","deployment-tool":"cli-firebase"},"serviceConfig":{"maxInstanceCount":20,"serviceAccountEmail":"1030890568878-compute@developer.gserviceaccount.com","uri":"https://whatsappwebhook-vjjlvjxxna-uc.a.run.app","ingressSettings":"ALLOW_ALL","maxInstanceRequestConcurrency":80,"secretEnvironmentVariables":[{"projectId":"aqui-pauli","version":"7","secret":"WHATSAPP_TOKEN","key":"WHATSAPP_TOKEN"},{"key":"WHATSAPP_VERIFY_TOKEN","version":"4","projectId":"aqui-pauli","secret":"WHATSAPP_VERIFY_TOKEN"},{"secret":"WHATSAPP_PHONE_ID","version":"6","projectId":"aqui-pauli","key":"WHATSAPP_PHONE_ID"},{"secret":"GEMINI_API_KEY","version":"2","projectId":"aqui-pauli","key":"GEMINI_API_KEY"}],"timeoutSeconds":60,"availableMemory":"256Mi","revision":"whatsappwebhook-00089-xor","availableCpu":"1","allTrafficOnLatestRevision":true},"name":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","@type":"type.googleapis.com/google.cloud.functions.v2.Function","environment":"GEN_2","createTime":"2026-03-21T04:29:19.383772823Z","updateTime":"2026-03-24T06:10:09.539606343Z","satisfiesPzi":true,"state":"ACTIVE"},"resourceLocation":{"currentLocations":["us-central1"]}}
+2026-03-24T06:10:36.619455Z I whatsappwebhook: 
+2026-03-24T06:10:36.667934Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: order
+
+2026-03-24T06:10:36.669442Z ? whatsappwebhook: ≡ƒ¢Æ Carrito WA recibido de 50683100015
+
+2026-03-24T06:10:36.994485Z ? whatsappwebhook: [WAOrder] ≡ƒ¢Æ Carrito recibido de 50683100015: 8 items
+
+2026-03-24T06:10:37.054223Z ? whatsappwebhook: [WAOrder] ID compuesto detectado: producto=3X4skWr8m2P5IEeuKzwP, variante=AM0wRMNS3AOJz0Mza5b5
+
+2026-03-24T06:10:37.248448Z ? whatsappwebhook: [WAOrder] Γ£à Producto resuelto: Tenis zoom vomero 5 (Blancas 36) ΓÇö Γéí100000 x1
+
+2026-03-24T06:10:37.299472Z ? whatsappwebhook: [WAOrder] ID compuesto detectado: producto=3X4skWr8m2P5IEeuKzwP, variante=NjiFqAkz0PTATJ49iSVF
+
+2026-03-24T06:10:37.400774Z ? whatsappwebhook: [WAOrder] Γ£à Producto resuelto: Tenis zoom vomero 5 (rojo) ΓÇö Γéí100000 x1
+
+2026-03-24T06:10:37.445906Z ? whatsappwebhook: [WAOrder] ID compuesto detectado: producto=gMu1r9toFpuFa5HRFiwv, variante=Lev4KWh5R9fIJnnYXCX1
+
+2026-03-24T06:10:37.554877Z ? whatsappwebhook: [WAOrder] Γ£à Producto resuelto: Medium Corner Zip Wallet (Silver/Black) ΓÇö Γéí69900 x1
+
+2026-03-24T06:10:37.609269Z ? whatsappwebhook: [WAOrder] ID compuesto detectado: producto=gMu1r9toFpuFa5HRFiwv, variante=SbPI5ze22Jb64XI5tpEW
+
+2026-03-24T06:10:37.706049Z ? whatsappwebhook: [WAOrder] Γ£à Producto resuelto: Medium Corner Zip Wallet (Gold/Tan) ΓÇö Γéí69900 x1
+
+2026-03-24T06:10:37.748143Z ? whatsappwebhook: [WAOrder] ID compuesto detectado: producto=gMu1r9toFpuFa5HRFiwv, variante=j7F1TrUMEScBkrMvND0N
+
+2026-03-24T06:10:37.838432Z ? whatsappwebhook: [WAOrder] Γ£à Producto resuelto: Medium Corner Zip Wallet (Gunmetal/Dark Stone) ΓÇö Γéí69900 x1
+
+2026-03-24T06:10:37.878225Z ? whatsappwebhook: [WAOrder] ID compuesto detectado: producto=3nlBrbCDDrlKfmSU7unR, variante=6zA4fnjdbTNUJTpe95h6
+
+2026-03-24T06:10:38.064505Z ? whatsappwebhook: [WAOrder] Γ£à Producto resuelto: Brooklyn Shoulder Bag 28 (Brass/Maple) ΓÇö Γéí217000 x4
+
+2026-03-24T06:10:38.102776Z ? whatsappwebhook: [WAOrder] ID compuesto detectado: producto=Lo0yDX31TeeGP4EQmNAU, variante=swK54VlChNd8LWMrOMjI
+
+2026-03-24T06:10:38.176544Z ? whatsappwebhook: [WAOrder] Γ£à Producto resuelto: Mini Payton Bag (Gold/Chalk) ΓÇö Γéí91000 x1
+
+2026-03-24T06:10:38.214322Z ? whatsappwebhook: [WAOrder] ID compuesto detectado: producto=Lo0yDX31TeeGP4EQmNAU, variante=VkiKYhnUzY7lXb4MVZ3o
+
+2026-03-24T06:10:38.311960Z ? whatsappwebhook: [WAOrder] Γ£à Producto resuelto: Mini Payton Bag (Gold/Pink Petal) ΓÇö Γéí91000 x1
+
+2026-03-24T06:10:39.289553Z ? whatsappwebhook: [ChatOrder] Created order AP-264445 (BO1pJwHhE9blMbLkY9ft) for jfakbVNQLebAs9OywlhqTVCiH292
+
+2026-03-24T06:10:39.289757Z ? whatsappwebhook: [WAOrder] Γ£à Orden AP-264445 creada desde carrito WA
+
+2026-03-24T06:10:39.369065Z ? whatsappwebhook: ≡ƒôñ Enviando WA a 50683100015 via phoneId=1081272435060524, texto="Γ£à *┬íPedido confirmado!*
+
+≡ƒöû *N├║mero:* AP-264445
+
+∩┐╜..."
+
+2026-03-24T06:10:39.819882Z ? whatsappwebhook: ≡ƒôñ WA API status=200, response: {"messaging_product":"whatsapp","contacts":[{"input":"50683100015","wa_id":"50683100015"}],"messages":[{"id":"wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI4QUIxRDZDRjU5MUQzQTZCNDgA"}]}
+
+2026-03-24T06:10:39.819985Z ? whatsappwebhook: Γ£à Mensaje enviado OK, messageId: wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI4QUIxRDZDRjU5MUQzQTZCNDgA
+
+2026-03-24T06:10:40.724746Z I whatsappwebhook: 
+2026-03-24T06:10:40.970038Z I whatsappwebhook: 
+2026-03-24T06:10:52.822923Z I whatsappwebhook: 
+2026-03-24T06:10:52.828685Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: image
+
+2026-03-24T06:10:54.456803Z ? whatsappwebhook: ≡ƒô╕ Imagen guardada: https://storage.googleapis.com/aqui-pauli.firebasestorage.app/payment-proofs/50683100015_1774332653650.jpg
+
+2026-03-24T06:10:54.546312Z ? whatsappwebhook: ΓÜá∩╕Å OCR fall├│, continuar sin datos: 7 PERMISSION_DENIED: Cloud Vision API has not been used in project 1030890568878 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/vision.googleapis.com/overview?project=1030890568878 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.
+
+2026-03-24T06:10:54.605627Z ? whatsappwebhook: ≡ƒÆ│ Tipo de pago detectado: transferencia
+
+2026-03-24T06:10:54.667306Z ? whatsappwebhook: ≡ƒÅª Orden AP-264445: Transferencia ΓåÆ verificando con Gmail
+
+2026-03-24T06:10:58.092479Z I whatsappwebhook: 
+2026-03-24T06:10:58.297683Z I whatsappwebhook: 
+2026-03-24T12:28:08.353339Z I whatsappwebhook: 
+2026-03-24T12:28:08.409123Z I whatsappwebhook: Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+2026-03-24T12:28:13.914358Z I whatsappwebhook: Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+2026-03-24T12:28:14.012050Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: text
+
+2026-03-24T12:28:14.671663Z ? whatsappwebhook: [Orchestrator] Sesi├│n: 50683100015_whatsapp, etapa: greeting, turno: 0, nueva: true
+
+2026-03-24T12:28:14.789553Z ? whatsappwebhook: [Orchestrator] Entidades CRM inyectadas: customerName, address, paymentMethod
+
+2026-03-24T12:28:16.088908Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: greeting, confidence: 0.9, tool: none
+
+2026-03-24T12:28:16.093419Z ? whatsappwebhook: [Orchestrator] Enviando 3 botones: Pedir en Web ≡ƒîÉ, Ver Cat├ílogo ≡ƒôï, Ayuda ≡ƒÖïΓÇìΓÖÇ∩╕Å
+
+2026-03-24T12:28:16.519033Z ? whatsappwebhook: [Orchestrator] Turno completado en 2050ms
+
+2026-03-24T12:28:16.593332Z ? whatsappwebhook: AI result: auto_reply intent: greeting
+
+2026-03-24T12:28:19.797922Z I whatsappwebhook: 
+2026-03-24T12:28:20.069797Z I whatsappwebhook: 
+2026-03-24T12:28:38.637677Z I whatsappwebhook: 
+2026-03-24T12:28:38.644612Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+
+2026-03-24T12:28:38.649820Z ? whatsappwebhook: ≡ƒöÿ Bot├│n presionado: id="need_help", title="Ayuda ≡ƒÖïΓÇìΓÖÇ∩╕Å"
+
+2026-03-24T12:28:38.992660Z ? whatsappwebhook: [Orchestrator] Sesi├│n: 50683100015_whatsapp, etapa: greeting, turno: 1, nueva: false
+
+2026-03-24T12:28:40.344092Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: clarification, confidence: 0.9, tool: none
+
+2026-03-24T12:28:40.345239Z ? whatsappwebhook: [Orchestrator] Guardrails issues: Transici├│n inv├ílida: greeting ΓåÆ greeting
+
+2026-03-24T12:28:40.345901Z ? whatsappwebhook: [Orchestrator] Enviando 3 botones: Pedir en Web ≡ƒîÉ, Ver Cat├ílogo ≡ƒôï, Ayuda ≡ƒÖïΓÇìΓÖÇ∩╕Å
+
+2026-03-24T12:28:40.759186Z ? whatsappwebhook: [Orchestrator] Turno completado en 1815ms
+
+2026-03-24T12:28:40.831731Z ? whatsappwebhook: AI result: auto_reply intent: clarification
+
+2026-03-24T12:28:43.436854Z I whatsappwebhook: 
+2026-03-24T12:28:43.565695Z I whatsappwebhook: 
+2026-03-24T12:28:48.156984Z I whatsappwebhook: 
+2026-03-24T12:28:48.163604Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+
+2026-03-24T12:28:48.163908Z ? whatsappwebhook: ≡ƒöÿ Bot├│n presionado: id="view_catalog", title="Ver Cat├ílogo ≡ƒôï"
+
+2026-03-24T12:28:48.164454Z ? whatsappwebhook: ≡ƒôñ Enviando WA a 50683100015 via phoneId=1081272435060524, texto="≡ƒ¢ì∩╕Å *┬íExplor├í nuestro cat├ílogo!*
+
+Ac├í pod├⌐s ver to..."
+
+2026-03-24T12:28:48.709446Z ? whatsappwebhook: ≡ƒôñ WA API status=200, response: {"messaging_product":"whatsapp","contacts":[{"input":"50683100015","wa_id":"50683100015"}],"messages":[{"id":"wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI5MTlDQ0FGNzY3MkREOEY5MkYA"}]}
+
+2026-03-24T12:28:48.709635Z ? whatsappwebhook: Γ£à Mensaje enviado OK, messageId: wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI5MTlDQ0FGNzY3MkREOEY5MkYA
+
+2026-03-24T12:28:49.465556Z I whatsappwebhook: 
+2026-03-24T12:28:49.549321Z I whatsappwebhook: 
+2026-03-24T12:30:15.396134Z I whatsappwebhook: 
+2026-03-24T12:30:15.410873Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: text
+
+2026-03-24T12:30:15.411068Z ? whatsappwebhook: ≡ƒôª Producto referenciado: retailerId=gMu1r9toFpuFa5HRFiwv_Lev4KWh5R9fIJnnYXCX1, catalogId=2123445418508910
+
+2026-03-24T12:30:15.562785Z ? whatsappwebhook: ≡ƒôª Texto enriquecido: "[PRODUCTO REFERENCIADO: Medium Corner Zip Wallet - Silver/Black ΓÇö Γéí69┬á900, stock: 0, tipo: normal] Este ser├¡a bajo pedido?..."
+
+2026-03-24T12:30:15.829775Z ? whatsappwebhook: [Orchestrator] Sesi├│n: 50683100015_whatsapp, etapa: greeting, turno: 2, nueva: false
+
+2026-03-24T12:30:17.137814Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: clarification, confidence: 0.9, tool: none
+
+2026-03-24T12:30:17.138651Z ? whatsappwebhook: [Orchestrator] Enviando 3 botones: Pedir en Web ≡ƒîÉ, Ver Cat├ílogo ≡ƒôï, Ayuda ≡ƒÖïΓÇìΓÖÇ∩╕Å
+
+2026-03-24T12:30:18.001573Z ? whatsappwebhook: [Orchestrator] Turno completado en 2229ms
+
+2026-03-24T12:30:18.057605Z ? whatsappwebhook: AI result: auto_reply intent: clarification
+
+2026-03-24T12:30:20.698066Z I whatsappwebhook: 
+2026-03-24T12:30:20.913841Z I whatsappwebhook: 
+2026-03-24T12:30:35.812955Z I whatsappwebhook: 
+2026-03-24T12:30:35.817643Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+
+2026-03-24T12:30:35.817839Z ? whatsappwebhook: ≡ƒöÿ Bot├│n presionado: id="view_catalog", title="Ver Cat├ílogo ≡ƒôï"
+
+2026-03-24T12:30:35.817998Z ? whatsappwebhook: ≡ƒôñ Enviando WA a 50683100015 via phoneId=1081272435060524, texto="≡ƒ¢ì∩╕Å *┬íExplor├í nuestro cat├ílogo!*
+
+Ac├í pod├⌐s ver to..."
+
+2026-03-24T12:30:36.339237Z ? whatsappwebhook: ≡ƒôñ WA API status=200, response: {"messaging_product":"whatsapp","contacts":[{"input":"50683100015","wa_id":"50683100015"}],"messages":[{"id":"wamid.HBgLNTA2ODMxMDAwMTUVAgARGBJGMzVGNjQyQkEwNDRBRjEzRTQA"}]}
+
+2026-03-24T12:30:36.339442Z ? whatsappwebhook: Γ£à Mensaje enviado OK, messageId: wamid.HBgLNTA2ODMxMDAwMTUVAgARGBJGMzVGNjQyQkEwNDRBRjEzRTQA
+
+2026-03-24T12:30:36.925715Z I whatsappwebhook: 
+2026-03-24T12:30:37.336157Z I whatsappwebhook: 
+2026-03-24T12:31:47.939132Z I whatsappwebhook: 
+2026-03-24T12:31:47.946373Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: text
+
+2026-03-24T12:31:47.946600Z ? whatsappwebhook: ≡ƒôª Producto referenciado: retailerId=3X4skWr8m2P5IEeuKzwP_NjiFqAkz0PTATJ49iSVF, catalogId=2123445418508910
+
+2026-03-24T12:31:48.103947Z ? whatsappwebhook: ≡ƒôª Texto enriquecido: "[PRODUCTO REFERENCIADO: Tenis zoom vomero 5 - rojo ΓÇö Γéí100┬á000, stock: 0, tipo: normal] 123..."
+
+2026-03-24T12:31:48.336051Z ? whatsappwebhook: [Orchestrator] Sesi├│n: 50683100015_whatsapp, etapa: greeting, turno: 3, nueva: false
+
+2026-03-24T12:31:49.740757Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: greeting, confidence: 0.9, tool: none
+
+2026-03-24T12:31:49.741468Z ? whatsappwebhook: [Orchestrator] Enviando 3 botones: Pedir en Web ≡ƒîÉ, Ver Cat├ílogo ≡ƒôï, Ayuda ≡ƒÖïΓÇìΓÖÇ∩╕Å
+
+2026-03-24T12:31:50.085881Z ? whatsappwebhook: [Orchestrator] Turno completado en 1789ms
+
+2026-03-24T12:31:50.151272Z ? whatsappwebhook: AI result: auto_reply intent: greeting
+
+2026-03-24T12:31:52.756548Z I whatsappwebhook: 
+2026-03-24T12:31:53.186625Z I whatsappwebhook: 

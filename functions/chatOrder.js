@@ -75,13 +75,27 @@ async function createChatOrder(contactId, orderData) {
           const varSnap = await db.collection("products").doc(pDoc.id)
             .collection("variants").get();
           
+          const itemVariantName = (item.variantName || item.variant || "").toLowerCase();
+          let bestVariant = null;
+          let anyVariant = null;
+
           for (const vDoc of varSnap.docs) {
             const v = vDoc.data();
-            if (v.stock > 0) {
-              matchedVariant = { id: vDoc.id, ...v };
-              break; // Tomar la primera variante con stock
+            // Guardar cualquier variante como fallback (incluso bajo_pedido)
+            if (!anyVariant) anyVariant = { id: vDoc.id, ...v };
+            
+            // Intentar match por nombre de variante
+            if (itemVariantName && v.name && v.name.toLowerCase().includes(itemVariantName)) {
+              bestVariant = { id: vDoc.id, ...v };
+              break;
+            }
+            // Si no hay nombre, tomar la primera con stock o bajo_pedido
+            if (!itemVariantName && (v.stock > 0 || v.supplyType === "bajo_pedido")) {
+              bestVariant = { id: vDoc.id, ...v };
+              break;
             }
           }
+          matchedVariant = bestVariant || anyVariant;
           break;
         }
       }

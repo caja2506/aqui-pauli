@@ -1,0 +1,155 @@
+﻿2026-03-24T05:52:51.382395Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: payment_info, confidence: 1, tool: none
+
+2026-03-24T05:52:53.311083Z ? whatsappwebhook: [Orchestrator] Turno completado en 10167ms
+
+2026-03-24T05:52:53.352633Z ? whatsappwebhook: AI result: auto_reply intent: payment_info
+
+2026-03-24T05:52:53.352811Z ? whatsappwebhook: ≡ƒôñ Enviando WA a 50683100015 via phoneId=1081272435060524, texto="┬íHola, Carlos! Entendido. Ya tenemos tu pedido AP-..."
+
+2026-03-24T05:52:53.839759Z ? whatsappwebhook: ≡ƒôñ WA API status=200, response: {"messaging_product":"whatsapp","contacts":[{"input":"50683100015","wa_id":"50683100015"}],"messages":[{"id":"wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI4NzI4NzJBRUI3RTBDNjc3QkIA"}]}
+
+2026-03-24T05:52:53.839847Z ? whatsappwebhook: Γ£à Mensaje enviado OK, messageId: wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI4NzI4NzJBRUI3RTBDNjc3QkIA
+
+2026-03-24T05:52:54.808806Z I whatsappwebhook: 
+2026-03-24T05:52:55.104735Z I whatsappwebhook: 
+2026-03-24T05:53:09.374853Z I whatsappwebhook: 
+2026-03-24T05:53:09.379696Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: image
+
+2026-03-24T05:53:11.443741Z ? whatsappwebhook: ≡ƒô╕ Imagen guardada: https://storage.googleapis.com/aqui-pauli.firebasestorage.app/payment-proofs/50683100015_1774331590980.jpg
+
+2026-03-24T05:53:11.511417Z ? whatsappwebhook: ΓÜá∩╕Å OCR fall├│, continuar sin datos: 7 PERMISSION_DENIED: Cloud Vision API has not been used in project 1030890568878 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/vision.googleapis.com/overview?project=1030890568878 then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.
+
+2026-03-24T05:53:11.573560Z ? whatsappwebhook: ≡ƒÆ│ Tipo de pago detectado: transferencia
+
+2026-03-24T05:53:11.631954Z ? whatsappwebhook: ≡ƒÅª Orden AP-444843: Transferencia ΓåÆ verificando con Gmail
+
+2026-03-24T05:53:15.199639Z I whatsappwebhook: 
+2026-03-24T05:53:15.211215Z I whatsappwebhook: 
+2026-03-24T05:53:31.650199Z I whatsappwebhook: 
+2026-03-24T05:53:31.654262Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: text
+
+2026-03-24T05:53:31.818763Z ? whatsappwebhook: [Orchestrator] Sesi├│n: 50683100015_whatsapp, etapa: payment_pending, turno: 7, nueva: false
+
+2026-03-24T05:53:34.166199Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: order_status, confidence: 1, tool: none
+
+2026-03-24T05:53:36.085371Z ? whatsappwebhook: [Orchestrator] Turno completado en 4308ms
+
+2026-03-24T05:53:36.137325Z ? whatsappwebhook: AI result: auto_reply intent: order_status
+
+2026-03-24T05:53:36.137496Z ? whatsappwebhook: ≡ƒôñ Enviando WA a 50683100015 via phoneId=1081272435060524, texto="┬íClaro, Carlos! Tu pedido AP-444843 incluye 2 pare..."
+
+2026-03-24T05:53:36.576550Z ? whatsappwebhook: ≡ƒôñ WA API status=200, response: {"messaging_product":"whatsapp","contacts":[{"input":"50683100015","wa_id":"50683100015"}],"messages":[{"id":"wamid.HBgLNTA2ODMxMDAwMTUVAgARGBJERTI4OTRFQUQ5NDg4OUQ0NzkA"}]}
+
+2026-03-24T05:53:36.576645Z ? whatsappwebhook: Γ£à Mensaje enviado OK, messageId: wamid.HBgLNTA2ODMxMDAwMTUVAgARGBJERTI4OTRFQUQ5NDg4OUQ0NzkA
+
+2026-03-24T05:53:37.556064Z I whatsappwebhook: 
+2026-03-24T05:53:37.726359Z I whatsappwebhook: 
+2026-03-24T05:53:46.242092Z I whatsappwebhook: 
+2026-03-24T05:53:46.245530Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: text
+
+2026-03-24T05:53:46.395380Z ? whatsappwebhook: [Orchestrator] Sesi├│n: 50683100015_whatsapp, etapa: payment_pending, turno: 8, nueva: false
+
+2026-03-24T05:53:50.543703Z ? whatsappwebhook: [AI] JSON inv├ílido: {
+  "intent": "clarification",
+  "replyText": "┬í
+
+2026-03-24T05:53:55.658873Z ? whatsappwebhook: [AI] JSON inv├ílido: {
+  "intent": "clarification",
+  "replyText": "┬í
+
+2026-03-24T05:53:55.658954Z ? whatsappwebhook: [AI] Todos los intentos fallaron. Usando fallback.
+
+2026-03-24T05:53:55.659213Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: error, confidence: 0, tool: none
+
+2026-03-24T05:53:55.659684Z ? whatsappwebhook: [Orchestrator] Guardrails issues: Confianza muy baja
+
+2026-03-24T05:53:57.749127Z ? whatsappwebhook: [Orchestrator] Turno completado en 11384ms
+
+2026-03-24T05:53:57.809220Z ? whatsappwebhook: AI result: auto_reply intent: error
+
+2026-03-24T05:53:57.809234Z ? whatsappwebhook: ≡ƒôñ Enviando WA a 50683100015 via phoneId=1081272435060524, texto="┬íHola! ≡ƒÿè Disculp├í, tuve un problemita. ┬┐Me pod├⌐s ..."
+
+2026-03-24T05:53:58.302761Z ? whatsappwebhook: ≡ƒôñ WA API status=200, response: {"messaging_product":"whatsapp","contacts":[{"input":"50683100015","wa_id":"50683100015"}],"messages":[{"id":"wamid.HBgLNTA2ODMxMDAwMTUVAgARGBJDOUJGNTBGRTcwNDkwODBCM0EA"}]}
+
+2026-03-24T05:53:58.302832Z ? whatsappwebhook: Γ£à Mensaje enviado OK, messageId: wamid.HBgLNTA2ODMxMDAwMTUVAgARGBJDOUJGNTBGRTcwNDkwODBCM0EA
+
+2026-03-24T05:53:59.230324Z I whatsappwebhook: 
+2026-03-24T05:53:59.546550Z I whatsappwebhook: 
+2026-03-24T06:05:39.072609186Z N whatsappWebhook: {"@type":"type.googleapis.com/google.cloud.audit.AuditLog","status":{},"authenticationInfo":{"principalEmail":"caja2506@gmail.com","principalSubject":"user:caja2506@gmail.com","oauthInfo":{"oauthClientId":"563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"}},"requestMetadata":{"callerIp":"186.151.98.78","callerSuppliedUserAgent":"FirebaseCLI/15.8.0 agent-name/antigravity,gzip(gfe),gzip(gfe)","requestAttributes":{"time":"2026-03-24T06:05:38.308881191Z","auth":{}},"destinationAttributes":{}},"serviceName":"cloudfunctions.googleapis.com","methodName":"google.cloud.functions.v2.FunctionService.UpdateFunction","authorizationInfo":[{"resource":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","permission":"cloudfunctions.functions.update","granted":true,"resourceAttributes":{"service":"cloudfunctions.googleapis.com","name":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","type":"cloudfunctions.googleapis.com/Function"},"permissionType":"ADMIN_WRITE"}],"resourceName":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","request":{"@type":"type.googleapis.com/google.cloud.functions.v2.UpdateFunctionRequest","update_mask":{"paths":["name","build_config.runtime","build_config.entry_point","build_config.source.storage_source.bucket","build_config.source.storage_source.object","build_config.environment_variables","build_config.source_token","service_config.environment_variables","service_config.secret_environment_variables","service_config.ingress_settings","service_config.timeout_seconds","service_config.service_account_email","service_config.available_memory","service_config.min_instance_count","service_config.max_instance_count","service_config.max_instance_request_concurrency","service_config.available_cpu","service_config.vpc_connector","service_config.vpc_connector_egress_settings","labels"]},"function":{"build_config":{"runtime":"nodejs20","source":{},"entry_point":"whatsappWebhook","source_token":"Clhwcm9qZWN0cy8xMDMwODkwNTY4ODc4L2xvY2F0aW9ucy91cy1jZW50cmFsMS9idWlsZHMvMDIxYTE4ZTgtY2VkMC00MGZmLWI5NGYtNGQ0NzgwZWM2YjJkEnZ1cy1jZW50cmFsMS1kb2NrZXIucGtnLmRldi9hcXVpLXBhdWxpL2djZi1hcnRpZmFjdHMvYXF1aS0tcGF1bGlfX3VzLS1jZW50cmFsMV9fY3JlYXRlX29yZGVyX3dpdGhfcmVzZXJ2YXRpb246dmVyc2lvbl8xGK759q6AHiJOcHJvamVjdHMvYXF1aS1wYXVsaS9sb2NhdGlvbnMvdXMtY2VudHJhbDEvZnVuY3Rpb25zL2NyZWF0ZU9yZGVyV2l0aFJlc2VydmF0aW9uKgwIrtOIzgYQgIS41gIyCG5vZGVqczIwOnYKI2djci5pby9nYWUtcnVudGltZXMvbm9kZWpzMjA6c3RhYmxlEk91cy1jZW50cmFsMS1kb2NrZXIucGtnLmRldi9zZXJ2ZXJsZXNzLXJ1bnRpbWVzL2dvb2dsZS0yMi1mdWxsL3J1bnRpbWVzL25vZGVqczIwQAE="},"labels":{"firebase-functions-hash":"6084ed0ff2f7bb8a4e6905d1933d3dfbbe6922b1","deployment-tool":"cli-firebase"},"name":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","service_config":{"max_instance_request_concurrency":80,"available_cpu":"1","secret_environment_variables":[{"key":"WHATSAPP_TOKEN","project_id":"aqui-pauli","version":"7","secret":"WHATSAPP_TOKEN"},{"version":"4","secret":"WHATSAPP_VERIFY_TOKEN","key":"WHATSAPP_VERIFY_TOKEN","project_id":"aqui-pauli"},{"secret":"WHATSAPP_PHONE_ID","version":"6","project_id":"aqui-pauli","key":"WHATSAPP_PHONE_ID"},{"version":"2","secret":"GEMINI_API_KEY","key":"GEMINI_API_KEY","project_id":"aqui-pauli"}],"available_memory":"256Mi"}}},"response":{"@type":"type.googleapis.com/google.longrunning.Operation"},"resourceLocation":{"currentLocations":["us-central1"]}}
+2026-03-24T06:05:44.846263Z I whatsappwebhook: Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+2026-03-24T06:05:52.587820Z I whatsappwebhook: Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+2026-03-24T06:05:54.190413746Z N whatsappWebhook: {"@type":"type.googleapis.com/google.cloud.audit.AuditLog","status":{},"authenticationInfo":{"principalEmail":"caja2506@gmail.com","principalSubject":"user:caja2506@gmail.com","oauthInfo":{"oauthClientId":"563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com"}},"requestMetadata":{"requestAttributes":{},"destinationAttributes":{}},"serviceName":"cloudfunctions.googleapis.com","methodName":"google.cloud.functions.v2.FunctionService.UpdateFunction","resourceName":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","response":{"buildConfig":{"source":{},"dockerRepository":"projects/aqui-pauli/locations/us-central1/repositories/gcf-artifacts","entryPoint":"whatsappWebhook","runtime":"nodejs20","automaticUpdatePolicy":{},"dockerRegistry":"ARTIFACT_REGISTRY","serviceAccount":"projects/aqui-pauli/serviceAccounts/1030890568878-compute@developer.gserviceaccount.com"},"name":"projects/aqui-pauli/locations/us-central1/functions/whatsappWebhook","createTime":"2026-03-21T04:29:19.383772823Z","environment":"GEN_2","updateTime":"2026-03-24T06:05:39.060581655Z","@type":"type.googleapis.com/google.cloud.functions.v2.Function","satisfiesPzi":true,"serviceConfig":{"ingressSettings":"ALLOW_ALL","allTrafficOnLatestRevision":true,"revision":"whatsappwebhook-00088-raf","maxInstanceRequestConcurrency":80,"secretEnvironmentVariables":[{"secret":"WHATSAPP_TOKEN","version":"7","projectId":"aqui-pauli","key":"WHATSAPP_TOKEN"},{"key":"WHATSAPP_VERIFY_TOKEN","projectId":"aqui-pauli","version":"4","secret":"WHATSAPP_VERIFY_TOKEN"},{"secret":"WHATSAPP_PHONE_ID","projectId":"aqui-pauli","version":"6","key":"WHATSAPP_PHONE_ID"},{"version":"2","projectId":"aqui-pauli","secret":"GEMINI_API_KEY","key":"GEMINI_API_KEY"}],"availableMemory":"256Mi","maxInstanceCount":20,"timeoutSeconds":60,"availableCpu":"1","serviceAccountEmail":"1030890568878-compute@developer.gserviceaccount.com","uri":"https://whatsappwebhook-vjjlvjxxna-uc.a.run.app"},"url":"https://us-central1-aqui-pauli.cloudfunctions.net/whatsappWebhook","state":"ACTIVE","labels":{"deployment-tool":"cli-firebase","firebase-functions-hash":"6084ed0ff2f7bb8a4e6905d1933d3dfbbe6922b1"}},"resourceLocation":{"currentLocations":["us-central1"]}}
+2026-03-24T06:06:26.359272Z I whatsappwebhook: 
+2026-03-24T06:06:26.520816Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: text
+
+2026-03-24T06:06:27.174865Z ? whatsappwebhook: [Orchestrator] Sesi├│n: 50683100015_whatsapp, etapa: greeting, turno: 0, nueva: true
+
+2026-03-24T06:06:27.292263Z ? whatsappwebhook: [Orchestrator] Entidades CRM inyectadas: customerName, address, paymentMethod
+
+2026-03-24T06:06:29.088451Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: greeting, confidence: 0.9, tool: none
+
+2026-03-24T06:06:29.097896Z ? whatsappwebhook: [Orchestrator] Error fatal: ReferenceError: toolResult is not defined
+    at _autoGenerateButtons (/workspace/bot/orchestrator.js:537:31)
+    at Object.processInboundMessage (/workspace/bot/orchestrator.js:256:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processTextMessage (/workspace/whatsapp/webhook.js:326:22)
+    at async /workspace/whatsapp/webhook.js:70:13
+
+2026-03-24T06:06:29.223854Z ? whatsappwebhook: AI result: auto_reply intent: error
+
+2026-03-24T06:06:29.224566Z ? whatsappwebhook: ≡ƒôñ Enviando WA a 50683100015 via phoneId=1081272435060524, texto="┬íDisculp├í! Tuve un problemita. ┬┐Me pod├⌐s repetir q..."
+
+2026-03-24T06:06:29.973644Z ? whatsappwebhook: ≡ƒôñ WA API status=200, response: {"messaging_product":"whatsapp","contacts":[{"input":"50683100015","wa_id":"50683100015"}],"messages":[{"id":"wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI5MTQ4QjYyQkVBRkIxNTM1MTMA"}]}
+
+2026-03-24T06:06:29.974004Z ? whatsappwebhook: Γ£à Mensaje enviado OK, messageId: wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI5MTQ4QjYyQkVBRkIxNTM1MTMA
+
+2026-03-24T06:06:30.931816Z I whatsappwebhook: 
+2026-03-24T06:06:31.120903Z I whatsappwebhook: 
+2026-03-24T06:06:40.042361Z I whatsappwebhook: 
+2026-03-24T06:06:40.050348Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: text
+
+2026-03-24T06:06:40.348385Z ? whatsappwebhook: [Orchestrator] Sesi├│n: 50683100015_whatsapp, etapa: greeting, turno: 0, nueva: false
+
+2026-03-24T06:06:41.925207Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: greeting, confidence: 0.9, tool: none
+
+2026-03-24T06:06:41.926708Z ? whatsappwebhook: [Orchestrator] Error fatal: ReferenceError: toolResult is not defined
+    at _autoGenerateButtons (/workspace/bot/orchestrator.js:537:31)
+    at Object.processInboundMessage (/workspace/bot/orchestrator.js:256:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processTextMessage (/workspace/whatsapp/webhook.js:326:22)
+    at async /workspace/whatsapp/webhook.js:70:13
+
+2026-03-24T06:06:41.983703Z ? whatsappwebhook: AI result: auto_reply intent: error
+
+2026-03-24T06:06:41.984386Z ? whatsappwebhook: ≡ƒôñ Enviando WA a 50683100015 via phoneId=1081272435060524, texto="┬íDisculp├í! Tuve un problemita. ┬┐Me pod├⌐s repetir q..."
+
+2026-03-24T06:06:42.474878Z ? whatsappwebhook: ≡ƒôñ WA API status=200, response: {"messaging_product":"whatsapp","contacts":[{"input":"50683100015","wa_id":"50683100015"}],"messages":[{"id":"wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI0QzQ2QUIwOEJDNjdDNTdCOEQA"}]}
+
+2026-03-24T06:06:42.475218Z ? whatsappwebhook: Γ£à Mensaje enviado OK, messageId: wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI0QzQ2QUIwOEJDNjdDNTdCOEQA
+
+2026-03-24T06:06:43.471282Z I whatsappwebhook: 
+2026-03-24T06:06:43.617492Z I whatsappwebhook: 
+2026-03-24T06:07:00.365961Z I whatsappwebhook: 
+2026-03-24T06:07:00.371630Z ? whatsappwebhook: ≡ƒô▒ Mensaje de 50683100015, tipo: text
+
+2026-03-24T06:07:00.563871Z ? whatsappwebhook: [Orchestrator] Sesi├│n: 50683100015_whatsapp, etapa: greeting, turno: 0, nueva: false
+
+2026-03-24T06:07:01.824311Z ? whatsappwebhook: [Orchestrator] Gemini ΓåÆ intent: greeting, confidence: 0.9, tool: none
+
+2026-03-24T06:07:01.825373Z ? whatsappwebhook: [Orchestrator] Error fatal: ReferenceError: toolResult is not defined
+    at _autoGenerateButtons (/workspace/bot/orchestrator.js:537:31)
+    at Object.processInboundMessage (/workspace/bot/orchestrator.js:256:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async processTextMessage (/workspace/whatsapp/webhook.js:326:22)
+    at async /workspace/whatsapp/webhook.js:70:13
+
+2026-03-24T06:07:01.873804Z ? whatsappwebhook: AI result: auto_reply intent: error
+
+2026-03-24T06:07:01.874905Z ? whatsappwebhook: ≡ƒôñ Enviando WA a 50683100015 via phoneId=1081272435060524, texto="┬íDisculp├í! Tuve un problemita. ┬┐Me pod├⌐s repetir q..."
+
+2026-03-24T06:07:02.333721Z ? whatsappwebhook: ≡ƒôñ WA API status=200, response: {"messaging_product":"whatsapp","contacts":[{"input":"50683100015","wa_id":"50683100015"}],"messages":[{"id":"wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI0MDU4Mjc0NURBOTJFMTBDRTUA"}]}
+
+2026-03-24T06:07:02.333975Z ? whatsappwebhook: Γ£à Mensaje enviado OK, messageId: wamid.HBgLNTA2ODMxMDAwMTUVAgARGBI0MDU4Mjc0NURBOTJFMTBDRTUA
+
+2026-03-24T06:07:03.388141Z I whatsappwebhook: 
+2026-03-24T06:07:03.487756Z I whatsappwebhook: 

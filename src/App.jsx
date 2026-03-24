@@ -32,6 +32,7 @@ import CrmPage from './pages/admin/CrmPage';
 import AutomationsPage from './pages/admin/AutomationsPage';
 import SoportePage from './pages/admin/SoportePage';
 import ShippingPage from './pages/admin/ShippingPage';
+import WhatsAppPage from './pages/admin/WhatsAppPage';
 
 // ========================================
 // Layout: Storefront (public)
@@ -119,6 +120,7 @@ export default function App() {
           <Route path="crm" element={<CrmPage />} />
           <Route path="automatizaciones" element={<AutomationsPage />} />
           <Route path="soporte" element={<SoportePage />} />
+          <Route path="whatsapp" element={<WhatsAppPage />} />
           <Route path="envios" element={<ShippingPage />} />
         </Route>
 

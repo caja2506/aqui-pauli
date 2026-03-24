@@ -266,4 +266,5 @@ module.exports = {
   validateResponse,
   checkConfidence,
   sanitizeForUser,
+  _getSafeFallback,
 };

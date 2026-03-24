@@ -1,0 +1,621 @@
+﻿
+2026-03-23T05:08:23.446523Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-23T05:08:24.260733Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_pending, turno: 16, nueva: false
+2026-03-23T05:08:26.602806Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="Hola Carlos, 
+┬┐c├│mo est├ís? ┬íQu├⌐ bueno verte de nuev..."
+2026-03-23T05:08:27.250234Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJDQUMwOUFEMEY0RjJERUYyQzkA"}
+]}
+2026-03-23T05:12:17.469683Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-23T05:12:17.763840Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_pending, turno: 17, nueva: false
+2026-03-23T05:12:19.544669Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íHola Carlos! 
+Claro, puedo ayudarte con un pedido ..."
+2026-03-23T05:12:20.030150Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI2Q0IzNDM1OTcwNjEzRTcxNEMA"}
+]}
+2026-03-23T05:12:30.195266Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-23T05:12:30.449378Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_pending, turno: 18, nueva: false
+2026-03-23T05:12:32.855996Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íHola Carlos! 
+Claro, puedo ayudarte con un pedido ..."
+2026-03-23T05:12:33.327683Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBIxN0ZGNEE1RTEzMUREMkI5NDMA"}
+]}
+2026-03-23T05:12:56.075861Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-23T05:12:56.327055Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_pending, turno: 19, nueva: false
+2026-03-23T05:12:58.263447Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="Claro, Carlos. El 
+bolso m├ís caro que tenemos es el..."
+2026-03-23T05:12:58.758822Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI1OENBREQ4MTQ4RUU2MDJGQUYA"}
+]}
+2026-03-23T05:13:06.630336Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-23T05:13:06.843930Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_pending, turno: 20, nueva: false
+2026-03-23T05:13:09.638233Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íPerfecto, 
+Carlos! Ya cre├⌐ tu orden [pedido pendie..."
+2026-03-23T05:13:10.073903Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJCQTVENjBEQTM0MDc5RjIwNUIA"}
+]}
+2026-03-23T05:15:18.304068Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: image
+2026-03-23T05:15:20.322859Z ? whatsappwebhook: 
+≡ƒô╕ Imagen guardada: https://storage.googleapis.co
+m/aqui-pauli.firebasestorage.app/payment-proofs/506
+83100015_1774242919567.jpg
+2026-03-23T14:28:11.315755Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: order
+2026-03-23T14:28:11.316613Z ? whatsappwebhook: 
+≡ƒ¢Æ Carrito WA recibido de 50683100015
+2026-03-23T14:28:11.657611Z ? whatsappwebhook: 
+[WAOrder] ≡ƒ¢Æ Carrito recibido de 50683100015: 2 
+items
+2026-03-23T14:28:11.884025Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="≡ƒÿö No pudimos 
+procesar tu carrito: Producto 3X4skW..."
+2026-03-23T14:28:12.517078Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI1RDg5QjNDREM3MkZGRjg1MDQA"}
+]}
+2026-03-23T18:54:50.022293Z ? whatsappwebhook: 
+≡ƒ¢Æ Carrito WA recibido de 50662839579
+2026-03-23T18:54:50.204745Z ? whatsappwebhook: 
+[WAOrder] ≡ƒ¢Æ Carrito recibido de 50662839579: 1 
+items
+2026-03-23T18:54:50.248845Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50662839579 via 
+phoneId=1081272435060524, texto="≡ƒÿö No pudimos 
+procesar tu carrito: Producto gMu1r9..."
+2026-03-23T20:02:18.124879Z ? whatsappwebhook: 
+≡ƒ¢Æ Carrito WA recibido de 50662839579
+2026-03-23T20:02:18.531077Z ? whatsappwebhook: 
+[WAOrder] ≡ƒ¢Æ Carrito recibido de 50662839579: 1 
+items
+2026-03-23T20:02:18.610080Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50662839579 via 
+phoneId=1081272435060524, texto="≡ƒÿö No pudimos 
+procesar tu carrito: Producto gMu1r9..."
+2026-03-24T01:34:39.198963Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:34:39.748253Z ? whatsappwebhook: 
+[Session] Sesi├│n expirada para 50683100015, 
+reseteando
+2026-03-24T01:34:40.033965Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 0, nueva: true
+2026-03-24T01:34:41.710911Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íHola Carlos! 
+≡ƒæï ┬┐C├│mo est├ís? ┬íQu├⌐ gusto saludarte..."
+2026-03-24T01:34:42.451406Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI5QTU1QTFERDQ0MDM0Njg2NEYA"}
+]}
+2026-03-24T01:35:47.578419Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:35:47.897864Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 1, nueva: false
+2026-03-24T01:35:50.635591Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íClaro, Carlos! 
+Tenemos los Tenis zoom vomero 5. V..."
+2026-03-24T01:35:51.140892Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI2QTAzMTg2NjI0QzkzQzE5NTQA"}
+]}
+2026-03-24T01:36:04.698098Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:36:04.932013Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 2, nueva: false
+2026-03-24T01:36:06.041129Z ? whatsappwebhook: 
+[Orchestrator] Gemini ΓåÆ intent: product_inquiry, 
+confidence: 0.9, tool: createOrUpdateCart
+2026-03-24T01:36:06.041401Z ? whatsappwebhook: 
+[ToolExecutor] Ejecutando: createOrUpdateCart {}
+2026-03-24T01:36:06.041860Z ? whatsappwebhook: 
+[ToolExecutor] createOrUpdateCart ΓåÆ success:false
+2026-03-24T01:36:06.900867Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="Tuve un 
+problemita consultando eso. ┬┐Me pod├⌐s repe..."
+2026-03-24T01:36:07.401993Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI2M0Y0NDg4NDI1QjZDQTFGOUEA"}
+]}
+2026-03-24T01:36:35.599301Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:36:35.807196Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 3, nueva: false
+2026-03-24T01:36:37.693738Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬┐Te gustar├¡a 
+que te los aparte?..."
+2026-03-24T01:36:38.141311Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJCNjJEMzM0RkE2MDBEOTFEMzAA"}
+]}
+2026-03-24T01:36:44.767124Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:36:44.976945Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 4, nueva: false
+2026-03-24T01:36:46.551436Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íPerfecto, 
+Carlos! Entonces te aparto los Tenis zo..."
+2026-03-24T01:36:46.992029Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI0MzkzMDkyMDREQjZGNjQxRTYA"}
+]}
+2026-03-24T01:37:01.902715Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:37:02.096150Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 5, nueva: false
+2026-03-24T01:37:04.292833Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íGenial, Carlos! 
+Ya te apart├⌐ los Tenis zoom vomer..."
+2026-03-24T01:37:04.750612Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBIyNUNEOEY5REZBNUU5QTlFMEIA"}
+]}
+2026-03-24T01:37:34.072287Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: image
+2026-03-24T01:37:36.286455Z ? whatsappwebhook: 
+≡ƒô╕ Imagen guardada: https://storage.googleapis.co
+m/aqui-pauli.firebasestorage.app/payment-proofs/506
+83100015_1774316255680.jpg
+2026-03-24T01:49:38.062454Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:49:38.629347Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 6, nueva: false
+2026-03-24T01:49:40.481519Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íHola de nuevo, 
+Carlos! Claro que s├¡, ┬┐qu├⌐ te gust..."
+2026-03-24T01:49:41.046375Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJFRThGM0Q1MjgwNkY2OThFRTYA"}
+]}
+2026-03-24T01:49:58.256488Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:49:58.444090Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 7, nueva: false
+2026-03-24T01:50:22.723127Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T01:50:22.898825Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 8, nueva: false
+2026-03-24T01:50:43.899080Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T01:50:44.056560Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 9, nueva: false
+2026-03-24T01:50:53.784379Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T01:50:53.919867Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 10, nueva: false
+2026-03-24T01:51:07.753624Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T01:51:07.914768Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 11, nueva: false
+2026-03-24T01:51:09.951703Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="No encontr├⌐ ese 
+producto en nuestro cat├ílogo. ┬┐Me ..."
+2026-03-24T01:51:10.367660Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI3REU0MjZGMjdFMjc0RDFDNEQA"}
+]}
+2026-03-24T01:59:05.883339Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:59:06.453776Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 12, nueva: false
+2026-03-24T01:59:09.529669Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íHola Carlos! 
+Claro, tenemos ropa, calzado y acces..."
+2026-03-24T01:59:10.325756Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJFMDg4QUI1MkRDRTVENzYxMTAA"}
+]}
+2026-03-24T01:59:35.008999Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T01:59:35.281682Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 13, nueva: false
+2026-03-24T01:59:38.172745Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íHola Carlos! 
+Claro, tenemos ropa, calzado y acces..."
+2026-03-24T01:59:38.651138Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBIwMDUyMkQxMjM3RTVGMzJBOEQA"}
+]}
+2026-03-24T02:00:09.847627Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T02:00:10.137887Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 14, nueva: false
+2026-03-24T02:00:14.019861Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íClaro, Carlos! 
+Tenemos varias categor├¡as: Ropa, C..."
+2026-03-24T02:00:14.483658Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJERTAzOTBDMjA0NTZCNDFFMzQA"}
+]}
+2026-03-24T02:02:41.328378Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T02:02:41.641010Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 15, nueva: false
+2026-03-24T02:02:45.076574Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íClaro, Carlos! 
+En accesorios tenemos bolsos y bil..."
+2026-03-24T02:02:45.538903Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBIzQUNENDNFNzE5MTNBNzg4OTMA"}
+]}
+2026-03-24T02:03:11.726549Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: audio
+2026-03-24T02:03:11.726802Z ? whatsappwebhook: 
+≡ƒÄñ Audio recibido de 50683100015, mime: 
+audio/ogg; codecs=opus, id: 916456451361343
+2026-03-24T02:03:14.191620Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 16, nueva: false
+2026-03-24T02:03:16.598902Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íUy, perd├│n 
+Carlos! Me refer├¡a a las categor├¡as ge..."
+2026-03-24T02:03:17.008433Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJBMTVGMUE4REU0RkMyNzU4MDMA"}
+]}
+2026-03-24T02:03:42.710988Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: audio
+2026-03-24T02:03:42.711061Z ? whatsappwebhook: 
+≡ƒÄñ Audio recibido de 50683100015, mime: 
+audio/ogg; codecs=opus, id: 1563041711429561
+2026-03-24T02:03:45.544106Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 17, nueva: false
+2026-03-24T02:03:47.632345Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íHola Carlos! En 
+calzado, tenemos nuestros "Tenis ..."
+2026-03-24T02:03:48.009657Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJGNTc5QURFNzcxRENDNzBENjcA"}
+]}
+2026-03-24T02:04:02.223897Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T02:04:02.381890Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 18, nueva: false
+2026-03-24T02:04:04.862136Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íPerfecto, 
+Carlos! Los "Tenis zoom vomero 5" est├ín..."
+2026-03-24T02:04:05.531806Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBIxRDA3RTU3NTQzQzhDMThCMjUA"}
+]}
+2026-03-24T02:06:19.419958Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T02:06:19.559118Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: discovery, turno: 19, nueva: false
+2026-03-24T02:06:22.125978Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íGenial, Carlos! 
+Ya agregu├⌐ los "Tenis zoom vomero..."
+2026-03-24T02:06:22.577535Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJEOEY5OTU2RjdERjNFNzdDRDYA"}
+]}
+2026-03-24T02:10:34.599893Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T02:10:34.894616Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_pending, turno: 20, nueva: false
+2026-03-24T02:10:37.444290Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íPerfecto, 
+Carlos! Para finalizar, por favor reali..."
+2026-03-24T02:10:37.923917Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJENTA2QUUyNzBFRTg3NEUyMjQA"}
+]}
+2026-03-24T03:07:19.704428Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: image
+2026-03-24T03:07:21.689962Z ? whatsappwebhook: 
+≡ƒô╕ Imagen guardada: https://storage.googleapis.co
+m/aqui-pauli.firebasestorage.app/payment-proofs/506
+83100015_1774321641094.jpg
+2026-03-24T03:07:42.820493Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:07:43.064516Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_verification, turno: 21, nueva: 
+false
+2026-03-24T03:08:46.332975Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:08:46.691331Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_verification, turno: 22, nueva: 
+false
+2026-03-24T03:09:12.685712Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T03:09:12.883427Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_verification, turno: 23, nueva: 
+false
+2026-03-24T03:09:14.867470Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íPerfecto, 
+Carlos! Nuestro equipo ya est├í revisand..."
+2026-03-24T03:09:15.342507Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI3RDcxNDAxN0MzMkMwREMyQjUA"}
+]}
+2026-03-24T03:09:33.418032Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:09:33.613559Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_verification, turno: 24, nueva: 
+false
+2026-03-24T03:09:49.667278Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:09:49.905758Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_verification, turno: 25, nueva: 
+false
+2026-03-24T03:10:12.890906Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:10:13.108659Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_verification, turno: 26, nueva: 
+false
+2026-03-24T03:10:29.680747Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T03:10:29.862233Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_verification, turno: 27, nueva: 
+false
+2026-03-24T03:10:31.504680Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="Entiendo, Carlos. 
+El equipo ya est├í revisando tu c..."
+2026-03-24T03:10:31.988445Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBIzNEQ5MUE3OTZCRThENEYxRkMA"}
+]}
+2026-03-24T03:20:07.655943Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:20:08.330427Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: payment_verification, turno: 28, nueva: 
+false
+2026-03-24T03:20:09.800360Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íHola Carlos! 
+Nuestro equipo ya est├í revisando tu ..."
+2026-03-24T03:20:10.424206Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBIxQjI5NTQ2NkYzRTA0RjU2OTIA"}
+]}
+2026-03-24T03:21:07.697523Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:21:07.974361Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: greeting, turno: 0, nueva: true
+2026-03-24T03:21:09.815338Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íBuenas noches, 
+Carlos! Γ£¿ Soy Pauli, de Aqu├¡ Pauli..."
+2026-03-24T03:21:10.380070Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBIzNjU2RTAyMUNDQzcxNEUzQTkA"}
+]}
+2026-03-24T03:21:43.744369Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:21:43.895737Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: greeting, turno: 1, nueva: false
+2026-03-24T03:21:46.152449Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬┐En qu├⌐ color 
+te gustar├¡a ver los tenis?..."
+2026-03-24T03:21:46.622384Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJBRTE5OTk4RUZGRTdBQ0UzM0EA"}
+]}
+2026-03-24T03:26:01.280429Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:26:01.537247Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: variant_selection, turno: 2, nueva: false
+2026-03-24T03:26:03.647576Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íPerfecto! Los 
+Tenis Zoom Vomero 5 est├ín disponibl..."
+2026-03-24T03:26:04.151522Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBI1N0U2RTM2RjAzNUFGNjc1MkIA"}
+]}
+2026-03-24T03:26:12.759042Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T03:26:12.939520Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: address_capture, turno: 3, nueva: false
+2026-03-24T03:26:40.998307Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T03:26:41.159120Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: address_capture, turno: 4, nueva: false
+2026-03-24T03:27:34.729271Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T03:27:34.936895Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: address_capture, turno: 5, nueva: false
+2026-03-24T03:27:36.922997Z ? whatsappwebhook: 
+[Orchestrator] createOrderDraft enriquecido: 
+{"customerName":"Carlos Jim├⌐nez","customerPhone":"
+50683100015","orderItems":[{"productSku":"Tenis 
+Zoom Vomero 5","variant":"Blancas 36","quantity":1}
+],"shippingAddress":{"address":"Alajuela, Grecia, 
+Grecia, 700 metros norte del supermercado la arena"
+},"paymentMethod":"sinpe","items":[{"productName":
+2026-03-24T03:27:36.923138Z ? whatsappwebhook: 
+[ToolExecutor] Ejecutando: createOrderDraft 
+{"customerName":"Carlos Jim├⌐nez","customerPhone":"
+50683100015","orderItems":[{"productSku":"Tenis 
+Zoom Vomero 5","variant":"Blancas 36","quantity":1}
+],"shippingAddress":{"address":"Alajuela, Grecia, G
+2026-03-24T04:04:23.940515Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T04:04:24.542814Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: greeting, turno: 0, nueva: true
+2026-03-24T04:04:26.524673Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="┬íBuenas noches, 
+Carlos! ≡ƒæï Soy Pauli, de Aqu├¡ Paul..."
+2026-03-24T04:04:27.278006Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBJCMzE1QzgzRDUxRDkxODJCN0IA"}
+]}
+2026-03-24T04:05:13.154802Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: text
+2026-03-24T04:05:13.351124Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: greeting, turno: 1, nueva: false
+2026-03-24T04:05:43.279937Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T04:05:43.439830Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: variant_selection, turno: 2, nueva: false
+2026-03-24T04:05:55.172435Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: interactive
+2026-03-24T04:05:55.313268Z ? whatsappwebhook: 
+[Orchestrator] Sesi├│n: 50683100015_whatsapp, 
+etapa: variant_selection, turno: 3, nueva: false
+2026-03-24T04:22:30.508697Z ? whatsappwebhook: 
+≡ƒô▒ Mensaje de 50683100015, tipo: order
+2026-03-24T04:22:30.510136Z ? whatsappwebhook: 
+≡ƒ¢Æ Carrito WA recibido de 50683100015
+2026-03-24T04:22:30.942858Z ? whatsappwebhook: 
+[WAOrder] ≡ƒ¢Æ Carrito recibido de 50683100015: 1 
+items
+2026-03-24T04:22:31.004938Z ? whatsappwebhook: 
+≡ƒôñ Enviando WA a 50683100015 via 
+phoneId=1081272435060524, texto="≡ƒÿö No pudimos 
+procesar tu carrito: Producto gMu1r9..."
+2026-03-24T04:22:31.896389Z ? whatsappwebhook: 
+≡ƒôñ WA API status=200, response: {"messaging_produ
+ct":"whatsapp","contacts":[{"input":"50683100015","
+wa_id":"50683100015"}],"messages":[{"id":"wamid.HBg
+LNTA2ODMxMDAwMTUVAgARGBIxRERDNDFEMkY5NTQ0RkJFOTQA"}
+]}
+
+

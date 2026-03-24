@@ -92,6 +92,7 @@ async function _createSession(sessionId, phoneOrChatId, channel, contactId, isFi
       orderNumber: "",
     },
     cartSnapshot: { items: [] },
+    recentQuestions: [],
     lastBotAction: "",
     lastBotReply: "",
     lastUserIntent: "",
@@ -246,6 +247,83 @@ async function recordTurn(sessionId, userMessage, botReply, intent, confidence) 
 }
 
 /**
+ * Registrar una pregunta hecha por el bot para evitar repeticiones.
+ * Guarda las últimas 3 preguntas con su estado.
+ *
+ * @param {string} sessionId — ID de sesión
+ * @param {string} question — Pregunta resumida
+ * @param {string} entityAsked — Entidad que se pedía (ej: "address", "selectedVariant")
+ */
+async function recordQuestion(sessionId, question, entityAsked) {
+  if (!sessionId || sessionId.startsWith("temp_")) return;
+
+  try {
+    const ref = db.collection(SESSIONS_COLLECTION).doc(sessionId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
+
+    const data = snap.data();
+    const recent = data.recentQuestions || [];
+
+    // Agregar nueva pregunta
+    recent.push({
+      question: (question || "").substring(0, 200),
+      entityAsked: entityAsked || "",
+      answered: false,
+      answer: "",
+      askedAt: new Date().toISOString(),
+    });
+
+    // Mantener solo las últimas 5
+    const trimmed = recent.slice(-5);
+
+    await ref.update({
+      recentQuestions: trimmed,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("[Session] Error recordQuestion:", err.message);
+  }
+}
+
+/**
+ * Marcar preguntas como respondidas cuando se detectan entidades.
+ *
+ * @param {string} sessionId — ID de sesión
+ * @param {Object} detectedEntities — Entidades detectadas
+ */
+async function markQuestionsAnswered(sessionId, detectedEntities) {
+  if (!sessionId || sessionId.startsWith("temp_") || !detectedEntities) return;
+
+  try {
+    const ref = db.collection(SESSIONS_COLLECTION).doc(sessionId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
+
+    const data = snap.data();
+    const recent = data.recentQuestions || [];
+    let changed = false;
+
+    for (const q of recent) {
+      if (!q.answered && q.entityAsked && detectedEntities[q.entityAsked]) {
+        q.answered = true;
+        q.answer = String(detectedEntities[q.entityAsked]).substring(0, 100);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await ref.update({
+        recentQuestions: recent,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    console.error("[Session] Error markQuestionsAnswered:", err.message);
+  }
+}
+
+/**
  * Marcar sesión para escalamiento humano
  */
 async function flagForEscalation(sessionId, reason) {
@@ -276,6 +354,8 @@ module.exports = {
   advanceStage,
   updateEntities,
   recordTurn,
+  recordQuestion,
+  markQuestionsAnswered,
   flagForEscalation,
   getSession,
   SESSIONS_COLLECTION,

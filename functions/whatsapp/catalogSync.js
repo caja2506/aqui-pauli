@@ -30,8 +30,7 @@ async function mapProductToMeta(productId, productData) {
     ? productData.images[0]
     : "";
 
-  const slug = productData.slug || productId;
-  const baseLink = `https://aqui-pauli.web.app/producto/${slug}`;
+  const baseLink = `https://aqui-pauli.web.app/producto/${productId}`;
 
   const items = [];
 
@@ -41,12 +40,12 @@ async function mapProductToMeta(productId, productData) {
       const v = vDoc.data();
       if (v.active === false) continue;
 
-      const attrs = v.attributes || v;
-      const variantPrice = attrs.price || productData.basePrice || 0;
-      const variantStock = attrs.stock || 0;
-      const variantName = attrs.name || "";
-      const variantImage = attrs.imageUrl || productImage;
-      const commercialStatus = attrs.commercialStatus || "";
+      // Leer campos directamente de la variante (prioridad), con fallback a sub-objeto attributes
+      const variantPrice = v.price || v.attributes?.price || productData.basePrice || 0;
+      const variantStock = v.stock || v.attributes?.stock || 0;
+      const variantName = v.name || v.attributes?.name || "";
+      const variantImage = v.imageUrl || v.attributes?.imageUrl || productImage;
+      const commercialStatus = v.commercialStatus || v.attributes?.commercialStatus || "";
 
       // Disponibilidad: "disponible" o "bajo_pedido" = in stock, incluso si stock es 0
       const isAvailable = commercialStatus === "disponible" || commercialStatus === "bajo_pedido" || variantStock > 0;
@@ -58,7 +57,7 @@ async function mapProductToMeta(productId, productData) {
         description: productData.description || productData.name || "Sin descripción",
         availability: isAvailable ? "in stock" : "out of stock",
         condition: "new",
-        price: `${Math.round(variantPrice * 100)} CRC`,
+        price: `${Math.round(variantPrice)} CRC`,
         link: baseLink,
         image: variantImage ? [{ url: variantImage }] : [],
         brand: brandName,
@@ -76,7 +75,7 @@ async function mapProductToMeta(productId, productData) {
       description: productData.description || productData.name || "Sin descripción",
       availability: "in stock",
       condition: "new",
-      price: `${Math.round(price * 100)} CRC`,
+      price: `${Math.round(price)} CRC`,
       link: baseLink,
       image: productImage ? [{ url: productImage }] : [],
       brand: brandName,

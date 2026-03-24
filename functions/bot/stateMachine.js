@@ -7,9 +7,26 @@ const STAGES = {
   greeting: {
     label: "Saludo",
     description: "Primer contacto, saludar e invitar a ver el catálogo",
-    allowedTools: ["getCustomerProfile"],
+    allowedTools: ["getCustomerProfile", "getProductBySku", "getProductCatalog"],
     requiredEntities: [],
     prompt: "El cliente acaba de saludar. Presentate como Pauli, saludá con calidez. NO listes productos en texto. Invitá al cliente a explorar nuestro catálogo usando el botón que el sistema le va a mostrar. Preguntá si busca algo en especial.",
+    uiConfig: {
+      buttonsEnabled: true,
+      buttonMode: "fixed", // "fixed" | "ai" | "hybrid" | "off"
+      fixedButtons: [
+        { id: "order_web", title: "Pedir en Web 🌐" },
+        { id: "view_catalog", title: "Ver Catálogo 📋" },
+        { id: "need_help", title: "Ayuda 🙋‍♀️" },
+      ],
+      catalogEnabled: true,
+      allowFreeText: true,
+      humanEscalationEnabled: true,
+    },
+    fallbackBehavior: "contextual", // "contextual" | "escalate" | "retry"
+    autoAdvanceOn: {
+      intents: ["product_inquiry", "price_check", "purchase"],
+      targetStage: "discovery",
+    },
   },
   discovery: {
     label: "Exploración",
@@ -17,6 +34,23 @@ const STAGES = {
     allowedTools: ["getProductCatalog", "getProductBySku", "checkStock", "getCustomerProfile"],
     requiredEntities: [],
     prompt: "El cliente está explorando productos. Si pregunta por algo específico, usá getProductBySku o getProductCatalog para buscar. Si no tiene algo específico, invitalo a ver el catálogo con el botón. NO listes productos como texto plano.",
+    uiConfig: {
+      buttonsEnabled: true,
+      buttonMode: "hybrid",
+      fixedButtons: [
+        { id: "order_web", title: "Pedir en Web 🌐" },
+        { id: "view_catalog", title: "Ver Catálogo 📋" },
+        { id: "need_help", title: "Ayuda 🙋‍♀️" },
+      ],
+      catalogEnabled: true,
+      allowFreeText: true,
+      humanEscalationEnabled: true,
+    },
+    fallbackBehavior: "contextual",
+    autoAdvanceOn: {
+      hasEntity: "selectedProduct",
+      targetStage: "product_selection",
+    },
   },
   product_selection: {
     label: "Selección de producto",
@@ -24,6 +58,19 @@ const STAGES = {
     allowedTools: ["getProductBySku", "checkStock", "getCustomerProfile"],
     requiredEntities: ["selectedProduct"],
     prompt: "El cliente mostró interés en un producto. Confirmá precio, disponibilidad y variantes. Preguntá talla/color/cantidad si aplica.",
+    uiConfig: {
+      buttonsEnabled: true,
+      buttonMode: "hybrid",
+      fixedButtons: [],
+      catalogEnabled: true,
+      allowFreeText: true,
+      humanEscalationEnabled: true,
+    },
+    fallbackBehavior: "contextual",
+    autoAdvanceOn: {
+      hasEntity: "selectedVariant",
+      targetStage: "variant_selection",
+    },
   },
   variant_selection: {
     label: "Selección de variante",
@@ -31,6 +78,16 @@ const STAGES = {
     allowedTools: ["getProductBySku", "checkStock"],
     requiredEntities: ["selectedProduct", "selectedVariant"],
     prompt: "El cliente necesita elegir variante (talla/color). Mostrá las opciones disponibles con stock real.",
+    uiConfig: {
+      buttonsEnabled: true,
+      buttonMode: "hybrid",
+      fixedButtons: [],
+      catalogEnabled: false,
+      allowFreeText: true,
+      humanEscalationEnabled: true,
+    },
+    fallbackBehavior: "contextual",
+    autoAdvanceOn: null,
   },
   address_capture: {
     label: "Captura de dirección",
@@ -38,6 +95,19 @@ const STAGES = {
     allowedTools: ["getCustomerProfile", "saveCustomerAddress"],
     requiredEntities: ["selectedProduct", "address"],
     prompt: "Ya tenemos producto seleccionado. Si ya hay dirección guardada del cliente, USALA. Si no, pedí la dirección de envío: provincia, cantón, distrito y señas.",
+    uiConfig: {
+      buttonsEnabled: false,
+      buttonMode: "off",
+      fixedButtons: [],
+      catalogEnabled: false,
+      allowFreeText: true,
+      humanEscalationEnabled: true,
+    },
+    fallbackBehavior: "contextual",
+    autoAdvanceOn: {
+      hasEntity: "address",
+      targetStage: "delivery_validation",
+    },
   },
   delivery_validation: {
     label: "Validación de entrega",
@@ -45,6 +115,19 @@ const STAGES = {
     allowedTools: ["getCustomerProfile"],
     requiredEntities: ["selectedProduct", "address"],
     prompt: "Tenemos dirección. Confirmá datos de envío (₡2,500 estándar a todo Costa Rica). Mostrá resumen del pedido y preguntá si procede.",
+    uiConfig: {
+      buttonsEnabled: true,
+      buttonMode: "fixed",
+      fixedButtons: [
+        { id: "confirm_yes", title: "✅ Sí, confirmar" },
+        { id: "confirm_no", title: "❌ No, cambiar" },
+      ],
+      catalogEnabled: false,
+      allowFreeText: true,
+      humanEscalationEnabled: true,
+    },
+    fallbackBehavior: "contextual",
+    autoAdvanceOn: null,
   },
   payment_pending: {
     label: "Pendiente de pago",
@@ -52,6 +135,19 @@ const STAGES = {
     allowedTools: ["getOrderStatus"],
     requiredEntities: ["orderNumber"],
     prompt: "El pedido ya fue creado. El cliente necesita hacer el pago. Recordá los métodos: SINPE 7095-6070 / IBAN CR15081400011020004961. Pedí el comprobante.",
+    uiConfig: {
+      buttonsEnabled: true,
+      buttonMode: "fixed",
+      fixedButtons: [
+        { id: "pay_sinpe", title: "📱 SINPE Móvil" },
+        { id: "pay_transfer", title: "🏦 Transferencia" },
+      ],
+      catalogEnabled: false,
+      allowFreeText: true,
+      humanEscalationEnabled: true,
+    },
+    fallbackBehavior: "contextual",
+    autoAdvanceOn: null,
   },
   payment_verification: {
     label: "Verificación de pago",
@@ -59,6 +155,16 @@ const STAGES = {
     allowedTools: ["getOrderStatus"],
     requiredEntities: ["orderNumber"],
     prompt: "El comprobante fue recibido y está siendo verificado. Informá al cliente que el equipo lo está revisando.",
+    uiConfig: {
+      buttonsEnabled: false,
+      buttonMode: "off",
+      fixedButtons: [],
+      catalogEnabled: false,
+      allowFreeText: true,
+      humanEscalationEnabled: true,
+    },
+    fallbackBehavior: "contextual",
+    autoAdvanceOn: null,
   },
   order_confirmation: {
     label: "Orden confirmada",
@@ -66,6 +172,19 @@ const STAGES = {
     allowedTools: ["getOrderStatus"],
     requiredEntities: ["orderNumber"],
     prompt: "El pedido está confirmado y pagado. Agradecé al cliente, dale el número de pedido y ofrecé ayuda adicional.",
+    uiConfig: {
+      buttonsEnabled: true,
+      buttonMode: "fixed",
+      fixedButtons: [
+        { id: "order_web", title: "Pedir en Web 🌐" },
+        { id: "view_catalog", title: "Ver Catálogo 📋" },
+      ],
+      catalogEnabled: true,
+      allowFreeText: true,
+      humanEscalationEnabled: false,
+    },
+    fallbackBehavior: "contextual",
+    autoAdvanceOn: null,
   },
   handoff_human: {
     label: "Escalamiento a humano",
@@ -73,6 +192,16 @@ const STAGES = {
     allowedTools: ["handoffToHuman"],
     requiredEntities: [],
     prompt: "No es posible resolver automáticamente. Informá al cliente que alguien del equipo lo va a contactar pronto.",
+    uiConfig: {
+      buttonsEnabled: false,
+      buttonMode: "off",
+      fixedButtons: [],
+      catalogEnabled: false,
+      allowFreeText: false,
+      humanEscalationEnabled: false,
+    },
+    fallbackBehavior: "escalate",
+    autoAdvanceOn: null,
   },
   closed: {
     label: "Cerrada",
@@ -80,6 +209,16 @@ const STAGES = {
     allowedTools: [],
     requiredEntities: [],
     prompt: "La conversación está cerrada. Si el cliente escribe de nuevo, tratá como nueva conversación.",
+    uiConfig: {
+      buttonsEnabled: false,
+      buttonMode: "off",
+      fixedButtons: [],
+      catalogEnabled: false,
+      allowFreeText: true,
+      humanEscalationEnabled: false,
+    },
+    fallbackBehavior: "contextual",
+    autoAdvanceOn: null,
   },
 };
 
@@ -152,6 +291,54 @@ function getInitialStage(hasHistory) {
   return hasHistory ? "discovery" : "greeting";
 }
 
+/**
+ * Obtener la configuración de UI de una etapa
+ */
+function getStageUIConfig(stage) {
+  const config = STAGES[stage];
+  return config ? config.uiConfig : STAGES.greeting.uiConfig;
+}
+
+/**
+ * Obtener el comportamiento de fallback de una etapa
+ */
+function getStageFallbackBehavior(stage) {
+  const config = STAGES[stage];
+  return config ? config.fallbackBehavior : "contextual";
+}
+
+/**
+ * Verificar si se debe auto-avanzar la etapa basándose en intent o entidades
+ * @returns {string|null} — la etapa destino si debe avanzar, null si no
+ */
+function getAutoAdvanceTarget(stage, intent, entities) {
+  const config = STAGES[stage];
+  if (!config || !config.autoAdvanceOn) return null;
+
+  const rule = config.autoAdvanceOn;
+
+  // Regla por intent
+  if (rule.intents && rule.intents.includes(intent)) {
+    return rule.targetStage;
+  }
+
+  // Regla por entidad presente
+  if (rule.hasEntity && entities && entities[rule.hasEntity]) {
+    return rule.targetStage;
+  }
+
+  return null;
+}
+
+/**
+ * Verificar si una tool está permitida en una etapa
+ */
+function isToolAllowed(stage, toolName) {
+  const config = STAGES[stage];
+  if (!config) return false;
+  return config.allowedTools.includes(toolName);
+}
+
 module.exports = {
   STAGES,
   TRANSITIONS,
@@ -162,4 +349,8 @@ module.exports = {
   getAllowedTools,
   getStagesForPrompt,
   getInitialStage,
+  getStageUIConfig,
+  getStageFallbackBehavior,
+  getAutoAdvanceTarget,
+  isToolAllowed,
 };

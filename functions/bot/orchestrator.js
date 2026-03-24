@@ -9,6 +9,7 @@ const geminiApiKey = defineSecret("GEMINI_API_KEY");
 // Capas del bot
 const { getOrCreateSession, updateSession, advanceStage, updateEntities, recordTurn, recordQuestion, markQuestionsAnswered, flagForEscalation } = require("./sessionManager");
 const { buildConversationContext } = require("./contextBuilder");
+const { getStageUIConfig, getStageFallbackBehavior, getAutoAdvanceTarget, isToolAllowed, canTransition } = require("./stateMachine");
 const { callGemini, getGenAIInstance, GEMINI_MODEL } = require("./aiAdapter");
 const { executeTool, getProductCatalog } = require("./toolExecutor");
 const { validateResponse, checkConfidence, sanitizeForUser } = require("./guardrails");
@@ -151,10 +152,32 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
     aiResponse = validation.correctedResponse;
 
     // ================================================
+    // 6b. AUTO-AVANZAR ETAPA basado en reglas del stateMachine
+    // ================================================
+    const autoTarget = getAutoAdvanceTarget(session.currentStage, aiResponse.intent, aiResponse.detectedEntities);
+    if (autoTarget && canTransition(session.currentStage, autoTarget)) {
+      console.log(`[Orchestrator] Auto-avance: ${session.currentStage} → ${autoTarget} (intent: ${aiResponse.intent})`);
+      await advanceStage(session.id, session.currentStage, autoTarget);
+      session.currentStage = autoTarget;
+    }
+
+    // ================================================
     // 7. EJECUTAR TOOL (si Gemini lo pide)
     // ================================================
     let toolResult = null;
     let orderCreated = null;
+
+    // Auto-corregir: si el usuario envió un producto referenciado del catálogo,
+    // SIEMPRE forzar getProductBySku — sin importar qué intent detectó Gemini.
+    // El tag [PRODUCTO REFERENCIADO:] fue inyectado por webhook.js al detectar context.referred_product
+    const refMatch = messageText.match(/\[PRODUCTO REFERENCIADO:\s*([^\]—]+)/);
+    if (refMatch && aiResponse.toolToCall !== "getProductBySku") {
+      const refProductName = refMatch[1].trim().split(" - ")[0].trim(); // quitar variante
+      console.log(`[Orchestrator] Auto-corrigiendo: producto referenciado "${refProductName}" → forzando getProductBySku (Gemini dijo ${aiResponse.intent})`);
+      aiResponse.intent = "product_inquiry";
+      aiResponse.toolToCall = "getProductBySku";
+      aiResponse.toolPayload = { productName: refProductName };
+    }
 
     // Auto-corregir: si Gemini detecta product_inquiry pero no llama tool,
     // elegir la tool correcta según contexto
@@ -202,17 +225,16 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
         await updateEntities(session.id, { orderNumber: toolResult.data.orderNumber });
       }
 
-      // Si la tool devuelve datos, re-llamar a Gemini con los resultados para respuesta informada
+      // Inyectar resultado de tool en el contexto de la respuesta (SIN doble call a Gemini)
+      // El replyText de Gemini ya fue generado antes de la tool. Si la tool trajo datos
+      // relevantes y Gemini no pudo usarlos, inyectamos un resumen en la respuesta.
       if (toolResult.success && !["createOrderDraft", "handoffToHuman"].includes(aiResponse.toolToCall)) {
-        // Re-llamar con contexto enriquecido
-        const enrichedContext = `${contextPrompt}\n\n[RESULTADO DE CONSULTA: ${aiResponse.toolToCall}]\n${JSON.stringify(toolResult.data).substring(0, 800)}`;
-        const enrichedResponse = await callGemini(apiKey, systemInstruction, enrichedContext, messageText);
-        if (enrichedResponse && !enrichedResponse._isFallback) {
-          // Mantener entidades y tool info del primer call, pero usar el nuevo replyText
-          aiResponse.replyText = enrichedResponse.replyText;
-          // Re-validar
-          const revalidation = validateResponse(aiResponse, session, catalogProducts);
-          aiResponse = revalidation.correctedResponse;
+        // Si el replyText es genérico o muy corto, enriquecerlo con datos de la tool
+        if (aiResponse.replyText.length < 50 || !aiResponse.replyText.includes("₡")) {
+          const toolSummary = _summarizeToolResult(aiResponse.toolToCall, toolResult.data);
+          if (toolSummary) {
+            aiResponse.replyText = aiResponse.replyText + "\n\n" + toolSummary;
+          }
         }
       }
     }
@@ -355,11 +377,19 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
   } catch (err) {
     console.error("[Orchestrator] Error fatal:", err);
     const sessionId = sessionStateBefore?.id || "unknown";
+    const currentStage = sessionStateBefore?.currentStage || "greeting";
     await logError(sessionId, err, `Processing message: "${(messageText || "").substring(0, 100)}"`);
+
+    // REGLA CRÍTICA: El fallback NUNCA reinicia la conversación.
+    // Usa un mensaje contextual basado en la etapa actual.
+    const { _getSafeFallback } = require("./guardrails");
+    const fallbackReply = _getSafeFallback(currentStage);
+    const stageUI = getStageUIConfig(currentStage);
 
     return {
       type: "auto_reply",
-      reply: "¡Disculpá! Tuve un problemita. ¿Me podés repetir qué necesitás? 😊",
+      reply: fallbackReply,
+      buttons: stageUI.buttonsEnabled ? stageUI.fixedButtons : [],
       intent: "error",
       confidence: 0,
       needsHumanReview: true,
@@ -424,45 +454,25 @@ async function _loadChatHistory(contactId, limit = 15) {
 }
 
 /**
- * Auto-generar botones interactivos desde DATOS REALES.
- * Los botones vienen del catálogo, tools, o etapa — NUNCA de Gemini.
+ * Auto-generar botones interactivos basados en:
+ * 1. Configuración de UI de la etapa (stateMachine.uiConfig)
+ * 2. Resultados reales de tools (variantes, productos)
+ * 3. Estado de la sesión (orden creada, producto seleccionado)
  *
- * @param {string} stage — etapa actual/siguiente
- * @param {string} reply — texto de respuesta (para detección de confirmaciones)
- * @param {Object} session — sesión actual
- * @param {Object|null} orderCreated — orden creada (si aplica)
- * @param {Array} catalogProducts — productos del catálogo pre-cargado
- * @param {Object|null} lastTool — { name, payload, result } de la última tool ejecutada
+ * PRINCIPIO: Los botones vienen del catálogo, tools, o config — NUNCA de Gemini.
  */
 function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProducts, lastTool) {
-  const replyLower = (reply || "").toLowerCase();
+  const uiConfig = getStageUIConfig(stage);
+
+  // Si la etapa tiene botones deshabilitados, no enviar nada
+  if (!uiConfig.buttonsEnabled) return [];
+
   const toolName = lastTool?.name || "";
   const toolData = lastTool?.result?.data || null;
   const toolSuccess = lastTool?.result?.success || false;
 
-  // ── 1. CONFIRMACIÓN (delivery_validation o pregunta de confirmación) ──
-  if (stage === "delivery_validation" || (reply.includes("¿") && /\b(confirm|procedo|correcto|está bien)\b/i.test(reply))) {
-    if (!orderCreated) {
-      return [
-        { id: "confirm_yes", title: "✅ Sí, confirmar" },
-        { id: "confirm_no", title: "❌ No, cambiar" },
-      ];
-    }
-  }
-
-  // ── 2. PAGO (después de crear orden, SOLO si no se eligió método aún) ──
-  if (stage === "payment_pending" || orderCreated) {
-    const alreadyHasPayment = session.extractedEntities?.paymentMethod ||
-      /sinpe.*7095|iban.*cr15|comprobante|enviame.*comprobante/i.test(replyLower);
-    if (!alreadyHasPayment) {
-      return [
-        { id: "pay_sinpe", title: "📱 SINPE Móvil" },
-        { id: "pay_transfer", title: "🏦 Transferencia" },
-      ];
-    }
-  }
-
-  // ── 3. VARIANTES REALES de getProductBySku ──
+  // ── PRIORIDAD 1: Botones generados por datos de TOOL ──
+  // Variantes reales de getProductBySku
   if (toolName === "getProductBySku" && toolSuccess && toolData?.variants) {
     const variants = toolData.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
     if (variants.length >= 2) {
@@ -473,90 +483,105 @@ function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProduc
     }
   }
 
-  // ── 4. VARIANTES desde el catálogo pre-cargado ──
-  // Trigger cuando el reply menciona colores/tallas/variantes O estamos en variant_selection.
-  // Va ANTES de productos del catálogo para que variantes tengan prioridad.
-  const mentionsVariants = /(color|talla|disponible en|tenemos en|viene en|variante|cuál te gustaría)/i.test(replyLower);
-  if ((stage === "variant_selection" || mentionsVariants) && catalogProducts?.length > 0) {
-    const selectedProduct = session.extractedEntities?.selectedProduct;
-    if (selectedProduct) {
-      const product = catalogProducts.find(p =>
-        p.name && p.name.toLowerCase().includes(selectedProduct.toLowerCase())
-      );
-      if (product?.variants?.length >= 2) {
-        const available = product.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
-        if (available.length >= 2) {
-          return available.slice(0, 10).map(v => ({
-            id: `variant_${v.id}`,
-            title: v.name.substring(0, 20),
-          }));
-        }
-      }
-    }
-  }
-
-  // ── 5. PRODUCTOS REALES de getProductCatalog ──
-  if (toolName === "getProductCatalog" && toolSuccess && toolData?.products) {
+  // Productos reales de getProductCatalog
+  if (toolName === "getProductCatalog" && toolSuccess && toolData?.products?.length >= 2) {
     const products = toolData.products;
-
-    if (products.length >= 2) {
-      if (products.length <= 10) {
-        return products.map(p => ({
-          id: `product_${p.id}`,
-          title: p.name.substring(0, 20),
-        }));
-      }
-
-      const categoryMap = {};
-      for (const p of products) {
-        const cat = p.category || "Otros";
-        if (!categoryMap[cat]) categoryMap[cat] = [];
-        categoryMap[cat].push(p);
-      }
-
-      const categories = Object.keys(categoryMap);
-      if (categories.length >= 2 && categories.length <= 10) {
-        return categories.slice(0, 10).map(cat => ({
-          id: `cat_${cat.toLowerCase().replace(/\s+/g, "_")}`,
-          title: cat.substring(0, 20),
-        }));
-      }
-
-      return products.slice(0, 10).map(p => ({
+    if (products.length <= 10) {
+      return products.map(p => ({
         id: `product_${p.id}`,
         title: p.name.substring(0, 20),
       }));
     }
+    // Más de 10 → agrupar por categoría
+    const categoryMap = {};
+    for (const p of products) {
+      const cat = p.category || "Otros";
+      if (!categoryMap[cat]) categoryMap[cat] = [];
+      categoryMap[cat].push(p);
+    }
+    const categories = Object.keys(categoryMap);
+    if (categories.length >= 2 && categories.length <= 10) {
+      return categories.slice(0, 10).map(cat => ({
+        id: `cat_${cat.toLowerCase().replace(/\s+/g, "_")}`,
+        title: cat.substring(0, 20),
+      }));
+    }
+    return products.slice(0, 10).map(p => ({
+      id: `product_${p.id}`,
+      title: p.name.substring(0, 20),
+    }));
   }
 
-  // ── 6. GREETING/DISCOVERY — botones principales (solo si no hay producto en contexto) ──
-  if (stage === "greeting" || stage === "discovery") {
-    // Si el reply ya menciona un producto específico o hay toolResult con datos,
-    // NO mostrar los botones genéricos — las secciones anteriores ya habrán
-    // generado botones de variantes o categorías más relevantes.
-    const hasProductContext = toolData?.variants?.length > 0 ||
-      toolData?.products?.length > 0 ||
-      reply.match(/\[PRODUCTO REFERENCIADO:/);
-    
-    if (!hasProductContext) {
-      return [
-        { id: "order_web", title: "Pedir en Web 🌐" },
-        { id: "view_catalog", title: "Ver Catálogo 📋" },
-        { id: "need_help", title: "Ayuda 🙋‍♀️" },
-      ];
+  // ── PRIORIDAD 2: Variantes desde catálogo pre-cargado (si hay producto seleccionado) ──
+  const selectedProduct = session.extractedEntities?.selectedProduct;
+  if (selectedProduct && catalogProducts?.length > 0) {
+    const product = catalogProducts.find(p =>
+      p.name && p.name.toLowerCase().includes(selectedProduct.toLowerCase())
+    );
+    if (product?.variants?.length >= 2) {
+      const available = product.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
+      if (available.length >= 2) {
+        return available.slice(0, 10).map(v => ({
+          id: `variant_${v.id}`,
+          title: v.name.substring(0, 20),
+        }));
+      }
     }
   }
 
-  // ── 7. Pregunta con "?" tipo confirmación (solo en etapas donde tiene sentido) ──
-  if ((stage === "delivery_validation" || stage === "order_confirmation") &&
-      reply.includes("?")) {
-    return [
-      { id: "yes", title: "👍 Sí" },
-      { id: "no", title: "👎 No" },
-    ];
+  // ── PRIORIDAD 3: Botones fijos de la configuración de etapa ──
+  if (uiConfig.buttonMode === "fixed" && uiConfig.fixedButtons.length > 0) {
+    return [...uiConfig.fixedButtons];
+  }
+
+  // ── PRIORIDAD 4: Botones híbridos (fijos si no hay contexto de tool) ──
+  if (uiConfig.buttonMode === "hybrid" && uiConfig.fixedButtons.length > 0) {
+    // Solo mostrar fijos si no hubo datos de tool más relevantes
+    return [...uiConfig.fixedButtons];
   }
 
   return [];
+}
+
+/**
+ * Genera un resumen legible de los datos de una tool para inyectar en el replyText.
+ * Reemplaza la doble llamada a Gemini — ahora el resultado se formatea directamente.
+ */
+function _summarizeToolResult(toolName, data) {
+  if (!data) return null;
+
+  switch (toolName) {
+    case "getProductBySku": {
+      const p = data;
+      let summary = `📦 *${p.name}*\n💰 Precio: ₡${(p.basePrice || 0).toLocaleString()}`;
+      if (p.supplyType === "bajo_pedido") {
+        summary += `\n⏳ Producto bajo pedido (15-20 días hábiles)`;
+      }
+      if (p.variants?.length > 0) {
+        const available = p.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
+        if (available.length > 0) {
+          summary += `\n🎨 Opciones: ${available.map(v => v.name).join(", ")}`;
+        }
+      }
+      return summary;
+    }
+    case "getProductCatalog": {
+      if (data.products?.length > 0) {
+        return `📋 Encontré ${data.products.length} productos. Te los muestro como opciones abajo 👇`;
+      }
+      return null;
+    }
+    case "checkStock": {
+      if (data.available !== undefined) {
+        return data.available > 0
+          ? `✅ Hay ${data.available} unidades disponibles`
+          : `⚠️ Sin stock actualmente`;
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
 }
 
 /**
