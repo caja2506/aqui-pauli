@@ -53,7 +53,7 @@ const RESPONSE_SCHEMA = {
 };
 
 // ⚠️ REGLA INQUEBRANTABLE: NO cambiar este modelo. Definido por el dueño del negocio.
-const GEMINI_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 /**
  * Llamar a Gemini con contexto estructurado

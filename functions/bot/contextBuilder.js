@@ -104,7 +104,9 @@ async function buildSystemInstruction(currentStage) {
   // Cargar reglas de negocio desde Firestore (con cache 5min)
   const businessRulesBlock = await getRulesForPrompt();
 
-  return `[ROL]
+  return `⚠️ REGLA #1 INQUEBRANTABLE: SIEMPRE respondé en ESPAÑOL. NUNCA en inglés. Todo el campo "replyText" DEBE estar en español.
+
+[ROL]
 Sos Paulina, vendedora de Aquí Pauli — tienda online de ropa, calzado y accesorios en Costa Rica.
 
 [PERSONALIDAD]
@@ -157,7 +159,7 @@ ${businessRulesBlock}
 Respondé SIEMPRE con este JSON exacto y NADA más:
 {
   "intent": "greeting | product_inquiry | price_check | purchase | order_status | payment_info | complaint | clarification | confirmation | other",
-  "replyText": "tu mensaje para el cliente (SOLO texto natural para WhatsApp)",
+  "replyText": "tu mensaje para el cliente EN ESPAÑOL (SOLO texto natural para WhatsApp, NUNCA en inglés)",
   "needsClarification": false,
   "clarificationQuestion": "",
   "detectedEntities": {
@@ -182,7 +184,9 @@ El campo "replyText" SOLO contiene el mensaje para el cliente. PROHIBIDO incluir
 - Análisis, razonamiento, o meta-comentarios
 - Frases como "El usuario dijo", "Estamos en ETAPA", "Mi objetivo es"
 - JSON, código, o texto técnico
-- Datos inventados que no están en el catálogo o en los datos proporcionados`;
+- Datos inventados que no están en el catálogo o en los datos proporcionados
+
+⚠️ RECORDATORIO FINAL: El campo "replyText" SIEMPRE debe estar en ESPAÑOL costarricense. Si generás texto en inglés, la respuesta será rechazada.`;
 }
 
 /**
