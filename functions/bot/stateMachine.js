@@ -16,7 +16,6 @@ const STAGES = {
       fixedButtons: [
         { id: "order_web", title: "Pedir en Web 🌐" },
         { id: "view_catalog", title: "Ver Catálogo 📋" },
-        { id: "need_help", title: "Ayuda 🙋‍♀️" },
       ],
       catalogEnabled: true,
       allowFreeText: true,
@@ -40,7 +39,6 @@ const STAGES = {
       fixedButtons: [
         { id: "order_web", title: "Pedir en Web 🌐" },
         { id: "view_catalog", title: "Ver Catálogo 📋" },
-        { id: "need_help", title: "Ayuda 🙋‍♀️" },
       ],
       catalogEnabled: true,
       allowFreeText: true,

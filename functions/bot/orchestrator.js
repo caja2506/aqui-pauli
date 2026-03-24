@@ -491,14 +491,22 @@ function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProduc
   const toolSuccess = lastTool?.result?.success || false;
 
   // ── PRIORIDAD 0: Botones de ACCIÓN según estado del flujo de compra ──
-  // Si ya tenemos producto + variante + dirección → el cliente está listo para confirmar
   const entities = session.extractedEntities || {};
   const hasProduct = !!entities.selectedProduct;
   const hasVariant = !!entities.selectedVariant;
   const hasAddress = !!entities.address;
-  const currentIntent = session.lastIntent || "";
+  const hasOrderNumber = !!entities.orderNumber;
 
-  // Si estamos en flujo de compra avanzado (dirección confirmada o intent de compra)
+  // Si ya se creó un pedido → botones post-orden
+  if (orderCreated || hasOrderNumber) {
+    return [
+      { id: "action_send_proof", title: "Enviar comprobante 📸" },
+      { id: "action_order_status", title: "Ver mi pedido 📋" },
+      { id: "action_new_order", title: "Hacer otro pedido 🛍️" },
+    ];
+  }
+
+  // Si tenemos producto + variante + dirección → listo para confirmar
   if (hasProduct && hasVariant && hasAddress) {
     return [
       { id: "action_confirm_order", title: "Confirmar Pedido ✅" },
@@ -508,7 +516,7 @@ function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProduc
   }
 
   // Si tenemos producto y variante pero falta dirección → pedir dirección o confirmar
-  if (hasProduct && hasVariant && !hasAddress && ["purchase", "confirmation"].includes(currentIntent)) {
+  if (hasProduct && hasVariant && !hasAddress) {
     return [
       { id: "action_confirm", title: "Confirmar ✅" },
       { id: "action_change_product", title: "Cambiar producto" },
