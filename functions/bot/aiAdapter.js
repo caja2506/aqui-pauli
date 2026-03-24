@@ -101,7 +101,7 @@ async function _callWithSchema(genAI, systemInstruction, contextPrompt, userMess
     systemInstruction,
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 800,
+      maxOutputTokens: 3500,
       responseMimeType: "application/json",
       responseSchema: RESPONSE_SCHEMA,
     },
@@ -123,7 +123,7 @@ async function _callJsonMode(genAI, systemInstruction, contextPrompt, userMessag
     systemInstruction,
     generationConfig: {
       temperature: 0.4,
-      maxOutputTokens: 800,
+      maxOutputTokens: 3500,
       responseMimeType: "application/json",
     },
   });
@@ -153,7 +153,8 @@ function _parseResponse(text) {
     parsed = JSON.parse(clean);
   } catch {
     console.warn("[AI] JSON inválido:", text.substring(0, 200));
-    return null;
+    // Intento de rescate: extraer replyText del JSON truncado con regex
+    return _rescueFromTruncatedJson(text);
   }
 
   // Normalizar campos
@@ -174,8 +175,71 @@ function _parseResponse(text) {
 }
 
 /**
- * Normalizar entidades extraídas
+ * Rescatar datos de un JSON truncado.
+ * Gemini a veces genera JSON válido pero lo corta antes de cerrarlo.
+ * Extraemos lo que podamos con regex para no perder la respuesta.
  */
+function _rescueFromTruncatedJson(text) {
+  if (!text || text.length < 10) return null;
+
+  // Extraer replyText — el campo más importante
+  const replyMatch = text.match(/"replyText"\s*:\s*"((?:[^"\\]|\\.)*)(?:"|$)/);
+  if (!replyMatch || !replyMatch[1] || replyMatch[1].length < 3) return null;
+
+  const replyText = replyMatch[1]
+    .replace(/\\n/g, "\n")
+    .replace(/\\"/g, '"')
+    .replace(/\\/g, "");
+
+  // Extraer intent
+  const intentMatch = text.match(/"intent"\s*:\s*"([^"]+)"/);
+  const intent = intentMatch ? intentMatch[1] : "other";
+
+  // Extraer confidence
+  const confMatch = text.match(/"confidence"\s*:\s*([\d.]+)/);
+  const confidence = confMatch ? parseFloat(confMatch[1]) : 0.7;
+
+  // Extraer toolToCall
+  const toolMatch = text.match(/"toolToCall"\s*:\s*"([^"]+)"/);
+  const toolToCall = toolMatch ? toolMatch[1] : "none";
+
+  // Extraer nextStage
+  const stageMatch = text.match(/"nextStage"\s*:\s*"([^"]+)"/);
+  const nextStage = stageMatch ? stageMatch[1] : "";
+
+  // Extraer shouldAdvanceStage
+  const advanceMatch = text.match(/"shouldAdvanceStage"\s*:\s*(true|false)/);
+  const shouldAdvanceStage = advanceMatch ? advanceMatch[1] === "true" : false;
+
+  // Extraer selectedProduct de detectedEntities
+  const productMatch = text.match(/"selectedProduct"\s*:\s*"([^"]+)"/);
+  const selectedProduct = productMatch ? productMatch[1] : "";
+
+  // Extraer selectedVariant
+  const variantMatch = text.match(/"selectedVariant"\s*:\s*"([^"]+)"/);
+  const selectedVariant = variantMatch ? variantMatch[1] : "";
+
+  console.log(`[AI] JSON rescatado: intent=${intent}, replyText="${replyText.substring(0, 60)}...", confidence=${confidence}`);
+
+  return {
+    intent,
+    replyText,
+    needsClarification: false,
+    clarificationQuestion: "",
+    detectedEntities: _normalizeEntities({
+      selectedProduct,
+      selectedVariant,
+    }),
+    toolToCall,
+    toolPayload: {},
+    shouldAdvanceStage,
+    nextStage,
+    confidence,
+    hallucinationRisk: "medium",
+    internalReasoningSummary: "Rescued from truncated JSON",
+    _isRescued: true,
+  };
+}
 function _normalizeEntities(entities) {
   if (!entities || typeof entities !== "object") {
     return {

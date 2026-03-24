@@ -146,19 +146,47 @@ async function getProductBySku({ productName, productId } = {}) {
       }
     }
 
-    // Buscar por nombre si no hay ID
+    // Buscar por nombre si no hay ID — búsqueda fuzzy
     if (!product && productName) {
       const snap = await db.collection("products")
         .where("active", "==", true)
         .get();
 
+      // Normalizar el nombre buscado: quitar info de variante (después de " - ")
+      const searchName = productName.toLowerCase().split(" - ")[0].trim();
+      const searchWords = searchName.split(/\s+/).filter(w => w.length > 2);
+
+      let bestMatch = null;
+      let bestScore = 0;
+
       for (const doc of snap.docs) {
         const p = doc.data();
-        if (p.name && p.name.toLowerCase().includes(productName.toLowerCase())) {
+        if (!p.name) continue;
+        const pName = p.name.toLowerCase();
+
+        // Match exacto por inclusión
+        if (pName.includes(searchName) || searchName.includes(pName)) {
           product = p;
           productDoc = doc;
           break;
         }
+
+        // Fuzzy: contar palabras coincidentes
+        const pWords = pName.split(/\s+/);
+        const matchCount = searchWords.filter(w => pWords.some(pw => pw.includes(w) || w.includes(pw))).length;
+        const score = matchCount / Math.max(searchWords.length, 1);
+
+        if (score > bestScore && score >= 0.5) {
+          bestScore = score;
+          bestMatch = { p, doc };
+        }
+      }
+
+      // Usar el mejor match fuzzy si no hubo match exacto
+      if (!product && bestMatch) {
+        product = bestMatch.p;
+        productDoc = bestMatch.doc;
+        console.log(`[ToolExecutor] getProductBySku fuzzy match: "${productName}" → "${product.name}" (score: ${bestScore.toFixed(2)})`);
       }
     }
 

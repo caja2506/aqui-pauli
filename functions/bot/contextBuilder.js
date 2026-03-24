@@ -18,6 +18,7 @@ const {
  * @param {Object} contact — datos CRM del contacto
  * @param {string} catalogData — catálogo relevante (ya filtrado)
  * @param {string} orderData — info de órdenes del cliente
+ * @param {Array} chatHistory — últimos 15 mensajes de la conversación
  * @returns {Object} — { systemInstruction, contextPrompt }
  */
 function buildConversationContext(
@@ -26,6 +27,7 @@ function buildConversationContext(
   contact,
   catalogData,
   orderData,
+  chatHistory,
 ) {
   const stage = session.currentStage || "greeting";
   const entities = session.extractedEntities || {};
@@ -50,15 +52,24 @@ function buildConversationContext(
   contextBlocks.push(buildContactBlock(contact));
 
   // Bloque 4: Hechos de negocio (catálogo, órdenes)
-  if (catalogData && catalogData !== "No hay productos disponibles.") {
+  // En greeting/discovery no inyectar catálogo completo para evitar que Gemini lo liste como texto
+  const skipFullCatalog = stage === "greeting" || (stage === "discovery" && !entities.selectedProduct);
+  if (catalogData && catalogData !== "No hay productos disponibles." && !skipFullCatalog) {
     contextBlocks.push(`[CATÁLOGO DISPONIBLE]\n${catalogData}`);
   }
   if (orderData) {
     contextBlocks.push(`[ÓRDENES DEL CLIENTE]\n${orderData}`);
   }
 
-  // Bloque 5: Último intercambio (para continuidad inmediata)
-  if (session.lastBotReply) {
+  // Bloque 5: Historial de conversación (últimos 15 mensajes)
+  if (chatHistory && chatHistory.length > 0) {
+    const historyLines = chatHistory.map(m => {
+      const who = m.direction === "inbound" ? "👤 Cliente" : "🤖 Bot";
+      return `${who}: ${m.content}`;
+    });
+    contextBlocks.push(`[HISTORIAL DE CONVERSACIÓN (Últimos ${chatHistory.length} mensajes)]\n${historyLines.join("\n")}`);
+  } else if (session.lastBotReply) {
+    // Fallback si no hay historial cargado
     contextBlocks.push(`[ÚLTIMO MENSAJE DEL BOT]\n${session.lastBotReply}`);
   }
 
@@ -68,7 +79,16 @@ function buildConversationContext(
     contextBlocks.push(buildToolsBlock(tools));
   }
 
-  // Bloque 7: Instrucciones de etapa
+  // Bloque 7: Preguntas recientes (anti-repetición)
+  if (session.recentQuestions && session.recentQuestions.length > 0) {
+    const questionLines = session.recentQuestions.map((q, i) => {
+      const answered = q.answered ? `(ya respondida: ${q.answer})` : "(pendiente)";
+      return `${i + 1}. "${q.question}" ${answered}`;
+    });
+    contextBlocks.push(`[PREGUNTAS RECIENTES — NO REPETIR]\n${questionLines.join("\n")}\nIMPORTANTE: NO repitas estas preguntas. Si ya fueron respondidas, usá la info. Si están pendientes, reformulá de otra manera.`);
+  }
+
+  // Bloque 8: Instrucciones de etapa
   contextBlocks.push(`[INSTRUCCIÓN DE ETAPA ACTUAL]\n${getStagePrompt(stage)}`);
 
   const contextPrompt = contextBlocks.join("\n\n");
@@ -108,11 +128,27 @@ ${getStagesForPrompt()}
 - Envío estándar: el costo de envío lo calcula el sistema automáticamente al crear la orden.
 - Si un producto es "bajo_pedido": anticipo del 20% del subtotal, entrega en 15-20 días hábiles. El sistema calcula el monto de anticipo y saldo automáticamente.
 
+[REGLA DE CATÁLOGO — MUY IMPORTANTE]
+- NUNCA listes productos como texto plano en tu respuesta (ej: "Opción 1: Producto X ₡5,000").
+- En su lugar, invitá al cliente a explorar el catálogo. El sistema automáticamente agrega un botón de "Ver Catálogo 📋" para el cliente.
+- SOLO mencioná un producto específico si el cliente YA preguntó por él o si encontrás uno relevante con una tool.
+- Está PROHIBIDO enumerar productos con precios en el texto del mensaje.
+
+[ANTI-ALUCINACIÓN — REGLAS ESTRICTAS]
+- SOLO podés mencionar productos que aparecen en [CATÁLOGO DISPONIBLE] o en el resultado de getProductCatalog/getProductBySku.
+- NUNCA inventes categorías, subcategorías, líneas de producto, colecciones ni nombres de producto.
+- Si el cliente pregunta por algo que NO está en el catálogo, respondé: "No tenemos ese producto en este momento, pero te puedo mostrar lo que sí tenemos."
+- Si no tenés datos del catálogo todavía, usá getProductCatalog primero ANTES de mencionar cualquier producto.
+- En "internalReasoningSummary" SIEMPRE verificá: "¿Los productos/categorías que menciono están en los datos reales?"
+
 [REGLAS DE FLUJO]
 - Si el cliente dice "sí"/ "ok"/ "listo"/ "correcto"/ "Me parece bien"/ "Yes"/"dale"/"va"/"perfecto": es o cualquier frase afirmativa CONFIRMACIÓN de lo último que preguntaste. NO resetees.
 - Si el cliente cambia de tema: respondé brevemente y retomá el flujo de venta.
 - SIEMPRE avanzá a la siguiente etapa cuando tengas los datos necesarios.
 - Si ya tenés datos suficientes, SALTATE etapas intermedias.
+- Si el cliente ya respondió algo (lo ves en DATOS RECOPILADOS), NO lo pidas de nuevo. NUNCA repitas una pregunta ya respondida.
+- Si la respuesta del cliente no es clara, reformulá la pregunta de forma diferente en vez de repetir la misma.
+- NOTA: Los botones interactivos los genera el sistema automáticamente. NO necesitás sugerirlos.
 
 [FORMATO DE SALIDA]
 Respondé SIEMPRE con este JSON exacto y NADA más:
@@ -135,7 +171,7 @@ Respondé SIEMPRE con este JSON exacto y NADA más:
   "nextStage": "",
   "confidence": 0.0,
   "hallucinationRisk": "low",
-  "internalReasoningSummary": "una línea sobre tu razonamiento"
+  "internalReasoningSummary": "Verifico: los productos que menciono están en el catálogo? [razonamiento]"
 }
 
 [PROHIBICIONES EN replyText]

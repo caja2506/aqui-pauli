@@ -88,7 +88,23 @@ function validateResponse(aiResponse, session, catalogProducts) {
     }
   }
 
-  // 7. Sanitizar contexto interno filtrado
+  // 7. Detectar preguntas repetidas
+  if (session.recentQuestions && session.recentQuestions.length > 0) {
+    const replyLower = (corrected.replyText || "").toLowerCase();
+    for (const q of session.recentQuestions) {
+      if (q.answered && _isSimilarQuestion(replyLower, q.question)) {
+        issues.push(`Pregunta repetida detectada: "${q.question}" (ya respondida: ${q.answer})`);
+        // Reemplazar con avance: usar la info ya conocida
+        corrected.replyText = corrected.replyText.replace(
+          /\?[^?]*$/,
+          `. Ya tengo esa info: ${q.answer}. ¿Algo más que necesités? 😊`
+        );
+        break;
+      }
+    }
+  }
+
+  // 8. Sanitizar contexto interno filtrado
   corrected.replyText = sanitizeForUser(corrected.replyText);
 
   return {
@@ -126,6 +142,40 @@ function _isPriceValid(price, catalogPrices) {
   }
 
   return false;
+}
+
+/**
+ * Detecta si una respuesta contiene una pregunta similar a una ya hecha.
+ * Usa solapamiento de palabras clave (sin stop words).
+ */
+function _isSimilarQuestion(replyLower, previousQuestion) {
+  if (!previousQuestion) return false;
+
+  const stopWords = new Set([
+    "el", "la", "los", "las", "un", "una", "de", "del", "en", "con",
+    "por", "para", "que", "qué", "te", "me", "tu", "su", "es", "y",
+    "o", "a", "al", "lo", "le", "se", "no", "sí", "si", "más",
+    "podés", "podrias", "decir", "dar", "favor", "muy", "bien",
+    "hola", "gracias", "ok", "😊", "🙏", "¿", "?",
+  ]);
+
+  const toKeywords = (text) => {
+    return text.toLowerCase()
+      .replace(/[^\w\sáéíóúñü]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !stopWords.has(w));
+  };
+
+  const replyKeywords = toKeywords(replyLower);
+  const questionKeywords = toKeywords(previousQuestion);
+
+  if (questionKeywords.length === 0) return false;
+
+  // Contar cuántas keywords del question original aparecen en el reply
+  const matches = questionKeywords.filter(kw => replyKeywords.includes(kw));
+  const overlap = matches.length / questionKeywords.length;
+
+  return overlap >= 0.6; // 60% de overlap = probablemente misma pregunta
 }
 
 /**
@@ -197,8 +247,8 @@ function sanitizeForUser(text) {
  */
 function _getSafeFallback(stage) {
   const fallbacks = {
-    greeting: "¡Hola! 😊 Soy Pauli de Aquí Pauli. ¿En qué te puedo ayudar?",
-    discovery: "¿Qué tipo de producto estás buscando? Tenemos ropa, calzado y accesorios 🛍️",
+    greeting: "¡Hola! 😊 Soy Pauli de Aquí Pauli. Podés explorar nuestro catálogo con el botón de abajo o decirme qué buscás 🛍️",
+    discovery: "¿Buscás algo en particular? Podés ver todo en nuestro catálogo o decirme qué tipo de producto te interesa 😊",
     product_selection: "¿Me podés decir cuál producto te interesa para darte más detalles? 😊",
     variant_selection: "¿Qué talla o color preferís? 😊",
     address_capture: "Para el envío, ¿me podés dar tu dirección? (provincia, cantón, distrito y señas) 📍",

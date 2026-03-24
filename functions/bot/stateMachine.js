@@ -6,17 +6,17 @@
 const STAGES = {
   greeting: {
     label: "Saludo",
-    description: "Primer contacto, saludar y mostrar productos relevantes",
-    allowedTools: ["getProductCatalog", "getCustomerProfile"],
+    description: "Primer contacto, saludar e invitar a ver el catálogo",
+    allowedTools: ["getCustomerProfile"],
     requiredEntities: [],
-    prompt: "El cliente acaba de saludar. Presentate como Pauli, saludá con calidez y mostrá 3-4 productos relevantes con precios del catálogo. Preguntá qué le interesa.",
+    prompt: "El cliente acaba de saludar. Presentate como Pauli, saludá con calidez. NO listes productos en texto. Invitá al cliente a explorar nuestro catálogo usando el botón que el sistema le va a mostrar. Preguntá si busca algo en especial.",
   },
   discovery: {
     label: "Exploración",
     description: "Cliente está explorando, preguntando por categorías o productos",
     allowedTools: ["getProductCatalog", "getProductBySku", "checkStock", "getCustomerProfile"],
     requiredEntities: [],
-    prompt: "El cliente está explorando productos. Mostrá opciones relevantes con precios reales del catálogo. Preguntá qué le interesa para guiar la venta.",
+    prompt: "El cliente está explorando productos. Si pregunta por algo específico, usá getProductBySku o getProductCatalog para buscar. Si no tiene algo específico, invitalo a ver el catálogo con el botón. NO listes productos como texto plano.",
   },
   product_selection: {
     label: "Selección de producto",
@@ -86,10 +86,10 @@ const STAGES = {
 // Transiciones válidas: desde → [posibles destinos]
 const TRANSITIONS = {
   greeting: ["discovery", "product_selection", "variant_selection", "address_capture", "delivery_validation", "handoff_human"],
-  discovery: ["product_selection", "variant_selection", "address_capture", "handoff_human", "greeting"],
+  discovery: ["product_selection", "variant_selection", "address_capture", "payment_pending", "handoff_human", "greeting"],
   product_selection: ["variant_selection", "address_capture", "delivery_validation", "discovery", "handoff_human"],
   variant_selection: ["address_capture", "delivery_validation", "product_selection", "handoff_human"],
-  address_capture: ["delivery_validation", "variant_selection", "handoff_human"],
+  address_capture: ["delivery_validation", "payment_pending", "variant_selection", "handoff_human"],
   delivery_validation: ["payment_pending", "address_capture", "handoff_human"],
   payment_pending: ["payment_verification", "order_confirmation", "handoff_human"],
   payment_verification: ["order_confirmation", "payment_pending", "handoff_human"],

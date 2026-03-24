@@ -9,7 +9,7 @@ const { getStorage } = require("firebase-admin/storage");
 const fetch = require("node-fetch");
 const { extractPaymentData } = require("../ocr/paymentReader");
 const { verifyWithGmail } = require("../gmail/verifier");
-const { sendPaymentReceived } = require("./sender");
+const { sendPaymentReceived, sendInteractiveButtons, sendInteractiveList, sendQuickConfirmation } = require("./sender");
 const { transcribeAudio } = require("./audioTranscriber");
 const { processWhatsAppOrder } = require("./processWhatsAppOrder");
 
@@ -68,6 +68,9 @@ const whatsappWebhook = onRequest(
           } else if (message.type === "text") {
             // Podría ser un número de orden o mensaje de seguimiento
             await processTextMessage(message, phoneClean);
+          } else if (message.type === "interactive") {
+            // Respuesta de botón interactivo o lista
+            await processInteractiveReply(message, phoneClean);
           }
         }
       } catch (error) {
@@ -198,8 +201,59 @@ async function processPaymentProof(message, phone) {
  * Procesa mensajes de texto (podría ser número de orden)
  */
 async function processTextMessage(message, phone) {
-  const text = (message.text?.body || "").trim();
+  let text = (message.text?.body || "").trim();
   const textUpper = text.toUpperCase();
+
+  // ── Detectar producto referenciado del catálogo de WhatsApp ──
+  // Cuando el cliente toca un producto del catálogo y escribe un mensaje,
+  // WhatsApp incluye context.referred_product con el ID del producto
+  const referredProduct = message.context?.referred_product;
+  if (referredProduct) {
+    const retailerId = referredProduct.catalog_id
+      ? referredProduct.catalog_id
+      : null;
+    const productId = referredProduct.product_retailer_id || null;
+    console.log(`📦 Producto referenciado: retailerId=${productId}, catalogId=${retailerId}`);
+
+    if (productId) {
+      try {
+        // Resolver el ID compuesto (productId_variantId)
+        let realProductId = productId;
+        let variantId = null;
+        let productDoc = await db.collection("products").doc(productId).get();
+
+        if (!productDoc.exists) {
+          const underscoreIdx = productId.indexOf("_");
+          if (underscoreIdx > 0) {
+            realProductId = productId.substring(0, underscoreIdx);
+            variantId = productId.substring(underscoreIdx + 1);
+            productDoc = await db.collection("products").doc(realProductId).get();
+          }
+        }
+
+        if (productDoc.exists) {
+          const pData = productDoc.data();
+          let productInfo = `[PRODUCTO REFERENCIADO: ${pData.name} — ₡${(pData.basePrice || 0).toLocaleString("es-CR")}]`;
+
+          // Buscar variante si aplica
+          if (variantId) {
+            const vDoc = await db.collection("products").doc(realProductId)
+              .collection("variants").doc(variantId).get();
+            if (vDoc.exists) {
+              const vData = vDoc.data();
+              productInfo = `[PRODUCTO REFERENCIADO: ${pData.name} - ${vData.name || variantId} — ₡${(vData.price || pData.basePrice || 0).toLocaleString("es-CR")}, stock: ${vData.stock || 0}, tipo: ${pData.supplyType || "normal"}]`;
+            }
+          }
+
+          // Enriquecer el texto con el contexto del producto
+          text = `${productInfo} ${text}`;
+          console.log(`📦 Texto enriquecido: "${text.substring(0, 150)}..."`);
+        }
+      } catch (err) {
+        console.warn(`⚠️ Error resolviendo producto referenciado:`, err.message);
+      }
+    }
+  }
 
   // Si parece un número de orden (AP-XXXXXX-XXXX)
   if (textUpper.startsWith("AP-")) {
@@ -274,8 +328,24 @@ async function processTextMessage(message, phone) {
     console.log("AI result:", aiResult.type, "intent:", aiResult.intent);
 
     if (aiResult.reply) {
-      // Enviar respuesta por WhatsApp
-      await sendWhatsAppMessage(phone, aiResult.reply);
+      // Decidir si enviar con botones o como texto plano
+      if (aiResult.buttons && aiResult.buttons.length > 0 && aiResult.buttons.length <= 3) {
+        // Enviar con botones interactivos
+        await sendInteractiveButtons(phone, aiResult.reply, aiResult.buttons, null, "Aquí Pauli");
+      } else if (aiResult.buttons && aiResult.buttons.length > 3) {
+        // Enviar como lista interactiva
+        await sendInteractiveList(phone, aiResult.reply, "Ver opciones", [{
+          title: "Opciones",
+          rows: aiResult.buttons.slice(0, 10).map(b => ({
+            id: b.id || b.title,
+            title: b.title,
+            description: b.description || "",
+          })),
+        }], null, "Aquí Pauli");
+      } else {
+        // Texto plano normal (con delay natural integrado en sendWhatsAppMessage)
+        await sendWhatsAppMessage(phone, aiResult.reply);
+      }
 
       // Guardar respuesta del bot
       await db.collection("crm_contacts").doc(contactId).collection("messages").add({
@@ -284,6 +354,7 @@ async function processTextMessage(message, phone) {
         channel: "whatsapp",
         autoReply: true,
         intent: aiResult.intent,
+        hasButtons: !!(aiResult.buttons && aiResult.buttons.length > 0),
         createdAt: new Date().toISOString(),
       });
     }
@@ -298,6 +369,114 @@ async function processTextMessage(message, phone) {
   } catch (aiErr) {
     console.error("Error en IA:", aiErr);
   }
+}
+
+/**
+ * Procesa respuestas de botones interactivos y listas de WhatsApp
+ */
+async function processInteractiveReply(message, phone) {
+  const interactive = message.interactive;
+  if (!interactive) return;
+
+  let replyText = "";
+  let replyId = "";
+
+  if (interactive.type === "button_reply") {
+    // Respuesta de botón (máx 3 opciones)
+    replyId = interactive.button_reply?.id || "";
+    replyText = interactive.button_reply?.title || replyId;
+    console.log(`🔘 Botón presionado: id="${replyId}", title="${replyText}"`);
+  } else if (interactive.type === "list_reply") {
+    // Respuesta de lista desplegable
+    replyId = interactive.list_reply?.id || "";
+    replyText = interactive.list_reply?.title || replyId;
+    console.log(`📋 Lista seleccionada: id="${replyId}", title="${replyText}"`);
+  }
+
+  if (!replyText) return;
+
+  // ── Manejo especial: botón "Pedir en Web" ──
+  if (replyId === "order_web") {
+    const webMsg =
+      "🌐 *¡Pedí desde nuestra tienda online!*\n\n" +
+      "Podés ver todos los productos, elegir tallas y colores, y hacer tu pedido directamente 👇\n\n" +
+      "🛒 https://aqui-pauli.web.app/tienda\n\n" +
+      "Si necesitás ayuda con algo, escribime por acá 😊";
+
+    await sendWhatsAppMessage(phone, webMsg);
+
+    // Guardar en historial del CRM
+    const phoneVariants = getPhoneVariants(phone);
+    for (const pv of phoneVariants) {
+      const snap = await db.collection("crm_contacts").where("phone", "==", pv).limit(1).get();
+      if (!snap.empty) {
+        await snap.docs[0].ref.collection("messages").add({
+          content: "🔘 [Botón: Pedir en Web]",
+          direction: "inbound",
+          channel: "whatsapp",
+          phone,
+          autoReply: false,
+          createdAt: new Date().toISOString(),
+        });
+        await snap.docs[0].ref.collection("messages").add({
+          content: webMsg,
+          direction: "outbound",
+          channel: "whatsapp",
+          autoReply: true,
+          createdAt: new Date().toISOString(),
+        });
+        break;
+      }
+    }
+    return;
+  }
+
+  // ── Manejo especial: botón "Ver Catálogo" ──
+  if (replyId === "view_catalog") {
+    const catalogMsg =
+      "🛍️ *¡Explorá nuestro catálogo!*\n\n" +
+      "Acá podés ver todos nuestros productos con fotos y precios 👇\n\n" +
+      "📋 https://wa.me/c/50670956070\n\n" +
+      "Cuando encontrés algo que te guste, agregalo al carrito desde ahí o escribime el nombre del producto y te ayudo con tallas y disponibilidad 😊";
+
+    await sendWhatsAppMessage(phone, catalogMsg);
+
+    // Guardar en historial del CRM
+    const phoneVariants = getPhoneVariants(phone);
+    for (const pv of phoneVariants) {
+      const snap = await db.collection("crm_contacts").where("phone", "==", pv).limit(1).get();
+      if (!snap.empty) {
+        await snap.docs[0].ref.collection("messages").add({
+          content: "🔘 [Botón: Ver Catálogo]",
+          direction: "inbound",
+          channel: "whatsapp",
+          phone,
+          autoReply: false,
+          createdAt: new Date().toISOString(),
+        });
+        await snap.docs[0].ref.collection("messages").add({
+          content: catalogMsg,
+          direction: "outbound",
+          channel: "whatsapp",
+          autoReply: true,
+          createdAt: new Date().toISOString(),
+        });
+        break;
+      }
+    }
+    return;
+  }
+
+  // Procesar como mensaje de texto normal con metadata extra
+  const virtualMessage = {
+    text: { body: replyText },
+    type: "text",
+    _isInteractiveReply: true,
+    _interactiveId: replyId,
+    _interactiveType: interactive.type,
+  };
+
+  await processTextMessage(virtualMessage, phone);
 }
 
 /**

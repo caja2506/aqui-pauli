@@ -7,7 +7,7 @@ const { defineSecret } = require("firebase-functions/params");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 
 // Capas del bot
-const { getOrCreateSession, updateSession, advanceStage, updateEntities, recordTurn, flagForEscalation } = require("./sessionManager");
+const { getOrCreateSession, updateSession, advanceStage, updateEntities, recordTurn, recordQuestion, markQuestionsAnswered, flagForEscalation } = require("./sessionManager");
 const { buildConversationContext } = require("./contextBuilder");
 const { callGemini, getGenAIInstance, GEMINI_MODEL } = require("./aiAdapter");
 const { executeTool, getProductCatalog } = require("./toolExecutor");
@@ -17,6 +17,7 @@ const { shouldUpdateSummary, generateUpdatedSummary, saveSummary } = require("./
 const { logTurn, logError } = require("./botLogger");
 
 // Importaciones del proyecto existente
+const { db } = require("../utils");
 const { getOrderContext, getOrdersByPhone, getOrdersByCustomerInfo } = require("./legacyHelpers");
 
 /**
@@ -86,11 +87,12 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
     // ================================================
     // 2. OBTENER DATOS DE NEGOCIO (en paralelo)
     // ================================================
-    const [catalogResult, orderByNumber, ordersByPhone, ordersByName] = await Promise.all([
+    const [catalogResult, orderByNumber, ordersByPhone, ordersByName, chatHistory] = await Promise.all([
       getProductCatalog({ limit: 15 }),
       getOrderContext(messageText),
       getOrdersByPhone(phone),
       getOrdersByCustomerInfo(contact),
+      _loadChatHistory(contactId, 15),
     ]);
 
     const catalogData = catalogResult.success ? catalogResult.data.formatted : "Catálogo no disponible.";
@@ -106,6 +108,7 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
       contact,
       catalogData,
       orderData,
+      chatHistory,
     );
 
     // ================================================
@@ -152,6 +155,23 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
     // ================================================
     let toolResult = null;
     let orderCreated = null;
+
+    // Auto-corregir: si Gemini detecta product_inquiry pero no llama tool,
+    // elegir la tool correcta según contexto
+    if (aiResponse.intent === "product_inquiry" && (!aiResponse.toolToCall || aiResponse.toolToCall === "none")) {
+      const selectedProduct = aiResponse.detectedEntities?.selectedProduct || session.extractedEntities?.selectedProduct;
+      if (selectedProduct) {
+        // Ya hay producto seleccionado → necesitamos variantes
+        console.log(`[Orchestrator] Auto-corrigiendo: product_inquiry con producto "${selectedProduct}" → forzando getProductBySku`);
+        aiResponse.toolToCall = "getProductBySku";
+        aiResponse.toolPayload = { productName: selectedProduct };
+      } else {
+        // No hay producto → mostrar catálogo
+        console.log("[Orchestrator] Auto-corrigiendo: product_inquiry sin tool → forzando getProductCatalog");
+        aiResponse.toolToCall = "getProductCatalog";
+        aiResponse.toolPayload = aiResponse.toolPayload || {};
+      }
+    }
 
     if (aiResponse.toolToCall && aiResponse.toolToCall !== "none") {
       // Enriquecer payload de createOrderDraft con datos de la sesión
@@ -228,11 +248,53 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
     reply = sanitizeForUser(reply);
 
     // ================================================
+    // 9b. DETERMINAR BOTONES INTERACTIVOS
+    // ================================================
+    // Botones se generan del DATO REAL (catálogo/herramienta), nunca de Gemini.
+    const stageAfter = aiResponse.nextStage || session.currentStage;
+    const lastTool = toolsCalled[toolsCalled.length - 1] || null;
+    let buttons = _autoGenerateButtons(stageAfter, reply, session, orderCreated, catalogProducts, lastTool);
+
+    // Validar límites de WhatsApp para botones
+    if (buttons.length > 0) {
+      buttons = buttons.map(b => ({
+        id: (b.id || b.title || "btn").substring(0, 256),
+        title: (b.title || "Opción").substring(0, 20),
+        ...(b.description ? { description: b.description.substring(0, 72) } : {}),
+      }));
+      console.log(`[Orchestrator] Enviando ${buttons.length} botones:`, buttons.map(b => b.title).join(", "));
+    }
+
+    // ================================================
     // 10. ACTUALIZAR SESIÓN
     // ================================================
-    // Actualizar entidades detectadas
+    // Marcar preguntas previas como respondidas si se detectaron entidades
     if (aiResponse.detectedEntities) {
+      await markQuestionsAnswered(session.id, aiResponse.detectedEntities);
       await updateEntities(session.id, aiResponse.detectedEntities);
+    }
+
+    // Registrar pregunta del bot (si la respuesta contiene "?")
+    if (reply.includes("?")) {
+      // Detectar qué entidad se está pidiendo
+      const entityMap = {
+        talla: "selectedVariant", color: "selectedVariant",
+        dirección: "address", provincia: "address", cantón: "address",
+        nombre: "customerName", pago: "paymentMethod",
+        cantidad: "quantity", cuántos: "quantity",
+      };
+      const replyLower = reply.toLowerCase();
+      let entityAsked = "";
+      for (const [keyword, entity] of Object.entries(entityMap)) {
+        if (replyLower.includes(keyword)) {
+          entityAsked = entity;
+          break;
+        }
+      }
+      // Extraer solo la pregunta (después del último salto de línea que contenga "?")
+      const questionMatch = reply.match(/[^\n]*\?[^\n]*/g);
+      const questionText = questionMatch ? questionMatch[questionMatch.length - 1].trim() : reply.substring(0, 100);
+      await recordQuestion(session.id, questionText, entityAsked);
     }
 
     // Avanzar etapa si corresponde
@@ -282,6 +344,7 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
     return {
       type: needsHuman ? "escalate" : "auto_reply",
       reply,
+      buttons,
       intent: aiResponse.intent,
       confidence: aiResponse.confidence,
       needsHumanReview: needsHuman,
@@ -328,6 +391,172 @@ async function _logAndRecord(session, userInput, finalReply, aiResponse, toolsCa
     errors,
     guardrailIssues,
   });
+}
+
+/**
+ * Cargar los últimos N mensajes del contacto para dar contexto a Gemini.
+ */
+async function _loadChatHistory(contactId, limit = 15) {
+  if (!contactId) return [];
+
+  try {
+    const snap = await db.collection("crm_contacts").doc(contactId)
+      .collection("messages")
+      .orderBy("createdAt", "desc")
+      .limit(limit)
+      .get();
+
+    if (snap.empty) return [];
+
+    return snap.docs.map(doc => {
+      const d = doc.data();
+      return {
+        direction: d.direction || "inbound",
+        content: (d.content || "").substring(0, 300),
+        createdAt: d.createdAt || "",
+        intent: d.intent || "",
+      };
+    }).reverse(); // Más antiguo primero
+  } catch (err) {
+    console.warn("[Orchestrator] Error cargando historial:", err.message);
+    return [];
+  }
+}
+
+/**
+ * Auto-generar botones interactivos desde DATOS REALES.
+ * Los botones vienen del catálogo, tools, o etapa — NUNCA de Gemini.
+ *
+ * @param {string} stage — etapa actual/siguiente
+ * @param {string} reply — texto de respuesta (para detección de confirmaciones)
+ * @param {Object} session — sesión actual
+ * @param {Object|null} orderCreated — orden creada (si aplica)
+ * @param {Array} catalogProducts — productos del catálogo pre-cargado
+ * @param {Object|null} lastTool — { name, payload, result } de la última tool ejecutada
+ */
+function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProducts, lastTool) {
+  const replyLower = (reply || "").toLowerCase();
+  const toolName = lastTool?.name || "";
+  const toolData = lastTool?.result?.data || null;
+  const toolSuccess = lastTool?.result?.success || false;
+
+  // ── 1. CONFIRMACIÓN (delivery_validation o pregunta de confirmación) ──
+  if (stage === "delivery_validation" || (reply.includes("¿") && /\b(confirm|procedo|correcto|está bien)\b/i.test(reply))) {
+    if (!orderCreated) {
+      return [
+        { id: "confirm_yes", title: "✅ Sí, confirmar" },
+        { id: "confirm_no", title: "❌ No, cambiar" },
+      ];
+    }
+  }
+
+  // ── 2. PAGO (después de crear orden, SOLO si no se eligió método aún) ──
+  if (stage === "payment_pending" || orderCreated) {
+    const alreadyHasPayment = session.extractedEntities?.paymentMethod ||
+      /sinpe.*7095|iban.*cr15|comprobante|enviame.*comprobante/i.test(replyLower);
+    if (!alreadyHasPayment) {
+      return [
+        { id: "pay_sinpe", title: "📱 SINPE Móvil" },
+        { id: "pay_transfer", title: "🏦 Transferencia" },
+      ];
+    }
+  }
+
+  // ── 3. VARIANTES REALES de getProductBySku ──
+  if (toolName === "getProductBySku" && toolSuccess && toolData?.variants) {
+    const variants = toolData.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
+    if (variants.length >= 2) {
+      return variants.slice(0, 10).map(v => ({
+        id: `variant_${v.id}`,
+        title: v.name.substring(0, 20),
+      }));
+    }
+  }
+
+  // ── 4. VARIANTES desde el catálogo pre-cargado ──
+  // Trigger cuando el reply menciona colores/tallas/variantes O estamos en variant_selection.
+  // Va ANTES de productos del catálogo para que variantes tengan prioridad.
+  const mentionsVariants = /(color|talla|disponible en|tenemos en|viene en|variante|cuál te gustaría)/i.test(replyLower);
+  if ((stage === "variant_selection" || mentionsVariants) && catalogProducts?.length > 0) {
+    const selectedProduct = session.extractedEntities?.selectedProduct;
+    if (selectedProduct) {
+      const product = catalogProducts.find(p =>
+        p.name && p.name.toLowerCase().includes(selectedProduct.toLowerCase())
+      );
+      if (product?.variants?.length >= 2) {
+        const available = product.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
+        if (available.length >= 2) {
+          return available.slice(0, 10).map(v => ({
+            id: `variant_${v.id}`,
+            title: v.name.substring(0, 20),
+          }));
+        }
+      }
+    }
+  }
+
+  // ── 5. PRODUCTOS REALES de getProductCatalog ──
+  if (toolName === "getProductCatalog" && toolSuccess && toolData?.products) {
+    const products = toolData.products;
+
+    if (products.length >= 2) {
+      if (products.length <= 10) {
+        return products.map(p => ({
+          id: `product_${p.id}`,
+          title: p.name.substring(0, 20),
+        }));
+      }
+
+      const categoryMap = {};
+      for (const p of products) {
+        const cat = p.category || "Otros";
+        if (!categoryMap[cat]) categoryMap[cat] = [];
+        categoryMap[cat].push(p);
+      }
+
+      const categories = Object.keys(categoryMap);
+      if (categories.length >= 2 && categories.length <= 10) {
+        return categories.slice(0, 10).map(cat => ({
+          id: `cat_${cat.toLowerCase().replace(/\s+/g, "_")}`,
+          title: cat.substring(0, 20),
+        }));
+      }
+
+      return products.slice(0, 10).map(p => ({
+        id: `product_${p.id}`,
+        title: p.name.substring(0, 20),
+      }));
+    }
+  }
+
+  // ── 6. GREETING/DISCOVERY — botones principales (solo si no hay producto en contexto) ──
+  if (stage === "greeting" || stage === "discovery") {
+    // Si el reply ya menciona un producto específico o hay toolResult con datos,
+    // NO mostrar los botones genéricos — las secciones anteriores ya habrán
+    // generado botones de variantes o categorías más relevantes.
+    const hasProductContext = toolData?.variants?.length > 0 ||
+      toolData?.products?.length > 0 ||
+      reply.match(/\[PRODUCTO REFERENCIADO:/);
+    
+    if (!hasProductContext) {
+      return [
+        { id: "order_web", title: "Pedir en Web 🌐" },
+        { id: "view_catalog", title: "Ver Catálogo 📋" },
+        { id: "need_help", title: "Ayuda 🙋‍♀️" },
+      ];
+    }
+  }
+
+  // ── 7. Pregunta con "?" tipo confirmación (solo en etapas donde tiene sentido) ──
+  if ((stage === "delivery_validation" || stage === "order_confirmation") &&
+      reply.includes("?")) {
+    return [
+      { id: "yes", title: "👍 Sí" },
+      { id: "no", title: "👎 No" },
+    ];
+  }
+
+  return [];
 }
 
 /**
