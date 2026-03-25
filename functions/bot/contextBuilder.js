@@ -174,10 +174,22 @@ Respondé SIEMPRE con este JSON exacto y NADA más:
   "toolPayload": {},
   "shouldAdvanceStage": false,
   "nextStage": "",
+  "buttonsHint": "none",
   "confidence": 0.0,
   "hallucinationRisk": "low",
   "internalReasoningSummary": "Verifico: los productos que menciono están en el catálogo? [razonamiento]"
 }
+
+[REGLA buttonsHint — MUY IMPORTANTE]
+El campo "buttonsHint" controla qué botones interactivos se muestran al cliente. SIEMPRE usá el valor correcto:
+- "confirm_yes_no" → Cuando preguntás si quiere agregar, confirmar, proceder, encargar, o cualquier pregunta de sí/no.
+- "show_variants" → Cuando mostrás opciones de color, talla, o variantes del producto actual SOLAMENTE. NO incluir variantes de otros productos.
+- "show_products" → Cuando mencionás varios productos de una categoría para que elija (ej: "Tenemos Vomero 5 y NikeCourt Lite 4, ¿cuál te interesa?").
+- "ask_provincia" → Cuando pedís la provincia del cliente.
+- "ask_canton" → Cuando pedís el cantón del cliente.
+- "ask_distrito" → Cuando pedís el distrito del cliente.
+- "free_text" → Cuando pedís cantidad, señas, nombre, o cualquier dato que el cliente debe escribir.
+- "none" → Cuando no se necesitan botones (saludos, info general, etc.)
 
 [PROHIBICIONES EN replyText]
 El campo "replyText" SOLO contiene el mensaje para el cliente. PROHIBIDO incluir:

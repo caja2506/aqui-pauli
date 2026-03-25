@@ -321,11 +321,16 @@ async function saveCustomerAddress({ address, provincia, canton, distrito, seña
   try {
     if (!contactId) return { success: false, error: "contactId requerido" };
 
+    // Leer dirección existente para NO sobreescribir campos con vacíos
+    const snap = await db.collection("crm_contacts").doc(contactId).get();
+    const existing = snap.exists ? (snap.data().lastAddress || {}) : {};
+
+    // Solo actualizar campos que tienen valor real (no vacío)
     const addressData = {
-      provincia: provincia || "",
-      canton: canton || "",
-      distrito: distrito || "",
-      señas: señas || address || "",
+      provincia: provincia || existing.provincia || "",
+      canton: canton || existing.canton || "",
+      distrito: distrito || existing.distrito || "",
+      señas: señas || address || existing.señas || "",
     };
 
     await db.collection("crm_contacts").doc(contactId).update({

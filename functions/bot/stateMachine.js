@@ -92,10 +92,10 @@ const STAGES = {
     description: "Se necesita la dirección de envío",
     allowedTools: ["getCustomerProfile", "saveCustomerAddress"],
     requiredEntities: ["selectedProduct", "address"],
-    prompt: "Ya tenemos producto seleccionado. Si ya hay dirección guardada del cliente, USALA. Si no, pedí la dirección de envío: provincia, cantón, distrito y señas.",
+    prompt: "Ya tenemos producto seleccionado. Para la dirección de envío seguí este flujo paso a paso: 1) Si el cliente ya tiene dirección guardada, preguntá si desea usarla. 2) Si no, pedí PRIMERO la provincia. 3) Luego el cantón. 4) Luego el distrito. 5) Luego las señas exactas (texto libre). 6) Al final confirmá la dirección completa. El sistema genera las listas interactivas automáticamente — NO las listes en texto. Solo hacé UNA pregunta por turno.",
     uiConfig: {
-      buttonsEnabled: false,
-      buttonMode: "off",
+      buttonsEnabled: true,
+      buttonMode: "hybrid",
       fixedButtons: [],
       catalogEnabled: false,
       allowFreeText: true,

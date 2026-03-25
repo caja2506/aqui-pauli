@@ -63,12 +63,15 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
         entitiesToMerge.customerName = contact.displayName;
       }
 
-      // Dirección guardada
+      // Dirección guardada — inyectar siempre que haya algún dato
       if (contact.lastAddress && !session.extractedEntities?.address) {
         const addr = contact.lastAddress;
         const addrParts = [addr.provincia, addr.canton, addr.distrito].filter(Boolean);
         if (addrParts.length > 0) {
           entitiesToMerge.address = addrParts.join(", ") + (addr.señas ? ` — ${addr.señas}` : "");
+        } else if (addr.señas) {
+          // Fallback: si solo hay señas (datos legacy o mal guardados)
+          entitiesToMerge.address = addr.señas;
         }
       }
 
@@ -99,6 +102,13 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
     const catalogData = catalogResult.success ? catalogResult.data.formatted : "Catálogo no disponible.";
     const catalogProducts = catalogResult.success ? catalogResult.data.products : [];
     const orderData = [orderByNumber, ordersByPhone, ordersByName].filter(Boolean).join("\n");
+
+    // ================================================
+    // 2b. DETECTAR SELECCIÓN DE DIRECCIÓN (provincia/cantón/distrito)
+    // Si el último mensaje del bot preguntó por provincia/cantón/distrito,
+    // y el usuario respondió con un nombre válido, guardarlo en entidades.
+    // ================================================
+    await _extractAddressSelection(messageText, session, chatHistory);
 
     // ================================================
     // 3. CONSTRUIR CONTEXTO
@@ -243,6 +253,10 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
 
           if (followUp && followUp.replyText && followUp.replyText.length > 20 && !followUp._isFallback) {
             aiResponse.replyText = followUp.replyText;
+            // Actualizar buttonsHint si la segunda llamada lo devuelve
+            if (followUp.buttonsHint && followUp.buttonsHint !== "none") {
+              aiResponse.buttonsHint = followUp.buttonsHint;
+            }
             console.log("[Orchestrator] Segunda llamada Gemini exitosa — respuesta enriquecida con datos de tool");
           }
         } catch (err) {
@@ -291,10 +305,10 @@ async function processInboundMessage(messageText, contact, { phone, contactId, c
     // ================================================
     // 9b. DETERMINAR BOTONES INTERACTIVOS
     // ================================================
-    // Botones se generan del DATO REAL (catálogo/herramienta), nunca de Gemini.
+    // Botones se generan usando buttonsHint de Gemini + datos reales del catálogo.
     const stageAfter = aiResponse.nextStage || session.currentStage;
     const lastTool = toolsCalled[toolsCalled.length - 1] || null;
-    let buttons = _autoGenerateButtons(stageAfter, reply, session, orderCreated, catalogProducts, lastTool);
+    let buttons = _autoGenerateButtons(stageAfter, reply, session, orderCreated, catalogProducts, lastTool, aiResponse);
 
     // Validar límites de WhatsApp para botones
     if (buttons.length > 0) {
@@ -474,13 +488,15 @@ async function _loadChatHistory(contactId, limit = 15) {
 
 /**
  * Auto-generar botones interactivos basados en:
+ * 0. Contexto de la PREGUNTA ACTUAL del bot (máxima prioridad)
  * 1. Configuración de UI de la etapa (stateMachine.uiConfig)
  * 2. Resultados reales de tools (variantes, productos)
  * 3. Estado de la sesión (orden creada, producto seleccionado)
  *
  * PRINCIPIO: Los botones vienen del catálogo, tools, o config — NUNCA de Gemini.
+ * REGLA NUEVA: Los botones deben ser CONTEXTUALMENTE CORRECTOS para la pregunta actual.
  */
-function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProducts, lastTool) {
+function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProducts, lastTool, aiResponse) {
   const uiConfig = getStageUIConfig(stage);
 
   // Si la etapa tiene botones deshabilitados, no enviar nada
@@ -489,15 +505,108 @@ function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProduc
   const toolName = lastTool?.name || "";
   const toolData = lastTool?.result?.data || null;
   const toolSuccess = lastTool?.result?.success || false;
-
-  // ── PRIORIDAD 0: Botones de ACCIÓN según estado del flujo de compra ──
   const entities = session.extractedEntities || {};
-  const hasProduct = !!entities.selectedProduct;
-  const hasVariant = !!entities.selectedVariant;
-  const hasAddress = !!entities.address;
-  const hasOrderNumber = !!entities.orderNumber;
+  const buttonsHint = aiResponse?.buttonsHint || "none";
 
-  // Si ya se creó un pedido → botones post-orden
+  // ══════════════════════════════════════════════════════
+  // PRIORIDAD -1: buttonsHint DE GEMINI (fuente principal)
+  // Gemini sabe exactamente qué está preguntando.
+  // ══════════════════════════════════════════════════════
+  const regexFallback = _detectQuestionType(reply);
+  const effectiveHint = (buttonsHint !== "none") ? buttonsHint : _mapRegexToHint(regexFallback);
+  console.log(`[Buttons] buttonsHint="${buttonsHint}", regexFallback="${regexFallback}", effectiveHint="${effectiveHint}", stage="${stage}"`);
+
+  // ── confirm_yes_no: Sí / No ──
+  if (effectiveHint === "confirm_yes_no") {
+    return [
+      { id: "confirm_yes", title: "Sí ✅" },
+      { id: "confirm_no", title: "No ❌" },
+    ];
+  }
+
+  // ── free_text: Sin botones (cantidad, señas, nombre, etc.) ──
+  if (effectiveHint === "free_text") {
+    return [];
+  }
+
+  // ── show_variants: Variantes del producto ACTUAL solamente ──
+  if (effectiveHint === "show_variants") {
+    // Primero: variantes desde tool data (getProductBySku)
+    if (toolName === "getProductBySku" && toolSuccess && toolData?.variants) {
+      const variants = toolData.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
+      if (variants.length >= 2) {
+        return variants.slice(0, 10).map(v => ({
+          id: `variant_${v.id}`,
+          title: v.name.substring(0, 20),
+        }));
+      }
+    }
+    // Segundo: variantes del producto seleccionado desde catálogo pre-cargado
+    const selectedProduct = entities.selectedProduct;
+    if (selectedProduct && catalogProducts?.length > 0) {
+      const product = catalogProducts.find(p =>
+        p.name && p.name.toLowerCase().includes(selectedProduct.toLowerCase())
+      );
+      if (product?.variants?.length >= 2) {
+        const available = product.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
+        if (available.length >= 2) {
+          return available.slice(0, 10).map(v => ({
+            id: `variant_${v.id || v.sku || v.name}`,
+            title: (v.name || v.sku || "Opción").substring(0, 20),
+          }));
+        }
+      }
+    }
+    // Fallback: si no hay variantes, no mostrar botones
+    return [];
+  }
+
+  // ── show_products: Productos mencionados en la respuesta ──
+  if (effectiveHint === "show_products") {
+    // Buscar productos del catálogo que el bot mencionó en su respuesta
+    const replyLower = (reply || "").toLowerCase();
+    if (catalogProducts?.length > 0) {
+      const mentioned = catalogProducts.filter(p =>
+        p.name && replyLower.includes(p.name.toLowerCase())
+      );
+      if (mentioned.length >= 2) {
+        return mentioned.slice(0, 10).map(p => ({
+          id: `product_${p.id}`,
+          title: p.name.substring(0, 20),
+        }));
+      }
+    }
+    // Fallback: productos del tool data
+    if (toolName === "getProductCatalog" && toolSuccess && toolData?.products?.length >= 2) {
+      return toolData.products.slice(0, 10).map(p => ({
+        id: `product_${p.id}`,
+        title: p.name.substring(0, 20),
+      }));
+    }
+    return [];
+  }
+
+  // ── ask_provincia: Lista de provincias CR ──
+  if (effectiveHint === "ask_provincia") {
+    return _getAddressButtons("provincia", null, null);
+  }
+
+  // ── ask_canton: Lista de cantones filtrados por provincia ──
+  if (effectiveHint === "ask_canton") {
+    return _getAddressButtons("canton", entities._addressProvincia || null, null);
+  }
+
+  // ── ask_distrito: Lista de distritos filtrados ──
+  if (effectiveHint === "ask_distrito") {
+    return _getAddressButtons("distrito", entities._addressProvincia || null, entities._addressCanton || null);
+  }
+
+  // ══════════════════════════════════════════════════════
+  // BOTONES DE CONTEXTO (si Gemini no envió hint específico)
+  // ══════════════════════════════════════════════════════
+
+  // Post-orden: botones de seguimiento
+  const hasOrderNumber = !!entities.orderNumber;
   if (orderCreated || hasOrderNumber) {
     return [
       { id: "action_send_proof", title: "Enviar comprobante 📸" },
@@ -506,7 +615,11 @@ function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProduc
     ];
   }
 
-  // Si tenemos producto + variante + dirección → listo para confirmar
+  // Producto+variante+dirección: confirmar pedido
+  const hasProduct = !!entities.selectedProduct;
+  const hasVariant = !!entities.selectedVariant;
+  const hasAddress = !!entities.address;
+
   if (hasProduct && hasVariant && hasAddress) {
     return [
       { id: "action_confirm_order", title: "Confirmar Pedido ✅" },
@@ -515,7 +628,7 @@ function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProduc
     ];
   }
 
-  // Si tenemos producto y variante pero falta dirección → pedir dirección o confirmar
+  // Producto+variante seleccionados, sin dirección: confirmar/cambiar
   if (hasProduct && hasVariant && !hasAddress) {
     return [
       { id: "action_confirm", title: "Confirmar ✅" },
@@ -524,73 +637,186 @@ function _autoGenerateButtons(stage, reply, session, orderCreated, catalogProduc
     ];
   }
 
-  // ── PRIORIDAD 1: Botones generados por datos de TOOL ──
-  // Variantes reales de getProductBySku
-  if (toolName === "getProductBySku" && toolSuccess && toolData?.variants) {
-    const variants = toolData.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
-    if (variants.length >= 2) {
-      return variants.slice(0, 10).map(v => ({
-        id: `variant_${v.id}`,
-        title: v.name.substring(0, 20),
-      }));
-    }
-  }
-
-  // Productos reales de getProductCatalog
-  if (toolName === "getProductCatalog" && toolSuccess && toolData?.products?.length >= 2) {
-    const products = toolData.products;
-    if (products.length <= 10) {
-      return products.map(p => ({
-        id: `product_${p.id}`,
-        title: p.name.substring(0, 20),
-      }));
-    }
-    // Más de 10 → agrupar por categoría
-    const categoryMap = {};
-    for (const p of products) {
-      const cat = p.category || "Otros";
-      if (!categoryMap[cat]) categoryMap[cat] = [];
-      categoryMap[cat].push(p);
-    }
-    const categories = Object.keys(categoryMap);
-    if (categories.length >= 2 && categories.length <= 10) {
-      return categories.slice(0, 10).map(cat => ({
-        id: `cat_${cat.toLowerCase().replace(/\s+/g, "_")}`,
-        title: cat.substring(0, 20),
-      }));
-    }
-    return products.slice(0, 10).map(p => ({
-      id: `product_${p.id}`,
-      title: p.name.substring(0, 20),
-    }));
-  }
-
-  // ── PRIORIDAD 2: Variantes desde catálogo pre-cargado (si hay producto seleccionado) ──
-  const selectedProduct = session.extractedEntities?.selectedProduct;
-  if (selectedProduct && catalogProducts?.length > 0) {
-    const product = catalogProducts.find(p =>
-      p.name && p.name.toLowerCase().includes(selectedProduct.toLowerCase())
-    );
-    if (product?.variants?.length >= 2) {
-      const available = product.variants.filter(v => v.stock > 0 || v.supplyType === "bajo_pedido");
-      if (available.length >= 2) {
-        return available.slice(0, 10).map(v => ({
-          id: `variant_${v.id}`,
-          title: v.name.substring(0, 20),
-        }));
-      }
-    }
-  }
-
-  // ── PRIORIDAD 3: Botones fijos de la configuración de etapa ──
+  // ── Botones fijos de la configuración de etapa ──
   if (uiConfig.buttonMode === "fixed" && uiConfig.fixedButtons.length > 0) {
     return [...uiConfig.fixedButtons];
   }
 
-  // ── PRIORIDAD 4: Botones híbridos (fijos si no hay contexto de tool) ──
+  // ── Botones híbridos ──
   if (uiConfig.buttonMode === "hybrid" && uiConfig.fixedButtons.length > 0) {
-    // Solo mostrar fijos si no hubo datos de tool más relevantes
     return [...uiConfig.fixedButtons];
+  }
+
+  // ══════════════════════════════════════════════════════
+  // SAFETY NET: Auto-detectar productos mencionados en el reply
+  // Si el bot menciona 2+ productos del catálogo y hace una pregunta,
+  // mostrarlos como botones (Gemini olvidó enviar show_products).
+  // ══════════════════════════════════════════════════════
+  if (catalogProducts?.length > 0 && reply && reply.includes("?")) {
+    const replyLower = reply.toLowerCase();
+    const mentioned = catalogProducts.filter(p =>
+      p.name && replyLower.includes(p.name.toLowerCase())
+    );
+    if (mentioned.length >= 2) {
+      console.log(`[Buttons] SAFETY NET: Detectados ${mentioned.length} productos en reply`);
+      return mentioned.slice(0, 10).map(p => ({
+        id: `product_${p.id}`,
+        title: p.name.substring(0, 20),
+      }));
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Mapear resultado de _detectQuestionType (regex) al formato de buttonsHint.
+ * Usado como fallback cuando Gemini no envía buttonsHint.
+ */
+function _mapRegexToHint(questionType) {
+  const map = {
+    confirmation: "confirm_yes_no",
+    address_confirm: "confirm_yes_no",
+    quantity: "free_text",
+    name: "free_text",
+    address_senas: "free_text",
+    variant: "show_variants",
+    address: "ask_provincia",
+    address_provincia: "ask_provincia",
+    address_canton: "ask_canton",
+    address_distrito: "ask_distrito",
+  };
+  return map[questionType] || "none";
+}
+
+/**
+ * Detecta el tipo de pregunta que el bot está haciendo en su reply.
+ * FALLBACK: Solo se usa cuando Gemini no envía buttonsHint.
+ *
+ * @param {string} reply — texto de respuesta del bot
+ * @returns {string} — "confirmation" | "quantity" | "address" | "address_provincia" |
+ *                       "address_canton" | "address_distrito" | "address_senas" |
+ *                       "address_confirm" | "variant" | "name" | "none"
+ */
+function _detectQuestionType(reply) {
+  if (!reply) return "none";
+  const lower = reply.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // ── Confirmación: ¿agregar al carrito?, ¿procedemos?, ¿te gustaria? ──
+  if (/te gustaria (agregar|ordenar|pedir|comprar|incluir)/i.test(lower) ||
+      /\b(lo|la|los|las) (agrego|agregamos|queres|aparto)/i.test(lower) ||
+      /(agregar|incluir).*(carrito|pedido)/i.test(lower) && lower.includes("?") ||
+      /\b(procedemos|procedo|confirmo|te lo aparto|lo confirmamos)\b/i.test(lower) && lower.includes("?") ||
+      /te gustaria ordenar/i.test(lower) ||
+      /queres (confirmar|proceder|ordenar|pedir)/i.test(lower)) {
+    return "confirmation";
+  }
+
+  // ── Cantidad: ¿cuántas unidades?, ¿cuántos pares?, ¿cuántos te gustaría llevar? ──
+  if (/cuant[oa]s?\s+(unidades|pares|queres|necesitas|deseas|ocupas|te gustaria|vas a|te llev)/i.test(lower) ||
+      /cuant[oa]s?\s+te\s+llev/i.test(lower) ||
+      /cuant[oa]s?\s+\w+\s+te\s+gustaria/i.test(lower) ||
+      /cuant[oa]s?\b.*\bllevar\b/i.test(lower) ||
+      /cantidad/i.test(lower) && lower.includes("?")) {
+    return "quantity";
+  }
+
+  // ── Confirmación de dirección ──
+  if (/(confirmar?|correcta?|bien)\s*(la\s+)?(direccion|dir)/i.test(lower) && lower.includes("?") ||
+      /esta\s+(bien|correcta?)\s*(la\s+)?(direccion|dir)/i.test(lower)) {
+    return "address_confirm";
+  }
+
+  // ── Señas (texto libre dentro del flujo de dirección) ──
+  if (/se[nñ]as/i.test(lower) && lower.includes("?") ||
+      /indicame las se[nñ]as/i.test(lower) ||
+      /referencia|punto de referencia/i.test(lower) && lower.includes("?")) {
+    return "address_senas";
+  }
+
+  // ── Provincia ──
+  if (/provincia/i.test(lower) && lower.includes("?") ||
+      /en que provincia/i.test(lower) ||
+      /indicame la provincia/i.test(lower) ||
+      /selecciona tu provincia/i.test(lower)) {
+    return "address_provincia";
+  }
+
+  // ── Cantón ──
+  if (/canton/i.test(lower) && lower.includes("?") ||
+      /en que canton/i.test(lower) ||
+      /indicame el canton/i.test(lower) ||
+      /selecciona.* canton/i.test(lower)) {
+    return "address_canton";
+  }
+
+  // ── Distrito ──
+  if (/distrito/i.test(lower) && lower.includes("?") ||
+      /en que distrito/i.test(lower) ||
+      /indicame el distrito/i.test(lower) ||
+      /selecciona.* distrito/i.test(lower)) {
+    return "address_distrito";
+  }
+
+  // ── Dirección general ──
+  if (/direccion/i.test(lower) && lower.includes("?") ||
+      /donde (te )?(lo |la )?(enviam|entregam)/i.test(lower) ||
+      /direccion de envio/i.test(lower)) {
+    return "address";
+  }
+
+  // ── Nombre del cliente ──
+  if (/tu nombre/i.test(lower) && lower.includes("?") ||
+      /como te llamas/i.test(lower) ||
+      /a nombre de quien/i.test(lower)) {
+    return "name";
+  }
+
+  // ── Variante/color/talla ──
+  if (/(que )?(color|talla|variante|opcion)/i.test(lower) && lower.includes("?") ||
+      /indicame el (color|talla)/i.test(lower) ||
+      /cual te gustaria/i.test(lower) && lower.includes("?") ||
+      /cual prefieres/i.test(lower) ||
+      /cual te gusta mas/i.test(lower)) {
+    return "variant";
+  }
+
+  return "none";
+}
+
+/**
+ * Genera botones de dirección según el sub-paso actual.
+ * Usa datos geográficos de Costa Rica.
+ *
+ * @param {string} step — "provincia" | "canton" | "distrito"
+ * @param {string|null} provincia — provincia seleccionada (para filtrar cantones)
+ * @param {string|null} canton — cantón seleccionado (para filtrar distritos)
+ * @returns {Array<{id: string, title: string}>}
+ */
+function _getAddressButtons(step, provincia, canton) {
+  const { getProvincias, getCantones, getDistritos } = require("./costaRicaGeo");
+
+  if (step === "provincia") {
+    return getProvincias().map(p => ({
+      id: `prov_${p.toLowerCase().replace(/\s+/g, "_").normalize("NFD").replace(/[\u0300-\u036f]/g, "")}`,
+      title: p.substring(0, 20),
+    }));
+  }
+
+  if (step === "canton" && provincia) {
+    const cantones = getCantones(provincia);
+    return cantones.slice(0, 10).map(c => ({
+      id: `cant_${c.toLowerCase().replace(/\s+/g, "_").normalize("NFD").replace(/[\u0300-\u036f]/g, "")}`,
+      title: c.substring(0, 20),
+    }));
+  }
+
+  if (step === "distrito" && provincia && canton) {
+    const distritos = getDistritos(provincia, canton);
+    return distritos.slice(0, 10).map(d => ({
+      id: `dist_${d.toLowerCase().replace(/\s+/g, "_").normalize("NFD").replace(/[\u0300-\u036f]/g, "")}`,
+      title: d.substring(0, 20),
+    }));
   }
 
   return [];
@@ -638,6 +864,82 @@ function _summarizeToolResult(toolName, data) {
 }
 
 /**
+ * Detectar si el usuario respondió con una provincia/cantón/distrito
+ * y guardar la selección en entidades de sesión.
+ *
+ * Esto permite que _getAddressButtons() filtre correctamente la siguiente lista.
+ */
+async function _extractAddressSelection(messageText, session, chatHistory) {
+  if (!messageText || !session?.id) return;
+
+  const { getProvincias, getCantones, getDistritos } = require("./costaRicaGeo");
+  const { updateEntities } = require("./sessionManager");
+  const entities = session.extractedEntities || {};
+
+  // Buscar el último mensaje del BOT en el historial para saber qué preguntó
+  const lastBotMsg = [...(chatHistory || [])].reverse().find(m => m.direction === "outbound");
+  if (!lastBotMsg) return;
+
+  const lastBotQuestion = _detectQuestionType(lastBotMsg.content || "");
+  const userInput = messageText.trim();
+
+  // Si el bot preguntó por provincia → el usuario está respondiendo con una provincia
+  if (lastBotQuestion === "address_provincia" || lastBotQuestion === "address") {
+    const provincias = getProvincias();
+    const match = provincias.find(p =>
+      p.toLowerCase() === userInput.toLowerCase() ||
+      p.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") ===
+      userInput.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    );
+    if (match) {
+      await updateEntities(session.id, { _addressProvincia: match, _addressCanton: "", _addressDistrito: "" });
+      session.extractedEntities._addressProvincia = match;
+      session.extractedEntities._addressCanton = "";
+      session.extractedEntities._addressDistrito = "";
+      console.log(`[Address] Provincia seleccionada: ${match}`);
+    }
+  }
+
+  // Si el bot preguntó por cantón → el usuario está respondiendo con un cantón
+  if (lastBotQuestion === "address_canton") {
+    const provincia = entities._addressProvincia;
+    if (provincia) {
+      const cantones = getCantones(provincia);
+      const match = cantones.find(c =>
+        c.toLowerCase() === userInput.toLowerCase() ||
+        c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") ===
+        userInput.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      );
+      if (match) {
+        await updateEntities(session.id, { _addressCanton: match, _addressDistrito: "" });
+        session.extractedEntities._addressCanton = match;
+        session.extractedEntities._addressDistrito = "";
+        console.log(`[Address] Cantón seleccionado: ${match} (${provincia})`);
+      }
+    }
+  }
+
+  // Si el bot preguntó por distrito → el usuario está respondiendo con un distrito
+  if (lastBotQuestion === "address_distrito") {
+    const provincia = entities._addressProvincia;
+    const canton = entities._addressCanton;
+    if (provincia && canton) {
+      const distritos = getDistritos(provincia, canton);
+      const match = distritos.find(d =>
+        d.toLowerCase() === userInput.toLowerCase() ||
+        d.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") ===
+        userInput.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      );
+      if (match) {
+        await updateEntities(session.id, { _addressDistrito: match });
+        session.extractedEntities._addressDistrito = match;
+        console.log(`[Address] Distrito seleccionado: ${match} (${provincia}, ${canton})`);
+      }
+    }
+  }
+}
+
+/**
  * Construir payload para createOrderDraft usando datos de sesión/CRM como fallback.
  * Resuelve el problema de Gemini enviando payload vacío.
  */
@@ -657,8 +959,20 @@ function _buildOrderPayload(geminiPayload, session, contact) {
         productId: entities.selectedProductId || "",
         variantName: entities.selectedVariant || "",
         variantId: entities.selectedVariantId || "",
-        quantity: entities.quantity || 1,
+        quantity: parseInt(entities.quantity) || 1,
       }];
+    }
+  }
+
+  // CRITICAL FIX: Inyectar quantity de la sesión si Gemini no lo incluyó en los items
+  // Gemini a veces envía items sin quantity, causando que la orden se cree con qty=1
+  const sessionQty = parseInt(entities.quantity) || 0;
+  if (sessionQty > 0 && payload.items && payload.items.length > 0) {
+    for (const item of payload.items) {
+      if (!item.quantity || item.quantity <= 0) {
+        item.quantity = sessionQty;
+        console.log(`[_buildOrderPayload] Inyectando quantity=${sessionQty} de sesión en item "${item.productName}"`);
+      }
     }
   }
 
