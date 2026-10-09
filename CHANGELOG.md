@@ -2,4 +2,6 @@
 
 ## 2026-10-09 — WA-RETIRE-001: preparar retirada de WhatsApp
 
-Carlos reservará el remitente para MotelOps y retira el vínculo de Facebook. Se prepara un bloqueo del bot y envíos automáticos, más retirada de enlaces/invitaciones de la web. Pagos, pedidos, SINPE, Telegram y catálogo Meta conservan su comportamiento. Candidato en revisión; no publicado ni desconectado en producción. Ver [alcance y límites](docs/WHATSAPP_RETIREMENT.md).
+Se prepara el canal apagado por defecto: bot, mensajes manuales/automáticos y nuevas automatizaciones se frenan; la web retira invitaciones a WhatsApp y soporte conserva el historial sin simular envíos. La lógica de pedidos, pagos/SINPE, Telegram y catálogo Meta no cambia.
+
+[Borrador1](https://github.com/caja2506/aqui-pauli/pull/1). Pasan17 pruebas backend,16 web y build; el lint general tiene2 errores preexistentes documentados. No desplegado ni desconectado en producción. Se elimina el comprobante por WhatsApp sin añadir una vía sustituta. Ver [alcance, pruebas y publicación pendiente](docs/WHATSAPP_RETIREMENT.md).

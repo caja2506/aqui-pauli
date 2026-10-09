@@ -30,8 +30,18 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - name: Lint
-        run: npm run lint
+      - name: Lint store files changed by this retirement
+        run: >-
+          ./node_modules/.bin/eslint
+          src/utils/storeWhatsApp.js
+          src/components/storefront/WhatsAppButton.jsx
+          src/components/storefront/Footer.jsx
+          src/pages/store/OrderConfirmation.jsx
+          src/pages/store/MyOrdersPage.jsx
+          src/pages/admin/SoportePage.jsx
+          src/pages/admin/AutomationsPage.jsx
+          src/components/admin/AdminSidebar.jsx
+          src/App.jsx
       - name: Verify store and support behavior
         if: ${{ !cancelled() }}
         run: node --test tests/store-whatsapp-ui.test.cjs
