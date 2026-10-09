@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { STORE_WHATSAPP_ENABLED } from '../../utils/storeWhatsApp';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Tag, FolderTree, Package, ClipboardList,
@@ -16,7 +17,7 @@ const NAV_ITEMS = [
   { to: '/admin/crm', icon: Users, label: 'CRM' },
   { to: '/admin/automatizaciones', icon: Zap, label: 'Automatizaciones' },
   { to: '/admin/soporte', icon: MessageCircle, label: 'Soporte' },
-  { to: '/admin/whatsapp', icon: Smartphone, label: 'WhatsApp' },
+  ...(STORE_WHATSAPP_ENABLED ? [{ to: '/admin/whatsapp', icon: Smartphone, label: 'WhatsApp' }] : []),
   { to: '/admin/envios', icon: Truck, label: 'Envíos' },
 ];
 

@@ -5,6 +5,7 @@
 // ==============================================
 const { defineSecret } = require("firebase-functions/params");
 const fetch = require("node-fetch");
+const { storeWhatsAppEnabled, whatsappRetiredResult } = require("./connectionPolicy");
 
 const WHATSAPP_TOKEN = defineSecret("WHATSAPP_TOKEN");
 const WHATSAPP_PHONE_ID = defineSecret("WHATSAPP_PHONE_ID");
@@ -27,6 +28,7 @@ function _getHeaders() {
 }
 
 async function _sendPayload(payload) {
+  if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
   const resp = await fetch(_getApiUrl(), {
     method: "POST",
     headers: _getHeaders(),
@@ -58,6 +60,7 @@ function _calculateTypingDelay(text) {
  * Hace que el bot no conteste instantáneamente (más humano).
  */
 async function withTypingDelay(to, text, sendFn) {
+  if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
   const delay = _calculateTypingDelay(text);
   await new Promise(resolve => setTimeout(resolve, delay));
   return sendFn();
@@ -69,6 +72,7 @@ async function withTypingDelay(to, text, sendFn) {
  * Envía un mensaje de texto simple por WhatsApp (con delay natural)
  */
 async function sendWhatsAppMessage(to, text) {
+  if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
   const phone = _normalizePhone(to);
   return withTypingDelay(to, text, () =>
     _sendPayload({
@@ -84,6 +88,7 @@ async function sendWhatsAppMessage(to, text) {
  * Envía texto sin delay (para notificaciones del sistema que deben ser inmediatas)
  */
 async function sendWhatsAppMessageImmediate(to, text) {
+  if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
   const phone = _normalizePhone(to);
   return _sendPayload({
     messaging_product: "whatsapp",
@@ -105,6 +110,7 @@ async function sendWhatsAppMessageImmediate(to, text) {
  * @param {string} [footerText] — Texto del footer (opcional)
  */
 async function sendInteractiveButtons(to, bodyText, buttons, headerText, footerText) {
+  if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
   const phone = _normalizePhone(to);
 
   // Validar límites de WhatsApp
@@ -161,6 +167,7 @@ async function sendInteractiveButtons(to, bodyText, buttons, headerText, footerT
  * @param {string} [footerText] — Footer opcional
  */
 async function sendInteractiveList(to, bodyText, buttonText, sections, headerText, footerText) {
+  if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
   const phone = _normalizePhone(to);
 
   // Validar límites de WhatsApp
@@ -296,3 +303,4 @@ module.exports = {
   sendPaymentVerified,
   sendOrderStatusUpdate,
 };
+

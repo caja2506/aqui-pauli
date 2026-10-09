@@ -1,4 +1,5 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { storeWhatsAppEnabled, whatsappRetiredResult } = require("./whatsapp/connectionPolicy");
 const { defineSecret } = require("firebase-functions/params");
 const { db, FieldValue, notifyAdminsTelegram, logAutomation, logMessage, getAppConfig } = require("./utils");
 const { findOrCreateContactByPhone, saveCrmMessage, updateCrmOnMessage } = require("./crm");
@@ -13,6 +14,7 @@ const telegramChatId = defineSecret("TELEGRAM_CHAT_ID");
 // HELPER: Enviar WhatsApp (interno, no callable)
 // ==============================================
 async function sendWhatsApp(to, message, { token, phoneId }) {
+  if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
   if (!token || !phoneId) {
     console.log(`[WhatsApp STUB] To: ${to}, msg: ${message.substring(0, 60)}...`);
     return { status: "stub_logged", providerMessageId: "" };
@@ -64,6 +66,7 @@ exports.processScheduledAutomations = onSchedule(
     timeoutSeconds: 300,
   },
   async () => {
+    if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
     const config = await getAppConfig();
     const toggles = config.automationToggles || {};
     const templates = config.messageTemplates || {};
@@ -269,6 +272,7 @@ exports.cleanExpiredReservations = onSchedule(
 exports.processAbandonedCarts = onSchedule(
   { schedule: "every day 09:00", timeoutSeconds: 120 },
   async () => {
+    if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
     const config = await getAppConfig();
     const hoursThreshold = config.cartAbandonmentHours || 24;
     const cutoff = new Date(Date.now() - hoursThreshold * 60 * 60 * 1000).toISOString();
@@ -325,3 +329,4 @@ exports.processAbandonedCarts = onSchedule(
     console.log(`Processed ${snap.size} abandoned carts.`);
   }
 );
+

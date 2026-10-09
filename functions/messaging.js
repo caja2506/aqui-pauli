@@ -1,4 +1,5 @@
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
+const { storeWhatsAppEnabled, respondToRetiredWhatsAppWebhook } = require("./whatsapp/connectionPolicy");
 const { defineSecret } = require("firebase-functions/params");
 const { db, notifyAdminsTelegram, logMessage } = require("./utils");
 const {
@@ -21,6 +22,7 @@ const telegramChatId = defineSecret("TELEGRAM_CHAT_ID");
 exports.sendWhatsAppMessage = onCall(
   { secrets: [whatsappToken, whatsappPhoneId], invoker: "public", cors: true },
   async (request) => {
+    if (!storeWhatsAppEnabled()) throw new HttpsError("failed-precondition", "WhatsApp de la tienda está desactivado.");
     const { to, message, relatedOrderId, relatedContactUid } = request.data;
 
     if (!to || !message) {
@@ -120,6 +122,7 @@ exports.sendWhatsAppMessage = onCall(
 exports.whatsappWebhook = onRequest(
   { secrets: [whatsappToken, whatsappPhoneId, whatsappVerifyToken, telegramBotToken, telegramChatId, geminiApiKey] },
   async (req, res) => {
+    if (respondToRetiredWhatsAppWebhook(req, res)) return;
     // ── Verificación del webhook (GET) ──
     if (req.method === "GET") {
       const mode = req.query["hub.mode"];
@@ -462,3 +465,4 @@ exports.telegramWebhook = onRequest(
     }
   }
 );
+
