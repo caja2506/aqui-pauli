@@ -1,9 +1,12 @@
 import { MessageCircle } from 'lucide-react';
+import { STORE_WHATSAPP_ENABLED } from '../../utils/storeWhatsApp';
 
 const WA_NUMBER = '50670956070';
 const WA_MESSAGE = '¡Hola! 👋 Me gustaría saber más sobre sus productos.';
 
 export default function WhatsAppButton() {
+  if (!STORE_WHATSAPP_ENABLED) return null;
+
   const waLink = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(WA_MESSAGE)}`;
 
   return (

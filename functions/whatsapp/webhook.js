@@ -7,6 +7,7 @@ const { defineSecret } = require("firebase-functions/params");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
 const fetch = require("node-fetch");
+const { storeWhatsAppEnabled, whatsappRetiredResult, respondToRetiredWhatsAppWebhook } = require("./connectionPolicy");
 const { extractPaymentData } = require("../ocr/paymentReader");
 const { verifyWithGmail } = require("../gmail/verifier");
 const { sendPaymentReceived, sendInteractiveButtons, sendInteractiveList, sendQuickConfirmation } = require("./sender");
@@ -27,6 +28,7 @@ const db = getFirestore();
 const whatsappWebhook = onRequest(
   { secrets: [WHATSAPP_TOKEN, WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_ID, GEMINI_API_KEY], cors: true, invoker: "public" },
   async (req, res) => {
+    if (respondToRetiredWhatsAppWebhook(req, res)) return;
     // --- GET: Verificación del webhook ---
     if (req.method === "GET") {
       const mode = req.query["hub.mode"];
@@ -632,6 +634,7 @@ async function processOrderMessage(message, phone) {
  * Envía mensaje de texto por WhatsApp
  */
 async function sendWhatsAppMessage(to, text) {
+  if (!storeWhatsAppEnabled()) return whatsappRetiredResult();
   try {
     const token = WHATSAPP_TOKEN.value().replace(/^Bearer\s+/i, '').trim();
     const phoneId = WHATSAPP_PHONE_ID.value().trim();
@@ -770,3 +773,4 @@ async function downloadMedia(url) {
 }
 
 module.exports = { whatsappWebhook };
+

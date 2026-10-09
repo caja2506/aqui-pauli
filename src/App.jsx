@@ -1,4 +1,5 @@
 import React from 'react';
+import { STORE_WHATSAPP_ENABLED } from './utils/storeWhatsApp';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { useRole } from './contexts/RoleContext';
@@ -120,7 +121,7 @@ export default function App() {
           <Route path="crm" element={<CrmPage />} />
           <Route path="automatizaciones" element={<AutomationsPage />} />
           <Route path="soporte" element={<SoportePage />} />
-          <Route path="whatsapp" element={<WhatsAppPage />} />
+          <Route path="whatsapp" element={STORE_WHATSAPP_ENABLED ? <WhatsAppPage /> : <Navigate to="/admin/soporte" replace />} />
           <Route path="envios" element={<ShippingPage />} />
         </Route>
 

@@ -1,4 +1,5 @@
 import { ShoppingBag, Instagram } from 'lucide-react';
+import { STORE_WHATSAPP_ENABLED } from '../../utils/storeWhatsApp';
 import { Link } from 'react-router-dom';
 
 export default function Footer() {
@@ -32,7 +33,7 @@ export default function Footer() {
           <div>
             <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4">Contacto</h3>
             <div className="space-y-2 text-sm text-slate-300">
-              <p>WhatsApp: +506 7095-6070</p>
+              {STORE_WHATSAPP_ENABLED && <p>WhatsApp: +506 7095-6070</p>}
               <p>Email: info@aquipauli.com</p>
               <a
                 href="https://www.instagram.com/aqui.paulina"

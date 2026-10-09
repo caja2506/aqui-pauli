@@ -1,4 +1,5 @@
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { storeWhatsAppEnabled } = require("./whatsapp/connectionPolicy");
 
 const db = getFirestore();
 
@@ -124,6 +125,7 @@ async function logAutomation({
   channel = "whatsapp",
   metadata = {},
 }) {
+  if (channel === "whatsapp" && !storeWhatsAppEnabled()) return null;
   const now = new Date().toISOString();
   const doc = await db.collection("automations").add({
     type,
@@ -196,3 +198,4 @@ module.exports = {
   getAppConfig,
   APP_CONFIG_DEFAULTS,
 };
+

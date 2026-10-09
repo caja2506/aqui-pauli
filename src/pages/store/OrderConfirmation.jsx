@@ -1,4 +1,5 @@
 import { useParams, useLocation, Link } from 'react-router-dom';
+import { STORE_WHATSAPP_ENABLED } from '../../utils/storeWhatsApp';
 import { CheckCircle, ArrowRight } from 'lucide-react';
 
 // Número de WhatsApp Business de Aquí Pauli (formato internacional sin +)
@@ -33,14 +34,16 @@ export default function OrderConfirmation() {
         <h3 className="text-sm font-bold text-amber-800 mb-2">Próximos pasos:</h3>
         <ul className="text-xs text-amber-700 space-y-1.5">
           <li>• Realiza el pago con el método seleccionado</li>
-          {needsProof && <li>• <strong>Envía tu comprobante por WhatsApp</strong> con el botón verde</li>}
-          <li>• Recibirás actualizaciones por WhatsApp</li>
+          {needsProof && (STORE_WHATSAPP_ENABLED
+            ? <li>• <strong>Envía tu comprobante por WhatsApp</strong> con el botón verde</li>
+            : <li>• Conservá tu comprobante de pago</li>)}
+          {STORE_WHATSAPP_ENABLED && <li>• Recibirás actualizaciones por WhatsApp</li>}
           <li>• Podrás rastrear tu pedido desde tu cuenta</li>
         </ul>
       </div>
 
       {/* Botón WhatsApp para enviar comprobante */}
-      {needsProof && (
+      {STORE_WHATSAPP_ENABLED && needsProof && (
         <a
           href={waLink}
           target="_blank"

@@ -1,4 +1,5 @@
 import { Zap, ShoppingCart, Truck, Star, MessageCircle, Bell, AlertCircle, CheckCircle } from 'lucide-react';
+import { STORE_WHATSAPP_ENABLED } from '../../utils/storeWhatsApp';
 import { useCollection } from '../../hooks/useCollection';
 import { formatDateTime } from '../../utils/formatters';
 
@@ -37,7 +38,9 @@ export default function AutomationsPage() {
     {
       key: 'carrito_abandonado',
       title: 'Carrito Abandonado',
-      description: 'WhatsApp al día siguiente si el cliente no completó la compra',
+      description: STORE_WHATSAPP_ENABLED
+        ? 'WhatsApp al día siguiente si el cliente no completó la compra'
+        : 'Historial de recordatorios de compras incompletas',
       icon: ShoppingCart,
     },
     {
@@ -65,6 +68,9 @@ export default function AutomationsPage() {
       <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
         <h2 className="font-black text-2xl text-slate-800 tracking-tight">Automatizaciones</h2>
         <p className="text-sm text-slate-400 mt-1">Motor de automatizaciones y registro de ejecuciones</p>
+        {!STORE_WHATSAPP_ENABLED && (
+          <p className="text-sm text-slate-500 mt-2">El canal WhatsApp está desactivado. Los registros anteriores se conservan.</p>
+        )}
       </div>
 
       {/* Stats */}
@@ -153,7 +159,9 @@ export default function AutomationsPage() {
           </div>
         ) : (
           <div className="p-8 text-center text-sm text-slate-400">
-            No hay ejecuciones registradas aún. Las automatizaciones se activarán con las primeras compras.
+            {STORE_WHATSAPP_ENABLED
+              ? 'No hay ejecuciones registradas aún. Las automatizaciones se activarán con las primeras compras.'
+              : 'No hay ejecuciones registradas aún.'}
           </div>
         )}
       </div>

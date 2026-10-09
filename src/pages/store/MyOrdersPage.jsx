@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { STORE_WHATSAPP_ENABLED } from '../../utils/storeWhatsApp';
 import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -144,7 +145,7 @@ export default function MyOrdersPage() {
               </div>
 
               {/* WhatsApp para enviar comprobante si pago pendiente */}
-              {(order.paymentStatus === 'pendiente' || !order.paymentStatus) && (
+              {STORE_WHATSAPP_ENABLED && (order.paymentStatus === 'pendiente' || !order.paymentStatus) && (
                 <div className="px-4 pb-4">
                   <a
                     href={`https://wa.me/50670956070?text=${encodeURIComponent(`¡Hola! Envío mi comprobante para el pedido ${order.orderNumber}`)}`}

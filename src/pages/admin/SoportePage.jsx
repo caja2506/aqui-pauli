@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { STORE_WHATSAPP_ENABLED } from '../../utils/storeWhatsApp';
 import { MessageCircle, Send, Bot, User, Search, Phone, ChevronLeft, Trash2 } from 'lucide-react';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db, functions } from '../../firebase';
@@ -81,16 +82,19 @@ export default function SoportePage() {
     }
   }, [messages]);
 
+  const selectedChannel = selectedContact?.lastChannel || 'whatsapp';
+  const whatsappReplyDisabled = !STORE_WHATSAPP_ENABLED && selectedChannel === 'whatsapp';
+
   // Enviar mensaje manual
   const handleSend = async () => {
-    if (!newMessage.trim() || !selectedContact || sending) return;
+    if (!newMessage.trim() || !selectedContact || sending || whatsappReplyDisabled) return;
 
     const msg = newMessage.trim();
     setNewMessage('');
     setSending(true);
 
     try {
-      const channel = selectedContact.lastChannel || 'whatsapp';
+      const channel = selectedChannel;
       const to = channel === 'whatsapp'
         ? selectedContact.phone
         : selectedContact.telegramChatId;
@@ -103,11 +107,16 @@ export default function SoportePage() {
 
       if (channel === 'whatsapp') {
         const sendWA = httpsCallable(functions, 'sendWhatsAppMessage');
-        await sendWA({
+        const result = await sendWA({
           to,
           message: msg,
           relatedContactUid: selectedContact.id,
         });
+        if (result.data?.status !== 'sent') {
+          throw new Error(result.data?.status === 'disabled'
+            ? 'WhatsApp está desactivado en esta tienda.'
+            : 'No se confirmó el envío del mensaje por WhatsApp.');
+        }
       }
 
       // Marcar como resuelto
@@ -430,19 +439,22 @@ export default function SoportePage() {
 
               {/* Input */}
               <div className="p-3 border-t border-slate-200 bg-white">
+                {whatsappReplyDisabled && (
+                  <p className="mb-2 text-xs text-slate-500">WhatsApp está desactivado en esta tienda. Podés consultar el historial.</p>
+                )}
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-                    placeholder="Escribe un mensaje..."
-                    disabled={sending}
+                    placeholder={whatsappReplyDisabled ? 'WhatsApp desactivado' : 'Escribe un mensaje...'}
+                    disabled={sending || whatsappReplyDisabled}
                     className="flex-1 px-4 py-3 text-sm bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent disabled:opacity-50"
                   />
                   <button
                     onClick={handleSend}
-                    disabled={!newMessage.trim() || sending}
+                    disabled={!newMessage.trim() || sending || whatsappReplyDisabled}
                     className="p-3 bg-rose-600 text-white rounded-2xl hover:bg-rose-700 transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-md"
                   >
                     <Send className={`w-5 h-5 ${sending ? 'animate-pulse' : ''}`} />

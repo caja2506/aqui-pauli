@@ -1,0 +1,42 @@
+name: Verify store WhatsApp retirement
+
+on:
+  push:
+    branches: [main, codex/retire-store-whatsapp]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify retired backend and preserved channels
+        run: node --test tests/whatsapp-retirement.node.cjs
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Verify store and support behavior
+        if: ${{ !cancelled() }}
+        run: node --test tests/store-whatsapp-ui.test.cjs
+      - name: Build
+        if: ${{ !cancelled() }}
+        env:
+          VITE_STORE_WHATSAPP_ENABLED: 'false'
+        run: npm run build
