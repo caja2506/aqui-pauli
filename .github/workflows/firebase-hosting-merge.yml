@@ -1,0 +1,77 @@
+name: Publish Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-hosting-live
+  cancel-in-progress: false
+
+jobs:
+  build_and_deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the requested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Record the version to publish
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          writeFileSync('dist/deployment.json', JSON.stringify({
+            commit: process.env.GITHUB_SHA,
+            repository: process.env.GITHUB_REPOSITORY,
+          }) + '\n');
+          NODE
+
+      - name: Check the Firebase project authorization
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI }}
+        run: |
+          node --input-type=module <<'NODE'
+          const credential = process.env.FIREBASE_SERVICE_ACCOUNT;
+          if (!credential) {
+            console.error('::error::Missing GitHub Actions repository secret FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI. Follow docs/firebase-hosting.md. The build succeeded; nothing has been deployed.');
+            process.exit(1);
+          }
+          let account;
+          try { account = JSON.parse(credential); }
+          catch {
+            console.error('::error::The Firebase secret must contain the complete service account JSON.');
+            process.exit(1);
+          }
+          if (account.type !== 'service_account' || account.project_id !== 'aqui-pauli' || !account.client_email || !account.private_key) {
+            console.error('::error::The Firebase secret must be a service account for project aqui-pauli.');
+            process.exit(1);
+          }
+          NODE
+
+      # This official action deploys with --only hosting. It does not deploy Functions or rules.
+      - name: Publish only Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI }}
+          firebaseToolsVersion: '15.34.1'
+          projectId: aqui-pauli
+          channelId: live
+
+      - name: Verify the public version and frontend assets
+        run: node scripts/verify-hosting.mjs
