@@ -22,6 +22,13 @@
     ],
     "rewrites": [
       {
+        "source": "/meta-feed.csv",
+        "function": {
+          "functionId": "metaFeed",
+          "region": "us-central1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
