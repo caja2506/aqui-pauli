@@ -2,7 +2,7 @@ import { useParams, useLocation, Link } from 'react-router-dom';
 import { CheckCircle, ArrowRight } from 'lucide-react';
 
 // Número de WhatsApp Business de Aquí Pauli (formato internacional sin +)
-const WHATSAPP_NUMBER = '50670956070';
+const WHATSAPP_NUMBER = '50671613342';
 
 export default function OrderConfirmation() {
   const { orderId } = useParams();
