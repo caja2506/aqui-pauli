@@ -1,5 +1,5 @@
 const SITE = "https://aqui-pauli.web.app";
-const HEAD = ["id","item_group_id","title","description","availability","condition","price","link","image_link","additional_image_link","brand","google_product_category"];
+const HEAD = ["id","item_group_id","title","description","availability","condition","price","link","image_link","additional_image_link","brand","google_product_category","product_type","custom_label_0","custom_label_1"];
 const esc = v => { v = (v ?? "").toString().replace(/\r?\n/g," ").trim(); return /[",]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; };
 const avail = v => {
   if (!v) return "out of stock";
@@ -8,15 +8,30 @@ const avail = v => {
   if (v.commercialStatus === "disponible") return "in stock";
   return "out of stock";
 };
+// Categories: cats = {id: {name, active, parentId}}; product.categoryIdList = ids (from categoryRefs/categoryIds).
+// custom_label_0 = top-level (root) category; custom_label_1 = sub-category (e.g. Hombres/Mujeres);
+// product_type = "Root > Sub" (extra roots, if any, appended after ", ").
+function catInfo(p, cats) {
+  const act = (p.categoryIdList || []).map(id => ({ id, ...(cats[id] || {}) })).filter(c => c.name && c.active !== false);
+  const roots = act.filter(c => !c.parentId || !cats[c.parentId]);
+  const subs = act.filter(c => c.parentId && cats[c.parentId]);
+  const top = roots[0] || (subs[0] && { id: subs[0].parentId, ...cats[subs[0].parentId] });
+  if (!top) return { product_type: "", custom_label_0: "", custom_label_1: "" };
+  const sub = subs.find(c => c.parentId === top.id);
+  const path = c => (c.parentId && cats[c.parentId] ? `${cats[c.parentId].name} > ${c.name}` : c.name);
+  const types = [sub ? path(sub) : top.name, ...roots.filter(c => c.id !== top.id).map(path)];
+  return { product_type: types.join(", "), custom_label_0: top.name, custom_label_1: sub ? sub.name : "" };
+}
 // products: [{id, ...fields}], variants: {pid:[{id,...}]}, brands: {id:name}
-function buildRows(products, variants, brands) {
+function buildRows(products, variants, brands, cats = {}) {
   const rows = [], problems = [];
   for (const p of products) {
     if (!p.active || p.deleted) continue;
     const brand = brands[p.brandId] || "Aquí Pauli";
     const imgs = (p.images||[]).filter(u => /^https:\/\//.test(u));
     const vs = (variants[p.id]||[]).filter(v => v.active !== false).sort((a,b)=>(a.order||0)-(b.order||0));
-    const base = { title: p.name, description: (p.description||"").trim() || `${p.name} - ${brand}. Disponible en Aquí Pauli, Costa Rica.`,
+    const ci = catInfo(p, cats);
+    const base = { ...ci, title: p.name, description: (p.description||"").trim() || `${p.name} - ${brand}. Disponible en Aquí Pauli, Costa Rica.`,
       condition: "new", link: `${SITE}/producto/${p.id}`, brand };
     const list = vs.length ? vs.map(v => ({ ...base, id: v.sku || `${p.id}-${v.id}`, item_group_id: vs.length>1 ? p.id : "",
         title: vs.length>1 && v.name ? `${p.name} - ${v.name}` : p.name,
