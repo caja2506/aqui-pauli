@@ -1,6 +1,6 @@
 import { MessageCircle } from 'lucide-react';
 
-const WA_NUMBER = '50670956070';
+const WA_NUMBER = '50671613342';
 const WA_MESSAGE = '¡Hola! 👋 Me gustaría saber más sobre sus productos.';
 
 export default function WhatsAppButton() {
