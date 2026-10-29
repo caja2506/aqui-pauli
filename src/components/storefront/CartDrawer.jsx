@@ -15,7 +15,7 @@ export default function CartDrawer() {
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setIsCartOpen(false)} />
 
       {/* Drawer */}
-      <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+      <div className="absolute right-0 top-0 h-dvh max-h-full w-full max-w-md bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
           <div className="flex items-center gap-2">
@@ -29,7 +29,7 @@ export default function CartDrawer() {
         </div>
 
         {/* Items */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] lg:pb-5 space-y-4">
           {items.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-4">
               <div className="w-20 h-20 rounded-2xl bg-slate-100 flex items-center justify-center">
@@ -92,7 +92,7 @@ export default function CartDrawer() {
 
         {/* Footer */}
         {items.length > 0 && (
-          <div className="border-t border-slate-100 p-5 space-y-4">
+          <div className="shrink-0 border-t border-slate-100 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] lg:pb-5 space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-sm font-bold text-slate-500">Subtotal</span>
               <span className="text-xl font-black text-slate-900">{formatCRC(subtotal)}</span>
