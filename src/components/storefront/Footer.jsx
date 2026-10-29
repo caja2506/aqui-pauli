@@ -1,11 +1,12 @@
 import { ShoppingBag, Instagram } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { LEGAL_LINKS } from '../legal/LegalLayout';
 
 export default function Footer() {
   return (
     <footer className="bg-slate-900 text-white mt-auto">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2 mb-4">
@@ -25,6 +26,16 @@ export default function Footer() {
             <div className="space-y-2">
               <Link to="/catalogo" className="block text-sm text-slate-300 hover:text-white transition-colors">Catálogo</Link>
               <Link to="/carrito" className="block text-sm text-slate-300 hover:text-white transition-colors">Mi Carrito</Link>
+            </div>
+          </div>
+
+          {/* Legal */}
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4">Información</h3>
+            <div className="space-y-2">
+              {LEGAL_LINKS.map((l) => (
+                <Link key={l.to} to={l.to} className="block text-sm text-slate-300 hover:text-white transition-colors">{l.label}</Link>
+              ))}
             </div>
           </div>
 
@@ -55,13 +66,13 @@ export default function Footer() {
                 <Instagram className="w-4 h-4" />
                 @aqui.paulina
               </a>
-              <p>Costa Rica 🇨🇷</p>
+              <p>Grecia, Alajuela, Costa Rica 🇨🇷</p>
             </div>
           </div>
         </div>
 
         <div className="border-t border-slate-800 mt-8 pt-6 text-center">
-          <p className="text-[11px] text-slate-500">© 2025 Aquí Pauli — Todos los derechos reservados</p>
+          <p className="text-[11px] text-slate-500">© {new Date().getFullYear()} Aquí Pauli · Carlos Jiménez Arias — Todos los derechos reservados</p>
         </div>
       </div>
     </footer>

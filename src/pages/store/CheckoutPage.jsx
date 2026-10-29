@@ -470,6 +470,9 @@ export default function CheckoutPage() {
                 <span className="font-black text-rose-600">{formatCRC(total)}</span>
               </div>
             </div>
+            <p className="text-[10px] text-slate-400 text-center">
+              Al comprar aceptas los <Link to="/terminos" className="underline">términos</Link>, las <Link to="/devoluciones" className="underline">devoluciones</Link> y los <Link to="/envios" className="underline">envíos</Link>.
+            </p>
             {OnlinePanel ? (
               <p className="text-[11px] text-slate-400 text-center">Paga con los botones de PayPal de arriba para confirmar tu pedido.</p>
             ) : (

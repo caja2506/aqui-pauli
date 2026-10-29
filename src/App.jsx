@@ -22,6 +22,7 @@ import CheckoutPage from './pages/store/CheckoutPage';
 import OrderConfirmation from './pages/store/OrderConfirmation';
 import MyOrdersPage from './pages/store/MyOrdersPage';
 import NotFoundPage from './pages/store/NotFoundPage';
+import { TerminosPage, DevolucionesPage, EnviosPage, PrivacidadPage } from './pages/store/LegalPages';
 
 // --- Admin Pages ---
 import DashboardPage from './pages/admin/DashboardPage';
@@ -106,6 +107,11 @@ export default function App() {
           <Route path="/checkout" element={<CheckoutPage />} />
           <Route path="/orden-confirmada/:orderId" element={<OrderConfirmation />} />
           <Route path="/mi-cuenta" element={<MyOrdersPage />} />
+          {/* Páginas legales (borrador: ver [CONFIRMAR]) */}
+          <Route path="/terminos" element={<TerminosPage />} />
+          <Route path="/devoluciones" element={<DevolucionesPage />} />
+          <Route path="/envios" element={<EnviosPage />} />
+          <Route path="/privacidad" element={<PrivacidadPage />} />
           {/* El carrito es un panel lateral; la página real de compra es /checkout */}
           <Route path="/carrito" element={<Navigate to="/checkout" replace />} />
           {/* 404 real dentro del layout de la tienda */}
