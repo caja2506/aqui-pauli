@@ -33,6 +33,9 @@ export default function TilopayReturnPage() {
             online: true, paid: res.result !== 'review', onlineLabel: 'tarjeta',
           },
         });
+      } else if (res.result === 'test_paid') {
+        // Modo de pruebas (solo admin/tester): el pedido NO queda pagado y no se envía nada al cliente.
+        setState({ status: 'test', message: res.message || 'Pago de PRUEBA recibido. No se cobró dinero real.' });
       } else {
         setState({ status: 'failed', message: res.message || 'El pago no se completó.' });
       }
@@ -58,7 +61,7 @@ export default function TilopayReturnPage() {
   }
   return (
     <div className="max-w-md mx-auto px-4 py-24 text-center">
-      <h1 className="text-xl font-black text-slate-900 mb-2">{view.status === 'failed' ? 'El pago no se completó' : 'Algo salió mal'}</h1>
+      <h1 className="text-xl font-black text-slate-900 mb-2">{view.status === 'failed' ? 'El pago no se completó' : view.status === 'test' ? 'Pago de prueba recibido' : 'Algo salió mal'}</h1>
       <p className="text-sm text-slate-500 mb-6">{view.message}</p>
       <div className="flex flex-wrap justify-center gap-3">
         <Link to="/checkout" className="px-6 py-3 bg-rose-600 text-white text-sm font-bold rounded-2xl">Volver al checkout</Link>

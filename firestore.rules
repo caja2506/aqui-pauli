@@ -54,6 +54,8 @@ service cloud.firestore {
     // El estado de pago, montos e ids de pasarela SOLO los escribe el servidor
     // (Cloud Functions / Admin SDK, que ignora estas reglas) o un admin.
     // El dueño puede: crear su pedido (pendiente), leerlo y adjuntar el comprobante.
+    // Tampoco puede escribir campos de dueño/pasarela (tilopay, paypal, customerUid ajeno) ni cambiar totales
+    // o estados después de crear. tilopayTx/* (registro de transacciones) no tiene regla: solo el servidor.
     match /orders/{orderId} {
       allow read: if request.auth != null
         && (isAdmin() || resource.data.uid == request.auth.uid || resource.data.customerUid == request.auth.uid);
@@ -64,14 +66,19 @@ service cloud.firestore {
             && request.resource.data.paymentStatus == 'pendiente'
             && request.resource.data.status == 'pendiente_pago'
             && !request.resource.data.keys().hasAny([
-              'paypal', 'paymentAmount', 'paymentTransactionId', 'paymentDate',
+              'paypal', 'tilopay', 'paymentAmount', 'paymentTransactionId', 'paymentDate',
               'reconciliationResult', 'reconciliationDetails', 'priceCorrectedByServer'
-            ]));
+            ])
+            // customerUid (campo de dueño) solo puede ser el propio usuario
+            && (!request.resource.data.keys().hasAny(['customerUid'])
+                || request.resource.data.customerUid == request.auth.uid));
 
       allow update: if isAdmin()
         || (request.auth != null
             && resource.data.uid == request.auth.uid
             && resource.data.paymentStatus in ['pendiente', 'rechazado', 'verificando']
+            // Los pedidos con tarjeta (Tilopay) los gestiona solo el servidor
+            && resource.data.get('paymentMethod', '') != 'tilopay'
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['paymentProofUrl', 'paymentPhone', 'paymentStatus', 'updatedAt'])
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentStatus'])
@@ -86,7 +93,9 @@ service cloud.firestore {
         allow create: if isAdmin()
           || (request.auth != null
               && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.uid == request.auth.uid
-              && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.paymentStatus == 'pendiente');
+              && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.paymentStatus == 'pendiente'
+              // no se agregan items a un pedido con un pago Tilopay ya iniciado
+              && !('tilopay' in getAfter(/databases/$(database)/documents/orders/$(orderId)).data));
         allow update, delete: if isAdmin();
       }
     }

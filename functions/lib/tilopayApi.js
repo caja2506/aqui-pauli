@@ -7,6 +7,8 @@
 // Pruebas y producción usan el MISMO host; el modo se cambia en el panel de Tilopay.
 // ==============================================
 
+const crypto = require("node:crypto");
+
 const TILOPAY_BASE = "https://app.tilopay.com";
 
 const PROVINCE_ISO = {
@@ -56,10 +58,33 @@ function splitName(full) {
   return { first: parts.slice(0, mid).join(" "), last: parts.slice(mid).join(" ") };
 }
 
-/** Número de orden enviado a Tilopay: único por intento (el mismo número no se reutiliza). */
-function tilopayOrderNumber(order, attempt) {
-  const base = String(order.orderNumber || order.id || "ORD").replace(/[^A-Za-z0-9-]/g, "");
-  return `${base}-T${attempt}`;
+/**
+ * Referencia enviada a Tilopay (orderNumber): sale SOLO del id del documento de Firestore (generado por el
+ * servidor, único) + el número de intento. Nunca del orderNumber del pedido (lo genera el cliente) ni de un
+ * texto de relleno. Tilopay exige orderNumber único para siempre.
+ */
+function tilopayReference(orderId, attempt) {
+  const id = String(orderId || "");
+  if (!/^[A-Za-z0-9]{8,40}$/.test(id)) throw new Error("orderId inválido para la referencia de Tilopay");
+  const n = Number(attempt);
+  if (!Number.isInteger(n) || n < 1 || n > 99) throw new Error("Intento inválido");
+  return `AP-${id}-T${n}`;
+}
+
+/**
+ * "Versión" del pedido: huella de lo que el cliente va a pagar (total, envío, líneas). Si cambia entre que se
+ * inicia el pago y se confirma, el pago NO se acredita automáticamente.
+ */
+function orderVersion(order) {
+  const lines = (Array.isArray(order?.itemsSummary) ? order.itemsSummary : [])
+    .map((i) => [String(i.productId ?? ""), String(i.variantId ?? ""), Number(i.quantity) || 0, Number(i.price) || 0])
+    .sort((x, y) => (x.join("|") < y.join("|") ? -1 : 1));
+  const canon = JSON.stringify({
+    total: Number(order?.total) || 0, subtotal: Number(order?.subtotal) || 0,
+    shippingCost: Number(order?.shippingCost) || 0, shippingType: String(order?.shippingType || ""),
+    canton: String(order?.shippingAddress?.canton || "").toLowerCase(), lines,
+  });
+  return crypto.createHash("sha256").update(canon).digest("hex").slice(0, 24);
 }
 
 /** Payload de processPayment: monto SIEMPRE en CRC, calculado por el servidor. */
@@ -99,37 +124,94 @@ function buildProcessPayload({ key, redirect, orderId, order, orderNumber, crcTo
   return p;
 }
 
+/** "test" | "live" | null (no reconocido). Tilopay usa "Test", "Production", "PROD", "TEST" según el endpoint. */
+function classifyEnvironment(env) {
+  const e = String(env ?? "").trim().toLowerCase();
+  if (!e) return null;
+  if (["test", "testing", "prueba", "pruebas", "sandbox"].includes(e)) return "test";
+  if (["prod", "production", "produccion", "producción", "live", "real"].includes(e)) return "live";
+  return null;
+}
+
+const isBlank = (v) => v === undefined || v === null || String(v).trim() === "";
+
+/** ¿La respuesta dice claramente "esa orden no existe"? (Tilopay devuelve errores con HTTP 200 o 4xx.) */
+function looksNotFound(data) {
+  if (!data || typeof data !== "object") return false;
+  if (Array.isArray(data.response) && data.response.length === 0) return true;
+  return /not exist|does not exist|not found|no existe|no encontrad/i.test(String(data.message ?? data.result ?? data.error ?? ""));
+}
+
+const REQUIRED_TX_FIELDS = ["id_tilopay", "currency", "amount"];
+
 /**
- * Interpreta la respuesta de /consult para un pedido.
- * Solo es "approved" si hay una transacción Payment con code "1", moneda CRC,
- * monto IGUAL al total calculado por el servidor, orderNumber exacto y
- * entorno coherente con el modo configurado (en live se rechaza "Test").
- * @returns {{state:"approved"|"declined"|"not_found"|"mismatch", tx?:object, reason?:string}}
+ * Interpreta la respuesta de /consult para UN intento de pago.
+ * Estados:
+ *  - approved               Payment, code "1", capture "Capture", CRC, monto IGUAL al del intento, id_tilopay, entorno
+ *                           reconocido y coherente con el modo del intento, merchantId (si viene y está configurado).
+ *  - pending_capture        Aprobado por el banco pero capture ≠ "Capture" ("Authorize", vacío, desconocido).
+ *  - pending_reconciliation Respuesta ilegible o incompleta (faltan type, id_tilopay, entorno, moneda, monto…).
+ *  - mismatch               Moneda/monto/entorno/comercio no coinciden, o varias transacciones aprobadas distintas.
+ *  - declined               Hay transacción pero no aprobada.
+ *  - not_found              Respuesta válida que dice que no hay transacción para esa orden.
+ * @returns {{state:string, tx?:object, reason?:string, env?:"test"|"live"|null}}
  */
-function interpretConsult(data, { orderNumber, crcTotal, mode = "live" }) {
-  const rows = Array.isArray(data?.response) ? data.response : [];
-  // Tilopay devuelve el orderNumber con un prefijo de comercio (p. ej. "PFC031932-TPTEST-A-T2"); se acepta
+function interpretConsult(data, { orderNumber, amount, crcTotal, mode = "live", merchantId = "" }) {
+  const expectedAmount = amount ?? crcTotal;
+  if (!data || typeof data !== "object" || !Array.isArray(data.response)) {
+    if (looksNotFound(data)) return { state: "not_found" };
+    return { state: "pending_reconciliation", reason: "Respuesta de Tilopay ilegible o incompleta." };
+  }
+  const rows = data.response.filter((r) => r && typeof r === "object");
+  // Tilopay devuelve el orderNumber con un prefijo de comercio (p. ej. "PFC031932-AP-xxx-T2"); se acepta
   // el exacto o ese prefijo (2-5 letras + dígitos + "-"), nunca un sufijo arbitrario.
   const want = String(orderNumber);
   const mine = rows.filter((r) => {
     const n = String(r.orderNumber ?? "");
     return n === want || (n.endsWith(`-${want}`) && /^[A-Za-z]{2,5}\d+$/.test(n.slice(0, -(want.length + 1))));
   });
-  if (mine.length === 0) return { state: "not_found" };
-  const payments = mine.filter((r) => !r.type || String(r.type).toLowerCase() === "payment");
-  const approved = payments.filter((r) => String(r.code) === "1");
-  if (approved.length === 0) return { state: "declined", tx: payments[0] || mine[0] };
-  const tx = approved[0];
-  if (String(tx.currency).toUpperCase() !== "CRC") return { state: "mismatch", tx, reason: `Moneda inesperada (${tx.currency}).` };
-  if (Math.round(Number(tx.amount) * 100) !== Math.round(Number(crcTotal) * 100)) {
-    return { state: "mismatch", tx, reason: `Monto no coincide (${tx.amount} vs ${crcTotal}).` };
+  if (mine.length === 0) {
+    if (rows.length === 0) return { state: "not_found" };
+    return { state: "pending_reconciliation", reason: "Tilopay devolvió filas con otro orderNumber." };
   }
-  const isTest = /test|prueba|sandbox/i.test(String(tx.environment || ""));
-  if (mode === "live" && isTest) return { state: "mismatch", tx, reason: "Transacción de PRUEBAS en modo live." };
-  return { state: "approved", tx, testMode: isTest };
+  if (mine.some((r) => isBlank(r.type))) {
+    return { state: "pending_reconciliation", tx: mine[0], reason: "La transacción no trae el campo type." };
+  }
+  const payments = mine.filter((r) => String(r.type).toLowerCase() === "payment");
+  if (payments.length === 0) return { state: "declined", tx: mine[0] };
+  if (payments.some((r) => isBlank(r.code))) {
+    return { state: "pending_reconciliation", tx: payments[0], reason: "La transacción no trae el campo code." };
+  }
+  const approved = payments.filter((r) => String(r.code) === "1");
+  if (approved.length === 0) return { state: "declined", tx: payments[0] };
+
+  const ids = new Set(approved.map((r) => String(r.id_tilopay ?? r.id ?? "")));
+  if (ids.size > 1) return { state: "mismatch", tx: approved[0], reason: "Hay varias transacciones aprobadas para la misma orden." };
+  const tx = approved[0];
+  const missing = REQUIRED_TX_FIELDS.filter((f) => isBlank(tx[f]));
+  const env = classifyEnvironment(tx.environment);
+  if (!env) missing.push("environment");
+  if (missing.length) {
+    return { state: "pending_reconciliation", tx, env, reason: `Faltan o no se reconocen campos de Tilopay: ${missing.join(", ")}.` };
+  }
+  if (String(tx.currency).toUpperCase() !== "CRC") return { state: "mismatch", tx, env, reason: `Moneda inesperada (${tx.currency}).` };
+  const paid = Math.round(Number(tx.amount) * 100);
+  if (!Number.isFinite(paid) || paid <= 0) return { state: "pending_reconciliation", tx, env, reason: `Monto ilegible (${tx.amount}).` };
+  if (paid !== Math.round(Number(expectedAmount) * 100)) {
+    return { state: "mismatch", tx, env, reason: `Monto no coincide (${tx.amount} vs ${expectedAmount}).` };
+  }
+  if (!isBlank(merchantId) && !isBlank(tx.merchantId) && String(tx.merchantId) !== String(merchantId)) {
+    return { state: "mismatch", tx, env, reason: `merchantId inesperado (${tx.merchantId}).` };
+  }
+  if (mode === "live" && env === "test") return { state: "mismatch", tx, env, reason: "Transacción de PRUEBAS en modo live." };
+  if (mode === "test" && env === "live") return { state: "mismatch", tx, env, reason: "Transacción REAL (producción) en modo de pruebas." };
+  if (!/^capture$/i.test(String(tx.capture ?? "").trim())) {
+    return { state: "pending_capture", tx, env, reason: `Cobro no capturado (capture: ${isBlank(tx.capture) ? "vacío" : tx.capture}).` };
+  }
+  return { state: "approved", tx, env };
 }
 
 module.exports = {
   TILOPAY_BASE, tpFetch, getToken, clearTokenCache, formatAmountCRC, splitName,
-  tilopayOrderNumber, buildProcessPayload, interpretConsult, PROVINCE_ISO,
+  tilopayReference, orderVersion, classifyEnvironment, looksNotFound, buildProcessPayload, interpretConsult, PROVINCE_ISO,
 };
