@@ -1,0 +1,91 @@
+name: Deploy Firebase Functions and Firestore Rules
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - 'firestore.rules'
+      - '.github/workflows/firebase-functions-deploy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-functions-aqui-pauli
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out the requested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install Functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Test Functions before loading deployment credentials
+        run: npm --prefix functions test
+
+      - name: Install the pinned Firebase CLI
+        run: npm install --global firebase-tools@15.34.2
+
+      - name: Prepare Firebase application default credentials
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { chmodSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const fail = (message) => {
+            console.error(`::error::${message}`);
+            process.exit(1);
+          };
+          const credential = process.env.FIREBASE_SERVICE_ACCOUNT;
+          if (!credential) {
+            fail('Missing repository secret FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI. See docs/firebase-functions-deploy.md. Nothing has been deployed.');
+          }
+          let account;
+          try {
+            account = JSON.parse(credential);
+          } catch {
+            fail('The Firebase secret must contain the complete service account JSON.');
+          }
+          if (account?.type !== 'service_account' || account.project_id !== 'aqui-pauli'
+              || typeof account.client_email !== 'string' || !account.client_email.trim()
+              || typeof account.private_key !== 'string' || !account.private_key.trim()) {
+            fail('The Firebase secret must be a service account for project aqui-pauli.');
+          }
+          if (!process.env.RUNNER_TEMP) fail('The runner temporary directory is unavailable.');
+          const path = join(process.env.RUNNER_TEMP, 'firebase-aqui-pauli-functions-service-account.json');
+          writeFileSync(path, JSON.stringify(account), { mode: 0o600, flag: 'wx' });
+          chmodSync(path, 0o600);
+          NODE
+
+      # Explicit codebase and endpoint selectors prevent unrelated Functions deployments.
+      # onOrderStatusChange is intentionally excluded until GMAIL_SMTP_* are configured.
+      - name: Deploy only Firestore Rules and the selected Functions
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-aqui-pauli-functions-service-account.json
+        run: >-
+          firebase deploy
+          --project aqui-pauli
+          --non-interactive
+          --only "firestore:rules,functions:default:tilopayGetConfig,functions:default:tilopayCreatePayment,functions:default:tilopayConfirm,functions:default:createOrderWithReservation,functions:default:deleteOrder,functions:default:submitPaymentProof,functions:default:approvePaymentManually,functions:default:paypalCreateOrder,functions:default:paypalCaptureOrder,functions:default:paypalGetQuote,functions:default:cleanExpiredReservations"
+
+      - name: Remove deployment credentials
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/firebase-aqui-pauli-functions-service-account.json"
