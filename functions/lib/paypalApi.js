@@ -24,6 +24,7 @@ async function getAccessToken({ env, clientId, secret, fetchFn = fetch }) {
 async function ppFetch(path, { env, token, method = "GET", body, requestId, fetchFn = fetch }) {
   const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   if (requestId) headers["PayPal-Request-Id"] = requestId;
+  if (method === "POST") headers.Prefer = "return=representation";
   const res = await fetchFn(`${paypalBase(env)}${path}`, {
     method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000),
   });
@@ -32,14 +33,14 @@ async function ppFetch(path, { env, token, method = "GET", body, requestId, fetc
 }
 
 /** Payload de orden PayPal (intent CAPTURE, USD, sin dirección de envío de PayPal). */
-function buildOrderPayload({ orderId, orderNumber, usdTotal }) {
+function buildOrderPayload({ orderId, orderNumber, usdTotal, partial = false }) {
   return {
     intent: "CAPTURE",
     purchase_units: [{
       reference_id: orderId,
       custom_id: orderId,
       invoice_id: orderNumber || orderId,
-      description: `Pedido ${orderNumber || orderId} - Aquí Pauli`.slice(0, 127),
+      description: `${partial ? "Apartado 50% Bajo pedido" : "Pedido"} ${orderNumber || orderId} - Aquí Pauli`.slice(0, 127),
       amount: { currency_code: "USD", value: usdTotal.toFixed(2) },
     }],
     application_context: {
@@ -63,13 +64,31 @@ function interpretCapture(order) {
 }
 
 /** Verifica que la orden PayPal corresponde al pedido y al monto esperado. */
-function verifyOrderMatches(ppOrder, { orderId, usdTotal }) {
+function verifyOrderMatches(ppOrder, { orderId, usdTotal, paypalOrderId }) {
+  if (paypalOrderId && ppOrder?.id !== paypalOrderId) return "El identificador de la orden PayPal no coincide";
+  if (!Array.isArray(ppOrder?.purchase_units) || ppOrder.purchase_units.length !== 1) return "Orden PayPal sin una única purchase_unit";
   const pu = ppOrder?.purchase_units?.[0];
   if (!pu) return "Orden PayPal sin purchase_units";
   if (pu.custom_id !== orderId) return "La orden PayPal no corresponde a este pedido";
   if (pu.amount?.currency_code !== "USD") return "Moneda inesperada";
-  if (Math.abs(Number(pu.amount?.value) - usdTotal) > 0.001) return "El monto de la orden PayPal no coincide";
+  if (!sameUsd(pu.amount?.value, usdTotal)) return "El monto de la orden PayPal no coincide";
   return null;
 }
 
-module.exports = { paypalBase, getAccessToken, ppFetch, buildOrderPayload, interpretCapture, verifyOrderMatches };
+function sameUsd(value, expected) {
+  if (!/^[0-9]+(?:\.[0-9]{1,2})?$/.test(String(value ?? ""))) return false;
+  const actual = Number(value);
+  return Number.isFinite(actual) && actual > 0 && typeof expected === "number"
+    && Number.isFinite(expected) && expected > 0 && Math.abs(actual - expected) < 0.001;
+}
+
+function verifyCaptureMatches(order, { usdTotal }) {
+  const captures = order?.purchase_units?.[0]?.payments?.captures;
+  if (!Array.isArray(captures) || captures.length !== 1 || !captures[0]?.id) return "PayPal no devolvió una única captura identificada";
+  const capture = captures[0];
+  if (capture.amount?.currency_code !== "USD") return "Moneda de captura inesperada";
+  if (!sameUsd(capture.amount?.value, usdTotal)) return "El monto capturado por PayPal no coincide";
+  return null;
+}
+
+module.exports = { paypalBase, getAccessToken, ppFetch, buildOrderPayload, interpretCapture, verifyOrderMatches, verifyCaptureMatches };

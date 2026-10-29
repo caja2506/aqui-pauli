@@ -6,6 +6,9 @@ function assertManualFlow(order) {
   if (hasTilopay(order)) {
     throw new HttpsError("failed-precondition", "Este pedido usa Tilopay. Confirma el pago con tilopayConfirm; un comprobante o una aprobación manual no sustituyen la consulta del cobro.");
   }
+  if (order.paymentMethod === "paypal" || Object.prototype.hasOwnProperty.call(order, "paypal")) {
+    throw new HttpsError("failed-precondition", "Este pedido usa PayPal. El cobro y su saldo se verifican con PayPal; un comprobante manual no puede reemplazar el apartado recibido.");
+  }
   if (isTerminalOrder(order)) throw new HttpsError("failed-precondition", "Este pedido está cerrado o es una prueba; no admite este cambio de pago.");
 }
 
