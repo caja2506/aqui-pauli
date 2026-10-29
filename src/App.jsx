@@ -107,7 +107,7 @@ export default function App() {
           <Route path="/checkout" element={<CheckoutPage />} />
           <Route path="/orden-confirmada/:orderId" element={<OrderConfirmation />} />
           <Route path="/mi-cuenta" element={<MyOrdersPage />} />
-          {/* Páginas legales (borrador: ver [CONFIRMAR]) */}
+          {/* Páginas legales */}
           <Route path="/terminos" element={<TerminosPage />} />
           <Route path="/devoluciones" element={<DevolucionesPage />} />
           <Route path="/envios" element={<EnviosPage />} />

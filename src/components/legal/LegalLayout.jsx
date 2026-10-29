@@ -8,6 +8,8 @@ export const LEGAL_LINKS = [
   { to: '/privacidad', label: 'Política de privacidad' },
 ];
 
+export const LAST_UPDATED = '29 de octubre de 2026';
+
 export const CONTACT = {
   whatsappLabel: '+506 7161 3342',
   whatsappUrl: 'https://wa.me/50671613342',
@@ -15,15 +17,6 @@ export const CONTACT = {
   owner: 'Carlos Jiménez Arias',
   place: 'Grecia, Alajuela, Costa Rica',
 };
-
-/** Marca visible para datos que Carlos todavía debe confirmar. */
-export function Confirm({ children }) {
-  return (
-    <mark className="bg-amber-100 text-amber-900 px-1 rounded font-bold" data-confirmar>
-      [CONFIRMAR{children ? `: ${children}` : ''}]
-    </mark>
-  );
-}
 
 export function Section({ title, children }) {
   return (
