@@ -19,11 +19,12 @@ export default function GiveawayRulesPage() {
         <p>La participación es gratuita y no requiere una compra. Debés ser mayor de 18 años, tener dirección en Costa Rica y registrarte o ingresar con tu cuenta de la tienda.</p>
         <p>Completá tu nombre, teléfono costarricense de 8 dígitos y correo electrónico; escogé el premio y aceptá las dos casillas obligatorias del formulario.</p>
         <p>Se admite una inscripción por cuenta. Al guardarla recibís un número correlativo de participante; volver a enviar el formulario no genera participaciones adicionales.</p>
+        <p>Después de inscribirte, comentá tu número de participante en la publicación del sorteo en Instagram <a href="https://www.instagram.com/aqui.paulina/" target="_blank" rel="noopener noreferrer" className={linkClass}>@aqui.paulina</a>.</p>
       </Section>
       <Section title="4. Elección de premio">
-        <p>Al inscribirte elegís una de estas opciones:</p>
-        <ul className="list-disc space-y-1 pl-5">{GIVEAWAY.prizes.map((prize) => <li key={prize.id}>{prize.label}</li>)}</ul>
-        <p>El número confirma tu inscripción y deja constancia del premio elegido.</p>
+        <p>Podés escoger cualquier colonia o perfume activo publicado en la tienda cuyo precio de venta mostrado sea inferior a ₡50 000. Los productos de ₡50 000 o más no califican.</p>
+        <p>Se incluyen colonias con stock, bajo pedido o sin stock. El selector del formulario consulta el catálogo de la tienda y permite buscar por nombre o marca.</p>
+        <p>Al inscribirte se verifica el producto y su precio actual. La inscripción guarda la colonia escogida y su precio en ese momento, junto con tu número de participante.</p>
       </Section>
       <Section title="5. Datos personales y consentimiento">
         <p>El responsable del tratamiento es Aquí Pauli ({CONTACT.owner}). Los datos del formulario, el premio elegido, los consentimientos, la fecha y el número de participante se almacenan en la base de datos de la tienda en Firebase para administrar el sorteo y contactarte. El acceso a la lista está reservado al personal administrador autorizado.</p>

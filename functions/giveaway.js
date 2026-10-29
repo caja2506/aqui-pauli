@@ -4,11 +4,12 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { Timestamp } = require("firebase-admin/firestore");
 const { db } = require("./utils");
 const config = require("./lib/giveawayConfig.json");
+const { selectGiveawayProduct } = require("./lib/giveawayCatalog.mjs");
 
 const START_MS = Date.parse(config.startsAt);
 const END_MS = Date.parse(config.endsAt);
 const INPUT_FIELDS = new Set([
-  "fullName", "phone", "email", "prizeId", "eligibilityAccepted", "privacyConsent", "promotionsConsent",
+  "fullName", "phone", "email", "productId", "eligibilityAccepted", "privacyConsent", "promotionsConsent",
 ]);
 
 function requireRegisteredUser(auth) {
@@ -48,15 +49,16 @@ function validatedInput(data, auth) {
       ? "Usá el correo de la cuenta con la que iniciaste sesión."
       : "Ingresá un correo electrónico válido.");
   }
-  const prize = config.prizes.find((item) => item.id === data.prizeId);
-  if (!prize) throw new HttpsError("invalid-argument", "Escogé uno de los premios del sorteo.");
+  if (typeof data.productId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(data.productId)) {
+    throw new HttpsError("invalid-argument", "Escogé una colonia del catálogo del sorteo.");
+  }
   if (data.eligibilityAccepted !== true || data.privacyConsent !== true) {
     throw new HttpsError("invalid-argument", "Confirmá que sos mayor de 18 años, tenés dirección en Costa Rica y autorizás el uso de tus datos para el sorteo.");
   }
   if (data.promotionsConsent !== undefined && typeof data.promotionsConsent !== "boolean") {
     throw new HttpsError("invalid-argument", "La autorización para promociones debe ser una elección válida.");
   }
-  return { fullName, phone: data.phone.trim(), email, prizeId: prize.id, prizeLabel: prize.label,
+  return { fullName, phone: data.phone.trim(), email, productId: data.productId,
     eligibilityAccepted: true, privacyConsent: true, promotionsConsent: data.promotionsConsent === true };
 }
 
@@ -65,7 +67,12 @@ function resultFor(entry, alreadyEntered) {
     number: entry.number,
     alreadyEntered,
     campaignId: entry.campaignId,
-    prizeId: entry.prizeId,
+    prizeLabel: entry.productName || entry.prizeLabel
+      || config.prizes.find((prize) => prize.id === entry.prizeId)?.label || "Premio registrado",
+    ...(entry.productId ? { schemaVersion: entry.schemaVersion, productId: entry.productId,
+      productName: entry.productName, productPrice: entry.productPrice,
+      variantId: entry.variantId || "", variantName: entry.variantName || "" } : {}),
+    ...(entry.prizeId ? { prizeId: entry.prizeId } : {}),
     createdAt: entry.createdAt.toDate().toISOString(),
   };
 }
@@ -96,6 +103,20 @@ exports.enterGiveaway = onCall({ region: "us-central1", cors: true, invoker: "pu
     const input = validatedInput(request.data, request.auth);
     const flag = await transaction.get(configRef);
     const counter = await transaction.get(counterRef);
+    const productRef = db.collection("products").doc(input.productId);
+    // El precio y la categoría se leen dentro de la misma transacción de alta.
+    // Cualquier cambio concurrente obliga a revalidar; el navegador solo aporta ID.
+    const productSnap = await transaction.get(productRef);
+    const variantsSnap = await transaction.get(productRef.collection("variants"));
+    const categoriesSnap = await transaction.get(db.collection("categories"));
+    const selected = productSnap.exists ? selectGiveawayProduct(
+      { ...productSnap.data(), id: productSnap.id },
+      variantsSnap.docs.map((snapshot) => ({ ...snapshot.data(), id: snapshot.id })),
+      categoriesSnap.docs.map((snapshot) => ({ ...snapshot.data(), id: snapshot.id })), config,
+    ) : null;
+    if (!selected) {
+      throw new HttpsError("failed-precondition", "La colonia elegida ya no califica. Escogé un perfume activo con precio de venta menor a ₡50 000.");
+    }
     // Se evalúa el reloj del servidor después de las lecturas y en CADA reintento.
     const now = Date.now();
     if (now < START_MS) throw new HttpsError("failed-precondition", "El sorteo todavía no ha comenzado.");
@@ -110,7 +131,8 @@ exports.enterGiveaway = onCall({ region: "us-central1", cors: true, invoker: "pu
 
     const timestamp = Timestamp.fromMillis(now);
     const entry = {
-      uid, campaignId: config.campaignId, number: lastNumber + 1, ...input,
+      uid, campaignId: config.campaignId, number: lastNumber + 1, ...input, ...selected,
+      schemaVersion: 2, prizeLabel: selected.productName,
       createdAt: timestamp, consentAcceptedAt: timestamp,
       termsVersion: config.termsVersion,
       privacyConsentVersion: config.privacyConsentVersion,

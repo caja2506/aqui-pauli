@@ -1,7 +1,8 @@
-import { doc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase';
 import giveaway from '../../functions/lib/giveawayConfig.json';
+import { isFragranceProduct, selectGiveawayProduct } from '../../functions/lib/giveawayCatalog.mjs';
 
 export const GIVEAWAY = giveaway;
 
@@ -12,8 +13,37 @@ export function giveawayStatus(enabled, now = Date.now()) {
   return 'active';
 }
 
-export function giveawayPrizeLabel(prizeId) {
-  return GIVEAWAY.prizes.find((prize) => prize.id === prizeId)?.label || 'Premio registrado';
+export function giveawayPrizeLabel(entryOrId) {
+  if (entryOrId && typeof entryOrId === 'object') {
+    if (entryOrId.productName) return entryOrId.productName;
+    if (entryOrId.prizeLabel) return entryOrId.prizeLabel;
+  }
+  const prizeId = typeof entryOrId === 'string' ? entryOrId : entryOrId?.prizeId;
+  return GIVEAWAY.prizes?.find((prize) => prize.id === prizeId)?.label || 'Premio registrado';
+}
+
+export function searchGiveawayProducts(products, search) {
+  const normalize = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const terms = normalize(search).split(/\s+/).filter(Boolean);
+  return products.filter((product) => terms.every((term) => normalize(product.productName).includes(term)));
+}
+
+export async function loadGiveawayProducts() {
+  const [productSnapshot, categorySnapshot] = await Promise.all([
+    getDocs(collection(db, 'products')), getDocs(collection(db, 'categories')),
+  ]);
+  const categories = categorySnapshot.docs.map((snapshot) => ({ ...snapshot.data(), id: snapshot.id }));
+  const products = productSnapshot.docs.map((snapshot) => ({ ...snapshot.data(), id: snapshot.id }))
+    .filter((product) => product.active === true && !product.deleted && !product.unlisted
+      && isFragranceProduct(product, categories, GIVEAWAY));
+  const choices = await Promise.all(products.map(async (product) => {
+    // Un fallo al leer variantes no permite usar un precio base posiblemente distinto.
+    const snapshot = await getDocs(collection(db, 'products', product.id, 'variants'));
+    const variants = snapshot.docs.map((variant) => ({ ...variant.data(), id: variant.id }));
+    return selectGiveawayProduct(product, variants, categories, GIVEAWAY);
+  }));
+  return choices.filter(Boolean).sort((a, b) => a.productName.localeCompare(b.productName, 'es')
+    || a.productId.localeCompare(b.productId));
 }
 
 export function watchGiveawayConfig(onValue, onError) {
@@ -34,7 +64,7 @@ export async function enterGiveaway(form) {
     fullName: form.fullName,
     phone: form.phone,
     email: form.email,
-    prizeId: form.prizeId,
+    productId: form.productId,
     eligibilityAccepted: form.eligibilityAccepted,
     privacyConsent: form.privacyConsent,
     promotionsConsent: form.promotionsConsent,

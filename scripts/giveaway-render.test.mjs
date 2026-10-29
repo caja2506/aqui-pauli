@@ -25,8 +25,9 @@ const ADMIN = 'src/pages/admin/GiveawayAdminPage.jsx';
 const APP = 'src/App.jsx';
 const SIDEBAR = 'src/components/admin/AdminSidebar.jsx';
 const CONFIG = 'functions/lib/giveawayConfig.json';
+const POLICY = 'functions/lib/giveawayCatalog.mjs';
 const files = [SERVICE, HOOK, BANNER, PAGE, BASES, LOGIN, HOME, CATALOG, ADMIN, APP, SIDEBAR,
-  'src/utils/giveawayExport.js',
+  POLICY, 'src/utils/giveawayExport.js', 'src/utils/formatters.js',
   'src/components/legal/LegalLayout.jsx', 'src/components/auth/FacebookIcon.jsx'];
 const config = JSON.parse(await readFile(path.join(root, CONFIG), 'utf8'));
 const compiled = new Map(await Promise.all(files.map(async (relative) => {
@@ -39,11 +40,15 @@ const compiled = new Map(await Promise.all(files.map(async (relative) => {
 const plain = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 const contains = (html, value) => assert.ok(plain(html).includes(value), `Missing text: ${value}`);
 const user = { uid: 'participant-1', isAnonymous: false, displayName: 'Ana Prueba', email: 'ana@example.invalid' };
+const choices = [
+  { productId: 'p1', productName: 'Versace Eros EDT 100 ml', productPrice: 47000, variantId: 'v1', variantName: '100 ml' },
+  { productId: 'p2', productName: 'Rasasi Hawas Black EDP 100 ml', productPrice: 32000, variantId: 'v2', variantName: '100 ml' },
+];
 const validForm = {
-  fullName: 'Ana Prueba', phone: '88887777', email: user.email, prizeId: config.prizes[0].id,
+  fullName: 'Ana Prueba', phone: '88887777', email: user.email, productId: choices[0].productId,
   eligibilityAccepted: true, privacyConsent: true, promotionsConsent: false,
 };
-const receipt = { campaignId: config.campaignId, number: 12, prizeId: config.prizes[0].id, createdAt: '2026-10-29T15:00:00.000Z' };
+const receipt = { campaignId: config.campaignId, number: 12, ...choices[0], prizeLabel: choices[0].productName, createdAt: '2026-10-29T15:00:00.000Z' };
 const forbidden = (name) => () => { throw new Error(`Unexpected external operation: ${name}`); };
 
 function runtime(options = {}) {
@@ -57,9 +62,13 @@ function runtime(options = {}) {
   const updates = [];
   const queries = [];
   const writes = [];
+  const reads = [];
+  const inputs = [];
+  const selects = [];
   const auth = Object.hasOwn(options, 'user') ? options.user : user;
   const giveaway = { enabled: true, loading: false, error: false, status: 'active', ...options.giveaway };
   const registration = { entry: null, loading: false, error: false, retry: () => {}, ...options.registration };
+  const catalog = { products: choices, loading: false, error: false, retry: () => {}, ...options.catalog };
   const modules = new Map([
     [abs(CONFIG), config],
     [abs('src/firebase.js'), { db: {}, functions: {} }],
@@ -81,13 +90,16 @@ function runtime(options = {}) {
   if (!options.realHooks) modules.set(abs(HOOK), {
     useGiveaway: () => giveaway,
     useGiveawayEntry: (uid) => { options.onEntryUid?.(uid); return registration; },
+    useGiveawayProducts: () => catalog,
   });
+  let emptyStringSlot = 0;
   const pageReact = {
     ...React,
     useState(initial) {
       let next = initial;
       if (initial && Object.hasOwn(initial, 'fullName') && options.form) next = options.form;
       if (initial === null && options.submitted) next = options.submitted;
+      if (initial === '' && ++emptyStringSlot === 2 && options.search) next = options.search;
       const [value, setValue] = React.useState(next);
       return [value, (updated) => { updates.push(updated); setValue(updated); }];
     },
@@ -105,12 +117,21 @@ function runtime(options = {}) {
   const observeElement = (fn) => (type, props, ...rest) => {
     if (type === 'form') forms.push(props);
     if (type === 'button') buttons.push(props);
+    if (type === 'input') inputs.push(props);
+    if (type === 'select') selects.push(props);
     if (props?.to) links.push(props);
     return fn(type, props, ...rest);
   };
   const jsxRuntime = { ...jsx, jsx: observeElement(jsx.jsx), jsxs: observeElement(jsx.jsxs) };
   const sdk = {
     doc: (_db, ...parts) => ({ path: parts.join('/') }),
+    collection: (_db, ...parts) => ({ path: parts.join('/') }),
+    getDocs: async (ref) => {
+      reads.push(ref.path);
+      if (options.readError?.(ref.path)) throw new Error('Firestore unavailable');
+      if (!options.firestore || !Object.hasOwn(options.firestore, ref.path)) return forbidden(`Firestore read ${ref.path}`)();
+      return { docs: options.firestore[ref.path].map((data) => ({ id: data.id, data: () => data })) };
+    },
     serverTimestamp: () => ({ __serverTimestamp: true }),
     setDoc: async (ref, value, writeOptions) => {
       writes.push({ path: ref.path, value, options: writeOptions });
@@ -164,12 +185,12 @@ function runtime(options = {}) {
       initialEntries: [{ pathname, state: locationState }],
     }, React.createElement(Component, props)));
   }
-  return { render, load: (relative) => load(abs(relative)), forms, links, buttons, calls, snapshots, updates, queries, writes };
+  return { render, load: (relative) => load(abs(relative)), forms, links, buttons, calls, snapshots, updates, queries, writes, reads, inputs, selects };
 }
 
 test('banner exacto, rosado y enlazado a la inscripción', () => {
   const html = runtime().render(BANNER);
-  contains(html, '🎁 Sorteo: ganá Light Blue Mujer EDT 25 ml o Acqua di Giò EDT 100 ml — Participar');
+  contains(html, '🎁 Sorteo: ganá la colonia que querás (hasta ₡50 000) — Participar');
   assert.match(html, /href="\/sorteo"/);
   assert.match(html, /bg-rose-100/);
 });
@@ -217,7 +238,7 @@ test('el login existente abre registro para el sorteo y conserva login por defec
   assert.doesNotMatch(runtime().render(LOGIN), /placeholder="Tu nombre"/);
 });
 
-test('formulario muestra datos, dos premios, correo de cuenta y consentimiento separado', () => {
+test('formulario muestra selector buscable, nombres y precios, correo de cuenta y consentimiento separado', () => {
   const html = runtime().render();
   assert.match(html, /data-testid="giveaway-form"/);
   const nameInput = html.match(/<input[^>]*name="fullName"[^>]*>/)?.[0];
@@ -229,7 +250,14 @@ test('formulario muestra datos, dos premios, correo de cuenta y consentimiento s
   const emailInput = html.match(/<input[^>]*name="email"[^>]*>/)?.[0];
   assert.match(emailInput, /readOnly=""/);
   assert.match(emailInput, /value="ana@example.invalid"/);
-  for (const prize of config.prizes) contains(html, prize.label);
+  for (const product of choices) contains(html, product.productName);
+  const select = html.match(/<select[^>]*name="productId"[^>]*>/)?.[0];
+  assert.match(select, /required=""/);
+  assert.match(html, /id="giveaway-search"[^>]*type="search"/);
+  contains(html, '₡47 000');
+  contains(html, '₡32 000');
+  contains(html, 'Los productos de ₡50 000 o más no califican.');
+  assert.doesNotMatch(html, /name="prizeId"/);
   for (const name of ['eligibilityAccepted', 'privacyConsent']) {
     const input = html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0];
     assert.match(input, /required=""/);
@@ -256,7 +284,7 @@ test('participación guardada reemplaza formulario por número y premio incluso 
     const html = runtime({ giveaway, registration: { entry: receipt } }).render();
     contains(html, '¡Ya estás participando!');
     contains(html, 'Tu número de participante es #12');
-    contains(html, config.prizes[0].label);
+    contains(html, receipt.productName);
     assert.doesNotMatch(html, /data-testid="giveaway-form"/);
   }
 });
@@ -309,7 +337,8 @@ test('un resultado repetido usa el mismo número y una falla permite reintento s
 
 test('servicio envía solo campos autorizados y rechaza una respuesta sin número válido', async () => {
   const app = runtime({ call: async () => ({ data: { ...receipt, number: -1 } }) });
-  await assert.rejects(app.load(SERVICE).enterGiveaway({ ...validForm, uid: 'victim', number: 1, createdAt: 'forged' }), /confirmar tu número/);
+  await assert.rejects(app.load(SERVICE).enterGiveaway({ ...validForm, uid: 'victim', number: 1, createdAt: 'forged',
+    productName: 'Otro premio', productPrice: 1, variantId: 'cheap', prizeId: 'legacy' }), /confirmar tu número/);
   assert.deepEqual(app.calls[0].payload, validForm);
 });
 
@@ -393,11 +422,14 @@ test('hook programa el cierre y vuelve a consultar la hora al recuperar foco', (
   }
 });
 
-test('bases muestran período CR, responsable, premios y derechos sin promesas de sorteo inventadas', () => {
+test('bases muestran período CR, catálogo elegible, instrucción Instagram y derechos', () => {
   const html = runtime().render(BASES);
   for (const value of ['29 de octubre de 2026', '5 de noviembre de 2026', '8:00 p. m.', 'Costa Rica (UTC−6)',
     'Carlos Jiménez Arias', 'San José de Grecia', 'Firebase', 'Ley 8968', '@aqui.paulina', 'rectificación', 'promociones']) contains(html, value);
-  for (const prize of config.prizes) contains(html, prize.label);
+  contains(html, 'inferior a ₡50 000');
+  contains(html, 'con stock, bajo pedido o sin stock');
+  contains(html, 'comentá tu número de participante');
+  assert.doesNotMatch(html, /Light Blue Mujer|Acqua di Giò/);
   assert.match(html, /href="\/sorteo"/);
 });
 
@@ -410,7 +442,7 @@ const findButton = (app, label) => {
 };
 const participant = (overrides = {}) => ({
   ...receipt, id: 'participant-1', uid: 'participant-1', fullName: 'Ana Prueba', phone: '88887777',
-  email: 'ana@example.invalid', prizeLabel: config.prizes[0].label,
+  email: 'ana@example.invalid', prizeLabel: receipt.productName,
   createdAt: { seconds: Date.parse('2026-10-30T02:00:00.000Z') / 1000 }, promotionsConsent: false, ...overrides,
 });
 
@@ -432,7 +464,7 @@ test('admin muestra datos de la campaña, hora CR y autorizaciones de promocione
   const html = app.render(ADMIN);
   assert.deepEqual(app.queries, [{ collection: 'giveawayEntries', options: { orderByField: 'number', orderDirection: 'asc' } }]);
   for (const value of ['Participantes (2)', '#12', '#13', 'Ana Prueba', 'Beatriz Prueba', '+506 88887777', 'ana@example.invalid',
-    config.prizes[0].label, '29/10/2026', '20:00:00', 'Fecha (Costa Rica)', 'Promociones']) contains(html, value);
+    receipt.productName, '₡47 000', '29/10/2026', '20:00:00', 'Fecha (Costa Rica)', 'Promociones']) contains(html, value);
   assert.match(html, /<td[^>]*>Sí<\/td>/);
   assert.match(html, /<td[^>]*>No<\/td>/);
   assert.doesNotMatch(html, /#666|No debe aparecer/);
@@ -543,4 +575,141 @@ test('registro del login existente vuelve a /sorteo después de crear la cuenta'
   await app.forms[0].onSubmit({ preventDefault() {} });
   assert.deepEqual(accounts, [[user.email, 'test-password-not-a-real-account', user.displayName]]);
   assert.deepEqual(navigations, [['/sorteo', { replace: true }]]);
+});
+
+const fragranceCategories = [{ id: 'fragrance', name: 'Perfumes' },
+  { id: 'men', name: 'Hombres', parentId: 'fragrance' }, { id: 'bags', name: 'Bolsos' }];
+const catalogFixture = () => ({
+  products: [
+    { id: 'p1', name: choices[0].productName, active: true, basePrice: 60000, categoryRefs: [{ id: 'men', path: 'categories/men' }] },
+    { id: 'p2', name: choices[1].productName, active: true, basePrice: 32000, categoryRefs: [{ id: 'fragrance' }] },
+    { id: 'limit', name: 'Colonia en el límite', active: true, basePrice: 100, categoryIds: ['fragrance'] },
+    { id: 'rounded', name: 'Precio mostrado al límite', active: true, basePrice: 49999.5, categoryIds: ['fragrance'] },
+    { id: 'base-only', name: 'Sin variantes', active: true, basePrice: 49999, categoryIds: ['fragrance'] },
+    { id: 'bag', name: 'Perfume en nombre pero es un bolso', active: true, basePrice: 100, categoryIds: ['bags'] },
+    { id: 'inactive', name: 'Inactiva', active: false, basePrice: 100, categoryIds: ['fragrance'] },
+    { id: 'deleted', name: 'Eliminada', active: true, deleted: true, basePrice: 100, categoryIds: ['fragrance'] },
+    { id: 'unlisted', name: 'Oculta', active: true, unlisted: true, basePrice: 100, categoryIds: ['fragrance'] },
+  ],
+  categories: fragranceCategories,
+  'products/p1/variants': [{ id: 'v1', active: true, price: 47000, stock: 0, commercialStatus: 'no_disponible' }],
+  'products/p2/variants': [{ id: 'v2', active: true, price: 32000, stock: 0, supplyType: 'bajo_pedido' }],
+  'products/limit/variants': [{ id: 'v3', active: true, price: 50000 }],
+  'products/rounded/variants': [],
+  'products/base-only/variants': [],
+});
+
+test('catálogo Firestore usa política compartida, precio de venta y no exige stock', async () => {
+  const app = runtime({ firestore: catalogFixture() });
+  const products = await app.load(SERVICE).loadGiveawayProducts();
+  assert.deepEqual(products.map((product) => [product.productId, product.productPrice]), [
+    ['p2', 32000], ['base-only', 49999], ['p1', 47000],
+  ]);
+  assert.equal(products.find((product) => product.productId === 'p1').productName, choices[0].productName);
+  assert.deepEqual(app.reads.slice(0, 2).sort(), ['categories', 'products']);
+  assert.equal(app.reads.length, 7);
+  assert.ok(app.reads.every((read) => !/bag\/variants|inactive\/variants|deleted\/variants|unlisted\/variants/.test(read)));
+});
+
+test('fallo de una consulta de variantes falla cerrado sin reemplazar precio por base', async () => {
+  const app = runtime({ firestore: catalogFixture(), readError: (path) => path === 'products/p1/variants' });
+  await assert.rejects(app.load(SERVICE).loadGiveawayProducts(), /Firestore unavailable/);
+});
+
+test('búsqueda ignora tildes y mayúsculas, conserva selección visible y no vuelve a consultar Firestore', () => {
+  const app = runtime({ search: 'rAsAsÍ', form: validForm });
+  const html = app.render();
+  contains(html, choices[1].productName);
+  contains(html, `Colonia escogida: ${choices[0].productName}`);
+  assert.equal(app.reads.length, 0);
+  const searchInput = app.inputs.find((input) => input.id === 'giveaway-search');
+  searchInput.onChange({ target: { value: 'Versace Eros' } });
+  assert.equal(app.updates.at(-1), 'Versace Eros');
+  assert.equal(app.reads.length, 0);
+  assert.deepEqual(app.load(SERVICE).searchGiveawayProducts(choices, 'EROS vÉrsace'), [choices[0]]);
+  assert.deepEqual(app.load(SERVICE).searchGiveawayProducts(choices, 'no existe'), []);
+  const noMatches = runtime({ search: 'No existe' }).render();
+  contains(noMatches, 'No hay coincidencias con esa búsqueda.');
+});
+
+test('selector entrega únicamente productId al formulario y bloquea una opción que desapareció', async () => {
+  const app = runtime();
+  app.render();
+  app.selects[0].onChange({ target: { value: 'p2' } });
+  assert.deepEqual(app.updates.at(-1)(validForm), { ...validForm, productId: 'p2' });
+  const missing = runtime({ form: { ...validForm, productId: 'removed' }, call: forbidden('removed product') });
+  contains(missing.render(), 'La colonia elegida ya no está en la lista. Escogé otra antes de participar.');
+  assert.equal(findButton(missing, 'Participar en el sorteo').disabled, true);
+  await missing.forms[0].onSubmit({ preventDefault() {} });
+  assert.equal(missing.calls.length, 0);
+});
+
+test('carga, error y catálogo vacío impiden inscripción y permiten reintentar', async () => {
+  for (const override of [{ loading: true }, { error: true }, { products: [] }]) {
+    let retried = 0;
+    const app = runtime({ form: validForm, catalog: { ...override, retry: () => { retried++; } }, call: forbidden('catalog unavailable') });
+    const html = app.render();
+    assert.equal(findButton(app, 'Participar en el sorteo').disabled, true);
+    assert.doesNotMatch(html, /<select/);
+    await app.forms[0].onSubmit({ preventDefault() {} });
+    assert.equal(app.calls.length, 0);
+    if (!override.loading) {
+      findButton(app, override.error ? 'Reintentar carga' : 'Actualizar colonias').onClick();
+      assert.equal(retried, 1);
+    }
+  }
+});
+
+test('hook del catálogo carga una vez, expone resultados, limpia respuestas tardías y falla cerrado', async () => {
+  for (const fail of [false, true]) {
+    const effects = [];
+    const states = [];
+    const app = runtime({ realHooks: true, firestore: catalogFixture(),
+      readError: () => fail,
+      hookReact: { useState: (initial) => [initial, (next) => states.push(next)], useEffect: (effect) => effects.push(effect) },
+    });
+    const initial = app.load(HOOK).useGiveawayProducts();
+    assert.equal(initial.loading, true);
+    assert.deepEqual(initial.products, []);
+    const cleanup = effects[0]();
+    await new Promise(setImmediate);
+    assert.equal(states.at(-1).loading, false);
+    assert.equal(states.at(-1).error, fail);
+    assert.equal(states.at(-1).products.length, fail ? 0 : 3);
+    cleanup();
+    initial.retry();
+    assert.deepEqual(states.at(-2), { products: [], loading: true, error: false });
+    assert.equal(states.at(-1)(3), 4);
+  }
+  const effects = [];
+  const states = [];
+  const unmounted = runtime({ realHooks: true, firestore: catalogFixture(),
+    hookReact: { useState: (initial) => [initial, (next) => states.push(next)], useEffect: (effect) => effects.push(effect) },
+  });
+  unmounted.load(HOOK).useGiveawayProducts();
+  effects[0]()();
+  await new Promise(setImmediate);
+  assert.deepEqual(states, []);
+});
+
+test('confirmación anuncia número e instrucción Instagram y conserva el snapshot del premio', () => {
+  const html = runtime({ registration: { entry: receipt } }).render();
+  const text = plain(html).replace(/\s+\./g, '.');
+  assert.ok(text.includes('Tu número de participante es #12. Comentá ese número en la publicación del sorteo en Instagram @aqui.paulina'));
+  contains(html, receipt.productName);
+  contains(html, '₡47 000');
+  assert.match(html, /href="https:\/\/www.instagram.com\/aqui.paulina\/"/);
+});
+
+test('inscripciones anteriores mantienen número y premio en confirmación y admin sin fabricar precio', () => {
+  const legacy = { campaignId: config.campaignId, number: 2, prizeId: config.prizes[1].id, prizeLabel: config.prizes[1].label,
+    createdAt: '2026-10-29T15:00:00.000Z' };
+  const html = runtime({ registration: { entry: legacy } }).render();
+  contains(html, 'Tu número de participante es #2');
+  contains(html, config.prizes[1].label);
+  assert.doesNotMatch(html, /data-testid="giveaway-form"/);
+  const admin = runtime({ collection: { data: [{ ...legacy, id: 'legacy', fullName: 'Cliente anterior', phone: '88887777', email: 'before@example.invalid' }] } }).render(ADMIN);
+  contains(admin, config.prizes[1].label);
+  contains(admin, '#2');
+  assert.match(admin, /<td[^>]*>—<\/td>/);
 });
