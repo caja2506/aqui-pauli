@@ -8,6 +8,7 @@ const { Timestamp } = require("firebase-admin/firestore");
 const { createMemoryFirestore } = require("./helpers/memoryFirestore");
 const config = require("../lib/giveawayConfig.json");
 const catalog = require("../lib/giveawayCatalog.mjs");
+const phonePolicy = require("../lib/giveawayPhone.mjs");
 
 const START = Date.parse(config.startsAt);
 const END = Date.parse(config.endsAt);
@@ -60,6 +61,7 @@ function loadHandler(seed = {}, initialNow = NOW) {
     "./utils": { db },
     "./lib/giveawayConfig.json": config,
     "./lib/giveawayCatalog.mjs": catalog,
+    "./lib/giveawayPhone.mjs": phonePolicy,
   };
   const module = { exports: {} };
   class TestDate extends Date { static now() { return now; } }
@@ -149,8 +151,8 @@ test("rechaza nombre, teléfono, correo y premio inválidos", async () => {
   const invalid = [
     { fullName: "" }, { fullName: " A " }, { fullName: 123 }, { fullName: "x".repeat(121) },
     { fullName: "Ana\nGonzález" }, { fullName: "Ana\u0000González" },
-    { phone: 88887777 }, { phone: "8888777" }, { phone: "50688887777" }, { phone: "8888-7777" },
-    { phone: "8888a777" }, { email: null }, { email: "" }, { email: "otra@example.test" },
+    { phone: 88887777 }, { phone: "8888777" }, { phone: "888877777" }, { phone: "8888a777" },
+    { email: null }, { email: "" }, { email: "otra@example.test" },
     { productId: "" }, { productId: "a/b" }, { productId: 1 }, { productId: null }, { productId: "x".repeat(129) },
   ];
   const h = loadHandler();
@@ -159,6 +161,50 @@ test("rechaza nombre, teléfono, correo y premio inválidos", async () => {
     await rejectsCode(h.enter({ ...request(), data }), "invalid-argument");
   }
   assert.deepEqual(h.store, h.initialStore);
+});
+
+test("teléfono acepta los seis inicios válidos y guarda 8 dígitos tras quitar formato y prefijo de Costa Rica", async () => {
+  const cases = [
+    ...["2", "4", "5", "6", "7", "8"].map((start) => [`${start}1234567`, `${start}1234567`]),
+    [" 8888 7777 ", "88887777"], ["8888-7777", "88887777"],
+    ["+50688887777", "88887777"], ["50688887777", "88887777"],
+    [" +506 8888-7777 ", "88887777"], ["506-8888 7777", "88887777"],
+    ["+506\u00a08888\u00a07777", "88887777"],
+    ["50612345", "50612345"], ["5061-2345", "50612345"],
+    ["+506 5061-2345", "50612345"], ["506 5061 2345", "50612345"],
+  ];
+  for (const [phone, expected] of cases) {
+    const h = loadHandler();
+    const result = await h.enter(request({ phone }));
+    assert.equal(result.number, 1, phone);
+    assert.equal(h.get("giveawayEntries/ana").phone, expected, phone);
+    assert.equal(h.get(COUNTER).lastNumber, 1, phone);
+    assert.equal(h.stats.commits, 1, phone);
+  }
+});
+
+test("teléfono inválido no se recorta ni consume número y devuelve el mismo error claro", async () => {
+  const invalid = [
+    "", "   ", "-", "8888777", "888877777", "8888777777777777",
+    ...["0", "1", "3", "9"].map((start) => `${start}1234567`),
+    "+506", "506", "+506 8888777", "506 8888777", "+506 888877777", "506 888877777",
+    "+506 +506 88887777", "+506 506 88887777", "50650688887777",
+    "+507 8888-7777", "00506 88887777", "+88887777", "8888+7777",
+    "8888a777", "8888a7777", "8888.7777", "(8888)7777", "88887777 ext 1",
+    "８８８８７７７７", "8888\u00007777", 88887777, null, undefined, true, {}, [],
+  ];
+  for (const phone of invalid) {
+    const h = loadHandler();
+    await assert.rejects(h.enter(request({ phone })), (error) => {
+      assert.equal(error.code, "invalid-argument");
+      assert.equal(error.message, phonePolicy.GIVEAWAY_PHONE_ERROR);
+      return true;
+    });
+    assert.deepEqual(h.store, h.initialStore);
+    assert.equal(h.get("giveawayEntries/ana"), undefined);
+    assert.equal(h.get(COUNTER), undefined);
+    assert.equal(h.stats.commits, 0);
+  }
 });
 
 test("email procede de la cuenta; una cuenta social sin email puede proporcionar su contacto", async () => {
