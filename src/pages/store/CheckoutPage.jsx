@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, CreditCard, ShoppingBag } from 'lucide-react';
+import { ArrowLeft, CreditCard, ShoppingBag, ShieldCheck } from 'lucide-react';
 import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
@@ -59,6 +59,13 @@ export default function CheckoutPage() {
       setGuestError('No pudimos iniciar tu compra como invitado. Revisá tu conexión e intentá de nuevo.');
     });
   }, [authLoading, user, items.length]);
+
+  // PayPal es la opción recomendada: se preselecciona si está disponible y el cliente aún no eligió
+  // (un cliente recurrente conserva su método preferido del CRM).
+  useEffect(() => {
+    if (loadingCrm || !availability.paypal?.available) return;
+    setForm(prev => (prev.paymentMethod ? prev : { ...prev, paymentMethod: 'paypal' }));
+  }, [loadingCrm, availability.paypal?.available]);
 
   // Cargar datos del CRM para pre-llenar
   useEffect(() => {
@@ -170,7 +177,8 @@ export default function CheckoutPage() {
     }
   };
 
-  const paymentMethods = listPaymentMethods(availability);
+  // PayPal primero (opción recomendada); el resto conserva su orden.
+  const paymentMethods = [...listPaymentMethods(availability)].sort((a, b) => (b.id === 'paypal') - (a.id === 'paypal'));
   const selectedMethod = getPaymentMethod(form.paymentMethod);
   const OnlinePanel = isOnlineMethod(form.paymentMethod) && availability[form.paymentMethod]?.available ? selectedMethod.Panel : null;
 
@@ -399,15 +407,28 @@ export default function CheckoutPage() {
             <div className="space-y-2">
               {paymentMethods.map(({ id: key, label, icon }) => {
                 const Icon = icon || CreditCard;
+                const recommended = key === 'paypal';
+                const selected = form.paymentMethod === key;
                 return (
-                  <label key={key} className={`flex items-center gap-3 p-4 rounded-xl border cursor-pointer transition-all ${form.paymentMethod === key ? 'border-rose-400 bg-rose-50' : 'border-slate-200 hover:border-rose-200'}`}>
-                    <input type="radio" name="payment" value={key} checked={form.paymentMethod === key} onChange={() => handleChange('paymentMethod', key)} className="accent-rose-600" />
+                  <label key={key} className={`relative flex items-center gap-3 p-4 rounded-xl border cursor-pointer transition-all ${recommended ? (selected ? 'border-2 border-emerald-500 bg-emerald-50 shadow-md' : 'border-2 border-emerald-400 bg-emerald-50/50 hover:bg-emerald-50') : selected ? 'border-rose-400 bg-rose-50' : 'border-slate-200 hover:border-rose-200'}`}>
+                    <input type="radio" name="payment" value={key} checked={selected} onChange={() => handleChange('paymentMethod', key)} className={recommended ? 'accent-emerald-600' : 'accent-rose-600'} />
                     <Icon className="w-5 h-5 text-slate-500" />
                     <span className="text-sm font-bold text-slate-900">{label}</span>
+                    {recommended && <span className="ml-auto text-[11px] font-black uppercase tracking-wide bg-emerald-600 text-white px-2.5 py-1 rounded-full">Recomendado</span>}
                   </label>
                 );
               })}
             </div>
+            {paymentMethods.some(m => m.id === 'paypal') && (
+              <div className="flex gap-3 p-4 rounded-xl border-2 border-emerald-300 bg-emerald-50" data-testid="paypal-trust-note">
+                <ShieldCheck className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-black text-emerald-900">Pagá con PayPal y comprás protegido</p>
+                  <p className="text-sm text-emerald-900 mt-0.5">Si tu pedido no te llega o no es como lo describimos, podés abrir una reclamación con la Protección al Comprador de PayPal y, si cumplís sus requisitos, recuperar tu dinero.</p>
+                  <p className="text-[11px] text-emerald-800 mt-1">Aplican las condiciones de PayPal (plazos y requisitos). <a href="https://www.paypal.com/cr/legalhub/paypal/buyer-protection" target="_blank" rel="noopener noreferrer" className="underline font-bold">Ver Protección al Comprador</a></p>
+                </div>
+              </div>
+            )}
             {form.paymentMethod === 'sinpe' && (
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Teléfono SINPE (el mismo con que pagarás)</label>
