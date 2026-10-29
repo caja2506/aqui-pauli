@@ -493,7 +493,7 @@ export default function CrmPage() {
                               <option value="paypal">PayPal</option>
                             </select>
                           </div>
-                          <InputField label="Tel. Pago" value={editForm.paymentPhone} onChange={v => setEditForm(p => ({ ...p, paymentPhone: v }))} placeholder="7095-6070" />
+                          <InputField label="Tel. Pago" value={editForm.paymentPhone} onChange={v => setEditForm(p => ({ ...p, paymentPhone: v }))} placeholder="8888-8888" />
                         </div>
                       </div>
                     </div>

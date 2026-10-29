@@ -126,8 +126,8 @@ export const BACKORDER_DEPOSIT_PERCENT = 0.20;
 // --- Datos para pagar por SINPE Móvil (fuente única: checkout y confirmación) ---
 // `holder` = nombre del titular de la cuenta. Si queda vacío no se muestra.
 export const SINPE_INFO = {
-  number: '7095-6070',
-  holder: '',
+  number: '8310-0015',
+  holder: 'Carlos Jiménez Arias',
 };
 
 // --- Provincias de Costa Rica ---
