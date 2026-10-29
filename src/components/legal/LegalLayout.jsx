@@ -15,6 +15,10 @@ export const CONTACT = {
   whatsappUrl: 'https://wa.me/50671613342',
   email: 'hola@aquipauli.com',
   owner: 'Carlos Jiménez Arias',
+  cedula: '5-0399-0516',
+  tradeName: 'Aquí Pauli',
+  site: 'aquipauli.com',
+  fullPlace: 'San José de Grecia, Grecia, Alajuela, Costa Rica',
   place: 'Grecia, Alajuela, Costa Rica',
 };
 

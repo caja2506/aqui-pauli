@@ -16,9 +16,27 @@ function ContactLine() {
   );
 }
 
+function MerchantInfo() {
+  return (
+    <ul className="list-disc pl-5 space-y-1" data-testid="merchant-info">
+      <li>Nombre: {CONTACT.owner}</li>
+      <li>Cédula de identidad: {CONTACT.cedula}</li>
+      <li>Nombre comercial: {CONTACT.tradeName}</li>
+      <li>Ubicación: {CONTACT.fullPlace}</li>
+      <li>WhatsApp: <a className={A} href={CONTACT.whatsappUrl} target="_blank" rel="noopener noreferrer">{CONTACT.whatsappLabel}</a></li>
+      <li>Correo: <a className={A} href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a></li>
+      <li>Sitio web: {CONTACT.site}</li>
+      <li>Inscrito en el Ministerio de Hacienda (régimen simplificado).</li>
+    </ul>
+  );
+}
+
 export function TerminosPage() {
   return (
     <LegalLayout title="Términos y condiciones" updated={UPDATED}>
+      <Section title="Información del comerciante">
+        <MerchantInfo />
+      </Section>
       <Section title="1. Quiénes somos">
         <p>
           Aquí Pauli (aquipauli.com) es una tienda en línea de Costa Rica operada por {CONTACT.owner}, persona física
@@ -152,7 +170,11 @@ export function PrivacidadPage() {
   return (
     <LegalLayout title="Política de privacidad" updated={UPDATED}>
       <Section title="1. Responsable de los datos">
-        <p>{CONTACT.owner}, persona física, {CONTACT.place}, titular de Aquí Pauli (aquipauli.com). Contacto para temas de privacidad: {CONTACT.email}.</p>
+        <p>El responsable de la base de datos es {CONTACT.owner}, cédula de identidad {CONTACT.cedula}, persona física, titular de Aquí Pauli (aquipauli.com), con domicilio en Grecia, Alajuela, Costa Rica.</p>
+        <p>
+          Contacto para temas de privacidad: WhatsApp <a className={A} href={CONTACT.whatsappUrl} target="_blank" rel="noopener noreferrer">{CONTACT.whatsappLabel}</a>
+          {' · '}correo <a className={A} href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a>.
+        </p>
       </Section>
       <Section title="2. Qué datos recopilamos">
         <ul className="list-disc pl-5 space-y-1">

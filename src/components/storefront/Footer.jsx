@@ -72,7 +72,8 @@ export default function Footer() {
         </div>
 
         <div className="border-t border-slate-800 mt-8 pt-6 text-center">
-          <p className="text-[11px] text-slate-500">© {new Date().getFullYear()} Aquí Pauli · Carlos Jiménez Arias — Todos los derechos reservados</p>
+          <p className="text-[11px] text-slate-500">© {new Date().getFullYear()} Aquí Pauli — Todos los derechos reservados</p>
+          <p className="text-[11px] text-slate-500 mt-1" data-testid="footer-legal">Aquí Pauli · Carlos Jiménez Arias · Céd. 5-0399-0516 · Grecia, Alajuela, Costa Rica</p>
         </div>
       </div>
     </footer>
