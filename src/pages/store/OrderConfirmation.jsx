@@ -8,7 +8,9 @@ const WHATSAPP_NUMBER = '50671613342';
 
 export default function OrderConfirmation() {
   const { orderId } = useParams();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const isGuest = !authLoading && !!user?.isAnonymous;
+  const hasAccount = !authLoading && !!user && !user.isAnonymous;
   const location = useLocation();
   const orderNumber = location.state?.orderNumber || orderId;
   const total = location.state?.total || '';
@@ -40,7 +42,7 @@ export default function OrderConfirmation() {
         </p>
       )}
 
-      {user?.isAnonymous && <div className="mb-6 text-left"><SaveAccountPrompt /></div>}
+      {isGuest && <div className="mb-6 text-left"><SaveAccountPrompt /></div>}
 
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-left mb-6">
         <h3 className="text-sm font-bold text-amber-800 mb-2">Próximos pasos:</h3>
@@ -48,9 +50,8 @@ export default function OrderConfirmation() {
           {!online && <li>• Realiza el pago con el método seleccionado</li>}
           {needsProof && <li>• <strong>Envía tu comprobante por WhatsApp</strong> con el botón verde</li>}
           <li>• Recibirás actualizaciones por WhatsApp</li>
-          {user?.isAnonymous
-            ? <li>• Para rastrear tu pedido desde cualquier dispositivo, guardá tu cuenta con Google</li>
-            : <li>• Podrás rastrear tu pedido desde tu cuenta</li>}
+          {isGuest && <li>• Para ver tu pedido desde cualquier dispositivo, guardá tu cuenta con Google (opcional)</li>}
+          {hasAccount && <li>• Podrás ver tu pedido en «Mis Pedidos»</li>}
         </ul>
       </div>
 
@@ -76,12 +77,14 @@ export default function OrderConfirmation() {
         >
           Seguir Comprando <ArrowRight className="w-4 h-4" />
         </Link>
-        <Link
-          to="/mi-cuenta"
-          className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl text-sm shadow-sm hover:bg-slate-50 transition-all"
-        >
-          Ver Mis Pedidos
-        </Link>
+        {hasAccount && (
+          <Link
+            to="/mi-cuenta"
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl text-sm shadow-sm hover:bg-slate-50 transition-all"
+          >
+            Ver Mis Pedidos
+          </Link>
+        )}
       </div>
     </div>
   );
