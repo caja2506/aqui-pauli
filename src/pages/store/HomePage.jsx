@@ -7,7 +7,7 @@ import LoadError from '../../components/ui/LoadError';
 
 export default function HomePage() {
   const { data: products, loading, error, retry } = useCollection('products', { orderByField: 'createdAt', orderDirection: 'desc' });
-  const activeProducts = products.filter(p => p.active && !p.deleted).slice(0, 8);
+  const activeProducts = products.filter(p => p.active && !p.deleted && !p.unlisted).slice(0, 8);
 
   return (
     <div className="min-h-screen">

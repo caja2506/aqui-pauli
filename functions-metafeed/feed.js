@@ -31,7 +31,7 @@ const cleanDesc = (t) => { let used = false; return (t||"").replace(OLD_PROMISE_
 function buildRows(products, variants, brands, cats = {}) {
   const rows = [], problems = [];
   for (const p of products) {
-    if (!p.active || p.deleted) continue;
+    if (!p.active || p.deleted || p.unlisted) continue;
     const brand = brands[p.brandId] || "Aquí Pauli";
     const imgs = (p.images||[]).filter(u => /^https:\/\//.test(u));
     const vs = (variants[p.id]||[]).filter(v => v.active !== false).sort((a,b)=>(a.order||0)-(b.order||0));

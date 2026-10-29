@@ -202,7 +202,7 @@ const onProductChange = onDocumentWritten(
     }
 
     // Producto eliminado o desactivado
-    if (!after || after.deleted || !after.active) {
+    if (!after || after.deleted || !after.active || after.unlisted) {
       if (before && before.active && !before.deleted) {
         console.log(`[CatalogSync] Producto ${productId} desactivado/borrado → eliminar de Meta`);
         await deleteProductFromMeta(productId);
@@ -250,7 +250,7 @@ const onVariantChange = onDocumentWritten(
     if (!productDoc.exists) return;
 
     const productData = productDoc.data();
-    if (!productData.active || productData.deleted) return;
+    if (!productData.active || productData.deleted || productData.unlisted) return;
 
     const metaProduct = await mapProductToMeta(productId, productData);
     await upsertProductInMeta(metaProduct);

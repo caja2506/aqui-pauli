@@ -53,7 +53,7 @@ const syncCatalogBatch = onCall(
 
     for (const doc of productsSnap.docs) {
       const productData = doc.data();
-      if (productData.deleted) continue;
+      if (productData.deleted || productData.unlisted) continue;
 
       try {
         const metaItems = await mapProductToMeta(doc.id, productData);

@@ -24,7 +24,7 @@ export default function CatalogPage() {
   const activeProducts = useMemo(() => {
     const tokens = norm(search).split(/\s+/).filter(Boolean);
     return products.filter(p => {
-      if (!p.active || p.deleted) return false;
+      if (!p.active || p.deleted || p.unlisted) return false; // unlisted = solo por URL directa (productos de prueba)
       let matchesSearch = true;
       if (tokens.length) {
         const catNames = (p.categoryRefs || []).flatMap(ref => {
