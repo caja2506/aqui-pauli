@@ -23,6 +23,7 @@ const { db } = require("./utils");
 const { getFxRate, crcToUsd } = require("./lib/fx");
 const { computeTotalsCRC } = require("./lib/pricing");
 const pp = require("./lib/paypalApi");
+const { hasTilopay, isTerminalOrder, isPaidState, validDocumentId } = require("./lib/orderFulfillment");
 
 const PAYPAL_SECRET = defineSecret("PAYPAL_SECRET");
 const PAYPAL_ENV = defineString("PAYPAL_ENV", { default: "sandbox" });
@@ -46,15 +47,26 @@ async function authToken() {
 
 async function loadOwnedOrder(request, orderId) {
   if (!request.auth) throw new HttpsError("unauthenticated", "Debes iniciar sesión.");
-  if (!orderId || typeof orderId !== "string") throw new HttpsError("invalid-argument", "orderId requerido.");
+  if (!validDocumentId(orderId)) throw new HttpsError("invalid-argument", "orderId requerido.");
   const ref = db.collection("orders").doc(orderId);
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError("not-found", "Pedido no encontrado.");
   const order = snap.data();
-  if (order.uid !== request.auth.uid && order.customerUid !== request.auth.uid) {
+  assertPaypalOrder(order, request.auth.uid);
+  return { ref, order };
+}
+
+function assertPaypalOrder(order, uid, paypalOrderId) {
+  if (order.uid !== uid && order.customerUid !== uid) {
     throw new HttpsError("permission-denied", "No tienes acceso a este pedido.");
   }
-  return { ref, order };
+  if (order.paymentMethod !== "paypal" || hasTilopay(order)) {
+    throw new HttpsError("failed-precondition", "Este pedido no pertenece al flujo PayPal. Los intentos Tilopay se confirman exclusivamente con Tilopay.");
+  }
+  if (isTerminalOrder(order)) throw new HttpsError("failed-precondition", "El pedido está cerrado; el pago requiere conciliación.");
+  if (paypalOrderId && order.paypal?.orderId !== paypalOrderId) {
+    throw new HttpsError("failed-precondition", "La orden PayPal cambió; confirma el intento correcto.");
+  }
 }
 
 /** Totales calculados en el servidor + conversión a USD. */
@@ -163,7 +175,13 @@ exports.paypalCreateOrder = onCall({ ...OPTS, secrets: [PAYPAL_SECRET] }, async 
       return l ? { ...s, price: l.unitPrice, lineTotal: l.lineTotal } : s;
     });
   }
-  await ref.update(update);
+  await db.runTransaction(async (t) => {
+    const current = await t.get(ref);
+    if (!current.exists) throw new HttpsError("not-found", "Pedido no encontrado.");
+    assertPaypalOrder(current.data(), request.auth.uid);
+    if (isPaidState(current.data())) throw new HttpsError("failed-precondition", "Este pedido ya fue pagado.");
+    t.update(ref, update);
+  });
 
   return { paypalOrderId: res.data.id, ...quote };
 });
@@ -193,6 +211,12 @@ exports.paypalCaptureOrder = onCall({ ...OPTS, secrets: [PAYPAL_SECRET] }, async
     console.error("[paypal] mismatch:", orderId, mismatch);
     throw new HttpsError("failed-precondition", mismatch);
   }
+
+  // No capturar sobre un pedido cuyo método o intento cambió durante la consulta.
+  const beforeCapture = await ref.get();
+  if (!beforeCapture.exists) throw new HttpsError("not-found", "Pedido no encontrado.");
+  assertPaypalOrder(beforeCapture.data(), request.auth.uid, paypalOrderId);
+  if (isPaidState(beforeCapture.data())) return { result: "already_paid", message: "Este pedido ya fue pagado." };
 
   // 2. Capturar (si ya estaba capturada en PayPal, reusar el detalle)
   let ppOrder = det.data;
@@ -231,6 +255,8 @@ exports.paypalCaptureOrder = onCall({ ...OPTS, secrets: [PAYPAL_SECRET] }, async
   if (outcome.state === "completed") {
     await db.runTransaction(async (t) => {
       const cur = await t.get(ref);
+      if (!cur.exists) throw new HttpsError("not-found", "Pedido no encontrado.");
+      assertPaypalOrder(cur.data(), request.auth.uid, paypalOrderId);
       if (cur.data().paymentStatus === "pagado") return;
       t.update(ref, {
         paymentMethod: "paypal",
@@ -249,17 +275,29 @@ exports.paypalCaptureOrder = onCall({ ...OPTS, secrets: [PAYPAL_SECRET] }, async
   }
 
   if (outcome.state === "pending") {
-    await ref.update({
+    await db.runTransaction(async (t) => {
+      const cur = await t.get(ref);
+      if (!cur.exists) throw new HttpsError("not-found", "Pedido no encontrado.");
+      assertPaypalOrder(cur.data(), request.auth.uid, paypalOrderId);
+      if (isPaidState(cur.data())) return;
+      t.update(ref, {
       paymentStatus: "verificando",
       status: "revision_manual",
       paymentTransactionId: paypalInfo.captureId,
       paypal: paypalInfo,
       notes: `PayPal pendiente: ${outcome.reason || "revisión"}`,
       updatedAt: now,
+      });
     });
     return { result: "pending", message: "PayPal dejó el pago en revisión. Te avisaremos." };
   }
 
-  await ref.update({ paypal: paypalInfo, updatedAt: now });
+  await db.runTransaction(async (t) => {
+    const cur = await t.get(ref);
+    if (!cur.exists) throw new HttpsError("not-found", "Pedido no encontrado.");
+    assertPaypalOrder(cur.data(), request.auth.uid, paypalOrderId);
+    if (isPaidState(cur.data())) return;
+    t.update(ref, { paypal: paypalInfo, updatedAt: now });
+  });
   return { result: "declined", retry: true, message: "El pago no se completó." };
 });
