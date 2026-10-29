@@ -122,6 +122,9 @@ export default function CheckoutPage() {
 
   const shippingCost = form.canton ? calculateShippingCost(form.canton, form.shippingType) : 0;
   const total = subtotal + shippingCost;
+  // Anticipo "Bajo pedido" (20% del total): solo aplica a pagos manuales (SINPE, transferencia, efectivo).
+  const depositToday = computeBackorderDeposit(total, items);
+  const showDeposit = depositToday > 0 && depositToday < total;
   const shippingOptions = form.canton ? getShippingOptions(form.canton) : [];
 
   // Territorial data
@@ -474,6 +477,19 @@ export default function CheckoutPage() {
                 <span className="font-black text-slate-900">Total</span>
                 <span className="font-black text-rose-600">{formatCRC(total)}</span>
               </div>
+              {showDeposit && !OnlinePanel && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1" data-testid="deposit-summary">
+                  <div className="flex justify-between text-sm">
+                    <span className="font-bold text-amber-900">Pagás hoy (anticipo 20%)</span>
+                    <span className="font-black text-amber-900">{formatCRC(depositToday)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-amber-800">
+                    <span>Saldo restante (se paga después)</span>
+                    <span className="font-bold">{formatCRC(total - depositToday)}</span>
+                  </div>
+                  <p className="text-xs text-amber-800">Tu pedido incluye productos «Bajo pedido».</p>
+                </div>
+              )}
             </div>
             <p className="text-[10px] text-slate-400 text-center">
               Al comprar aceptas los <Link to="/terminos" className="underline">términos</Link>, las <Link to="/devoluciones" className="underline">devoluciones</Link> y los <Link to="/envios" className="underline">envíos</Link>.
@@ -486,7 +502,7 @@ export default function CheckoutPage() {
               disabled={submitting}
               className="w-full py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
-              {submitting ? 'Procesando...' : `Confirmar Pedido · ${formatCRC(total)}`}
+              {submitting ? 'Procesando...' : (showDeposit ? `Confirmar · pagás hoy ${formatCRC(depositToday)} (20%)` : `Confirmar Pedido · ${formatCRC(total)}`)}
             </button>
             )}
           </div>
