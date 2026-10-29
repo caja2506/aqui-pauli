@@ -1,6 +1,16 @@
 import { collection, doc, setDoc, updateDoc, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { generateOrderNumber } from '../utils/formatters';
+import { BACKORDER_DEPOSIT_PERCENT } from '../utils/constants';
+
+/**
+ * Anticipo de pedidos "Bajo pedido" (misma regla que se guarda en el pedido):
+ * 20% del total del pedido si alguna línea es bajo pedido; 0 si no.
+ */
+export function computeBackorderDeposit(total, items = []) {
+  const hasBackorder = items.some(i => i.supplyType === 'bajo_pedido');
+  return hasBackorder ? Math.round((total || 0) * BACKORDER_DEPOSIT_PERCENT) : 0;
+}
 
 /**
  * Crea un pedido completo:
@@ -20,7 +30,7 @@ export async function createOrder(orderData) {
 
   // Calcular si hay productos bajo pedido (backorder)
   const hasBackorder = orderData.items.some(i => i.supplyType === 'bajo_pedido');
-  const backorderDeposit = hasBackorder ? Math.round(total * 0.2) : 0;
+  const backorderDeposit = computeBackorderDeposit(total, orderData.items);
 
   batch.set(orderRef, {
     orderNumber,

@@ -8,7 +8,8 @@ import { formatCRC } from '../../utils/formatters';
 import { listPaymentMethods, getPaymentMethod, isOnlineMethod, ONLINE_PROVIDERS } from '../../services/payments/registry';
 import { getProvincias, getCantones, getDistritos, buscarPorCodigoPostal } from '../../data/costaRicaTerritorial';
 import { calculateShippingCost, getShippingOptions } from '../../services/shippingService';
-import { createOrder } from '../../services/orderService';
+import { createOrder, computeBackorderDeposit } from '../../services/orderService';
+import { SINPE_INFO } from '../../utils/constants';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -252,7 +253,7 @@ export default function CheckoutPage() {
       const result = await createOrder(buildOrderData(form.paymentMethod));
 
       clearCart();
-      navigate(`/orden-confirmada/${result.orderId}`, { state: { orderNumber: result.orderNumber, total, paymentMethod: form.paymentMethod } });
+      navigate(`/orden-confirmada/${result.orderId}`, { state: { orderNumber: result.orderNumber, total, paymentMethod: form.paymentMethod, hasBackorder: items.some(i => i.supplyType === 'bajo_pedido'), backorderDeposit: computeBackorderDeposit(total, items) } });
     } catch (err) {
       console.error('Error creating order:', err);
       const errorMessage = err?.code === 'functions/failed-precondition'
@@ -411,7 +412,11 @@ export default function CheckoutPage() {
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Teléfono SINPE (el mismo con que pagarás)</label>
                 <input value={form.paymentPhone} onChange={e => handleChange('paymentPhone', e.target.value)} placeholder="8888-8888" className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 ${errors.paymentPhone ? 'border-red-300' : 'border-slate-200'}`} />
-                <p className="text-[10px] text-slate-400 mt-1">SINPE Móvil al 7095-6070</p>
+                <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                  <p className="text-sm font-bold text-blue-900">Pagá por SINPE Móvil al <span className="text-lg font-black whitespace-nowrap">{SINPE_INFO.number}</span></p>
+                  {SINPE_INFO.holder && <p className="text-sm text-blue-900">A nombre de {SINPE_INFO.holder}</p>}
+                  <p className="text-sm text-blue-800 mt-1">Al confirmar el pedido te mostramos el monto exacto y el número de pedido para poner en la descripción del SINPE.</p>
+                </div>
               </div>
             )}
             {form.paymentMethod === 'transferencia' && (
@@ -419,7 +424,7 @@ export default function CheckoutPage() {
                 <p className="text-xs font-bold text-blue-700">Datos para transferencia:</p>
                 <div className="space-y-1">
                   <p className="text-sm text-blue-900"><span className="font-bold">IBAN:</span> CR15081400011020004961</p>
-                  <p className="text-sm text-blue-900"><span className="font-bold">SINPE Móvil:</span> 7095-6070</p>
+                  <p className="text-sm text-blue-900"><span className="font-bold">SINPE Móvil:</span> {SINPE_INFO.number}</p>
                 </div>
                 <p className="text-[10px] text-blue-500">Subí tu comprobante después de realizar el pago</p>
               </div>

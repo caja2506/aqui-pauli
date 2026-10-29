@@ -1,4 +1,10 @@
+import { useEffect, useState } from 'react';
 import { useParams, useLocation, Link } from 'react-router-dom';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { formatCRC } from '../../utils/formatters';
+import { SINPE_INFO } from '../../utils/constants';
+import CopyButton from '../../components/ui/CopyButton';
 import { CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
@@ -12,18 +18,35 @@ export default function OrderConfirmation() {
   const isGuest = !authLoading && !!user?.isAnonymous;
   const hasAccount = !authLoading && !!user && !user.isAnonymous;
   const location = useLocation();
-  const orderNumber = location.state?.orderNumber || orderId;
-  const total = location.state?.total || '';
-  const paymentMethod = location.state?.paymentMethod || '';
+  // Datos del pedido: primero lo que manda el checkout; si se recarga la página, se leen del pedido guardado.
+  const [savedOrder, setSavedOrder] = useState(null);
+  useEffect(() => {
+    if (!user || !orderId) return undefined;
+    let cancelled = false;
+    getDoc(doc(db, 'orders', orderId))
+      .then(snap => { if (!cancelled && snap.exists()) setSavedOrder(snap.data()); })
+      .catch(() => { /* sin acceso: se usa lo que vino del checkout */ });
+    return () => { cancelled = true; };
+  }, [user, orderId]);
+
+  const orderNumber = location.state?.orderNumber || savedOrder?.orderNumber || orderId;
+  const total = location.state?.total || savedOrder?.total || '';
+  const paymentMethod = location.state?.paymentMethod || savedOrder?.paymentMethod || '';
+  const hasBackorder = location.state?.hasBackorder ?? !!(savedOrder?.hasBackorder || savedOrder?.hasBackorderItems);
+  const backorderDeposit = location.state?.backorderDeposit ?? Number(savedOrder?.backorderDeposit || savedOrder?.depositTotal || 0);
+  const isSinpe = paymentMethod === 'sinpe' || paymentMethod === 'sinpe_movil';
+  const totalNum = Number(total) || 0;
+  const hasDeposit = hasBackorder && backorderDeposit > 0 && backorderDeposit < totalNum;
+  const amountToPay = hasDeposit ? backorderDeposit : totalNum;
 
   const paid = !!location.state?.paid;
   const online = !!location.state?.online;
 
-  const needsProof = paymentMethod === 'sinpe' || paymentMethod === 'transferencia';
+  const needsProof = isSinpe || paymentMethod === 'transferencia';
 
   // Mensaje pre-llenado para WhatsApp
   const waMessage = encodeURIComponent(
-    `¡Hola! 👋 Acabo de hacer mi pedido *${orderNumber}*${total ? ` por *₡${Number(total).toLocaleString('es-CR')}*` : ''}.\n\nAdjunto mi comprobante de pago 📎`
+    `¡Hola! 👋 Mi pedido es *${orderNumber}*${amountToPay ? `. Pagué *${formatCRC(amountToPay)}*${hasDeposit ? ' (anticipo del 20%)' : ''} por SINPE Móvil` : ''}.\n\nAdjunto mi comprobante de pago 📎`
   );
   const waLink = `https://wa.me/${WHATSAPP_NUMBER}?text=${waMessage}`;
 
@@ -46,10 +69,51 @@ export default function OrderConfirmation() {
 
       {isGuest && <div className="mb-6 text-left"><SaveAccountPrompt /></div>}
 
+      {isSinpe && (
+        <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl p-5 text-left mb-6" data-testid="sinpe-instructions">
+          <h2 className="text-base font-black text-blue-900 mb-1">Cómo pagar por SINPE Móvil</h2>
+          <p className="text-sm text-blue-900 mb-4">Hacé el SINPE con estos datos y poné el número de pedido en la descripción.</p>
+          <div className="space-y-3">
+            {amountToPay > 0 && (
+              <div>
+                <p className="text-xs font-bold text-blue-800 uppercase">{hasDeposit ? 'Monto a pagar ahora (anticipo 20%)' : 'Monto a pagar'}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-2xl font-black text-slate-900">{formatCRC(amountToPay)}</span>
+                  <CopyButton text={amountToPay} label="Copiar" ariaLabel="Copiar monto" />
+                </div>
+                {hasDeposit && (
+                  <p className="text-sm text-blue-900 mt-1">
+                    Tu pedido incluye productos «Bajo pedido». Total del pedido: {formatCRC(totalNum)}. El resto ({formatCRC(totalNum - amountToPay)}) se paga después, cuando te avisemos.
+                  </p>
+                )}
+              </div>
+            )}
+            <div>
+              <p className="text-xs font-bold text-blue-800 uppercase">Número SINPE Móvil</p>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-2xl font-black text-slate-900 whitespace-nowrap">{SINPE_INFO.number}</span>
+                <CopyButton text={SINPE_INFO.number.replace(/\D/g, '')} label="Copiar" ariaLabel="Copiar número SINPE" />
+              </div>
+              {SINPE_INFO.holder && <p className="text-sm text-blue-900">A nombre de <strong>{SINPE_INFO.holder}</strong></p>}
+            </div>
+            <div>
+              <p className="text-xs font-bold text-blue-800 uppercase">Descripción del SINPE (número de pedido)</p>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-2xl font-black text-slate-900 whitespace-nowrap">{orderNumber}</span>
+                <CopyButton text={orderNumber} label="Copiar" ariaLabel="Copiar número de pedido" />
+              </div>
+            </div>
+          </div>
+          <p className="text-sm text-blue-900 mt-4">Después de pagar, enviá el comprobante por WhatsApp con el botón verde.</p>
+        </div>
+      )}
+
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-left mb-6">
         <h3 className="text-sm font-bold text-amber-800 mb-2">Próximos pasos:</h3>
-        <ul className="text-xs text-amber-700 space-y-1.5">
-          {!online && <li>• Realiza el pago con el método seleccionado</li>}
+        <ul className="text-sm text-amber-800 space-y-1.5">
+          {!online && (isSinpe
+            ? <li>• Hacé el SINPE con los datos de arriba, con tu número de pedido en la descripción</li>
+            : <li>• Realiza el pago con el método seleccionado</li>)}
           {needsProof && <li>• <strong>Envía tu comprobante por WhatsApp</strong> con el botón verde</li>}
           <li>• Recibirás actualizaciones por WhatsApp</li>
           {hasAccount && <li>• Podrás ver tu pedido en «Mis Pedidos»</li>}

@@ -123,6 +123,13 @@ export const CRM_FUNNEL_STAGES = [
 // --- Anticipo bajo pedido ---
 export const BACKORDER_DEPOSIT_PERCENT = 0.20;
 
+// --- Datos para pagar por SINPE Móvil (fuente única: checkout y confirmación) ---
+// `holder` = nombre del titular de la cuenta. Si queda vacío no se muestra.
+export const SINPE_INFO = {
+  number: '7095-6070',
+  holder: '',
+};
+
 // --- Provincias de Costa Rica ---
 export const PROVINCIAS = [
   'San José', 'Alajuela', 'Cartago', 'Heredia', 'Guanacaste', 'Puntarenas', 'Limón'
