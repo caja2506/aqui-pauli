@@ -26,8 +26,9 @@ const APP = 'src/App.jsx';
 const SIDEBAR = 'src/components/admin/AdminSidebar.jsx';
 const CONFIG = 'functions/lib/giveawayConfig.json';
 const POLICY = 'functions/lib/giveawayCatalog.mjs';
+const PHONE_POLICY = 'functions/lib/giveawayPhone.mjs';
 const files = [SERVICE, HOOK, BANNER, PAGE, BASES, LOGIN, HOME, CATALOG, ADMIN, APP, SIDEBAR,
-  POLICY, 'src/utils/giveawayExport.js', 'src/utils/formatters.js',
+  POLICY, PHONE_POLICY, 'src/utils/giveawayExport.js', 'src/utils/formatters.js',
   'src/components/legal/LegalLayout.jsx', 'src/components/auth/FacebookIcon.jsx'];
 const config = JSON.parse(await readFile(path.join(root, CONFIG), 'utf8'));
 const compiled = new Map(await Promise.all(files.map(async (relative) => {
@@ -100,6 +101,7 @@ function runtime(options = {}) {
       if (initial && Object.hasOwn(initial, 'fullName') && options.form) next = options.form;
       if (initial === null && options.submitted) next = options.submitted;
       if (initial === '' && ++emptyStringSlot === 2 && options.search) next = options.search;
+      if (initial === '' && emptyStringSlot === 3 && options.phoneError) next = options.phoneError;
       const [value, setValue] = React.useState(next);
       return [value, (updated) => { updates.push(updated); setValue(updated); }];
     },
@@ -255,8 +257,9 @@ test('formulario muestra selector buscable, nombres y precios, correo de cuenta 
   assert.match(nameInput, /required=""/);
   assert.match(nameInput, /value="Ana Prueba"/);
   const phoneInput = html.match(/<input[^>]*name="phone"[^>]*>/)?.[0];
-  assert.match(phoneInput, /pattern="\[0-9\]\{8\}"/);
-  assert.match(phoneInput, /maxLength="8"/);
+  assert.match(phoneInput, /required=""/);
+  assert.doesNotMatch(phoneInput, /maxLength=|pattern=/);
+  contains(html, 'Podés pegar el número con +506 o 506, espacios o guiones.');
   const emailInput = html.match(/<input[^>]*name="email"[^>]*>/)?.[0];
   assert.match(emailInput, /readOnly=""/);
   assert.match(emailInput, /value="ana@example.invalid"/);
@@ -280,6 +283,93 @@ test('formulario muestra selector buscable, nombres y precios, correo de cuenta 
   contains(html, 'Opcional. Tu decisión no cambia tu participación en el sorteo.');
   assert.match(html, /href="\/sorteo\/bases"/);
   assert.match(html, /pb-\[calc\(7rem\+env\(safe-area-inset-bottom,0px\)\)\]/);
+});
+
+const validPhoneCases = [
+  ...['2', '4', '5', '6', '7', '8'].map((start) => [`${start}1234567`, `${start}1234567`]),
+  ['8888-7777', '88887777'], [' 8888 7777 ', '88887777'],
+  ['+506 8888-7777', '88887777'], ['506 8888-7777', '88887777'],
+  ['+506\u00a08888\u00a07777', '88887777'],
+  ['50612345', '50612345'], ['5061-2345', '50612345'],
+  ['+506 5061-2345', '50612345'], ['506 5061-2345', '50612345'],
+];
+const invalidPhones = [
+  '', '8888777', '888877777', '8888-77777', '8888a7777', '(8888)7777', '8888.7777',
+  ...['0', '1', '3', '9'].map((start) => `${start}1234567`),
+  '+506 888877777', '506 888877777', '+506 506 88887777', '50650688887777',
+  '+506 +506 88887777', '+507 88887777', '00506 88887777',
+];
+const phoneTarget = (value) => ({ value, message: '', setCustomValidity(message) { this.message = message; } });
+const lastFormUpdate = (app, current) => app.updates.filter((value) => typeof value === 'function').at(-1)(current);
+
+test('pegar teléfonos con formato guarda 8 dígitos completos y conserva los locales que empiezan 506', () => {
+  for (const [raw, expected] of validPhoneCases) {
+    const app = runtime({ form: validForm });
+    app.render();
+    const input = app.inputs.find((candidate) => candidate.name === 'phone');
+    const target = phoneTarget(raw);
+    input.onChange({ currentTarget: target });
+    assert.equal(lastFormUpdate(app, validForm).phone, expected, raw);
+    assert.equal(target.message, '', raw);
+    assert.equal(app.calls.length, 0);
+  }
+});
+
+test('teléfonos inválidos no pierden dígitos ni letras al pegar o repetir blur e invalid', () => {
+  for (const raw of invalidPhones) {
+    const app = runtime({ form: validForm });
+    const { GIVEAWAY_PHONE_ERROR } = app.load(PHONE_POLICY);
+    app.render();
+    const input = app.inputs.find((candidate) => candidate.name === 'phone');
+    const target = phoneTarget(raw);
+    let form = validForm;
+    for (const handler of [input.onChange, input.onBlur, input.onBlur, input.onInvalid]) {
+      handler({ currentTarget: target });
+      form = lastFormUpdate(app, form);
+      assert.equal(form.phone, raw, raw);
+      assert.equal(target.message, GIVEAWAY_PHONE_ERROR, raw);
+      target.value = form.phone;
+    }
+    assert.ok(app.updates.includes(GIVEAWAY_PHONE_ERROR));
+    assert.equal(app.calls.length, 0);
+  }
+});
+
+test('el envío valida el teléfono aun sin blur y nunca llama al servidor si es inválido', async () => {
+  for (const phone of invalidPhones) {
+    const app = runtime({ form: { ...validForm, phone } });
+    const { GIVEAWAY_PHONE_ERROR } = app.load(PHONE_POLICY);
+    app.render();
+    await app.forms[0].onSubmit({ preventDefault() {} });
+    assert.equal(app.calls.length, 0, phone);
+    assert.ok(app.updates.includes(GIVEAWAY_PHONE_ERROR), phone);
+  }
+});
+
+test('el envío acepta el formato permitido sin blur y manda el mismo teléfono canónico del servidor', async () => {
+  for (const [phone, expected] of validPhoneCases) {
+    const app = runtime({ form: { ...validForm, phone }, call: async () => ({ data: receipt }) });
+    app.render();
+    await app.forms[0].onSubmit({ preventDefault() {} });
+    assert.equal(app.calls.length, 1, phone);
+    assert.deepEqual(app.calls[0], { callableName: 'enterGiveaway', payload: { ...validForm, phone: expected } });
+  }
+});
+
+test('el error del teléfono es visible, está asociado al campo y se limpia al corregir el número', () => {
+  const { GIVEAWAY_PHONE_ERROR } = runtime().load(PHONE_POLICY);
+  const app = runtime({ form: { ...validForm, phone: '888877777' }, phoneError: GIVEAWAY_PHONE_ERROR });
+  const html = app.render();
+  contains(html, GIVEAWAY_PHONE_ERROR);
+  assert.match(html, /id="giveaway-phone-error" role="alert"/);
+  const field = html.match(/<input[^>]*name="phone"[^>]*>/)?.[0];
+  assert.match(field, /aria-invalid="true"/);
+  assert.match(field, /aria-describedby="giveaway-phone-help giveaway-phone-error"/);
+  const target = phoneTarget('+506 8888-7777');
+  app.inputs.find((candidate) => candidate.name === 'phone').onChange({ currentTarget: target });
+  assert.equal(target.message, '');
+  assert.ok(app.updates.includes(''));
+  assert.equal(lastFormUpdate(app, validForm).phone, '88887777');
 });
 
 test('el correo puede completarse cuando el proveedor de cuenta no lo entrega', () => {

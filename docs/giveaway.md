@@ -46,6 +46,10 @@ El navegador escucha el flag y programa el cierre mientras la página está abie
 
 La callable `enterGiveaway` recibe únicamente nombre, teléfono, correo, `productId` y las tres elecciones de consentimiento. Usa el UID autenticado como ID de `giveawayEntries/{uid}`. Cuando la cuenta tiene correo, ese correo es la autoridad; para proveedores sin correo, el formulario permite completar uno válido.
 
+El teléfono usa la misma política en el formulario y el servidor, definida en `functions/lib/giveawayPhone.mjs`: exactamente 8 dígitos, con inicio 2, 4, 5, 6, 7 u 8. Se ignoran espacios y guiones y se admite un único prefijo de Costa Rica `+506` o `506`. Un número local de 8 dígitos como `50612345` se conserva completo. La inscripción guarda los 8 dígitos, sin prefijo ni separadores.
+
+El campo no limita ni recorta el texto pegado, ni elimina letras u otros caracteres para convertir un valor inválido en válido. Solo reemplaza el texto por el teléfono normalizado después de validar el valor original. Un teléfono inválido se conserva para corregirlo y muestra un error al salir del campo o intentar enviar; volver a validarlo no elimina prefijos adicionales. El servidor también lo rechaza sin crear una entrada ni consumir un número.
+
 La creación de la inscripción y el incremento de `giveawayCounters/2026-10-perfumes.lastNumber` ocurren en una sola transacción. Los números empiezan en 1. Dos envíos del mismo usuario devuelven la inscripción original; varios usuarios concurrentes obtienen números distintos. El cliente no puede aportar UID, número, fecha o campaña, ni escribir el contador.
 
 Cada entrada guarda los datos solicitados, premio, número, campaña, UID, `createdAt` y `consentAcceptedAt` como Timestamp de Firestore generado en el servidor, textos/versiones de las declaraciones y el consentimiento promocional separado. No se copian participantes al CRM ni se envían promociones o mensajes automáticamente.

@@ -6,6 +6,7 @@ import { useGiveaway, useGiveawayEntry, useGiveawayProducts } from '../../hooks/
 import { CONTACT } from '../../components/legal/LegalLayout';
 import { GIVEAWAY, enterGiveaway, giveawayErrorMessage, giveawayPrizeLabel, searchGiveawayProducts } from '../../services/giveawayService';
 import { formatCRC } from '../../utils/formatters';
+import { GIVEAWAY_PHONE_ERROR, isValidGiveawayPhone, normalizeGiveawayPhone } from '../../../functions/lib/giveawayPhone.mjs';
 
 const fieldClass = 'w-full rounded-xl border border-rose-200 bg-white px-4 py-3 text-base text-slate-900 outline-none focus:ring-2 focus:ring-rose-500';
 const linkClass = 'font-bold text-rose-700 underline underline-offset-4 hover:text-rose-900';
@@ -18,6 +19,8 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const phoneInput = useRef(null);
   const catalog = useGiveawayProducts();
   const selected = catalog.products.find((product) => product.productId === form.productId);
   const filtered = searchGiveawayProducts(catalog.products, search);
@@ -27,15 +30,31 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
   const canSubmit = canEnter && !catalog.loading && !catalog.error && Boolean(selected);
   const busy = useRef(false);
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const updatePhone = (input, showError = false) => {
+    const valid = isValidGiveawayPhone(input.value);
+    input.setCustomValidity(valid ? '' : GIVEAWAY_PHONE_ERROR);
+    if (showError || phoneError) setPhoneError(valid ? '' : GIVEAWAY_PHONE_ERROR);
+    // Solo normalizamos valores ya válidos. Los inválidos se conservan completos:
+    // validarlos de nuevo no debe quitar otro prefijo ni ocultar dígitos de más.
+    update('phone', valid ? normalizeGiveawayPhone(input.value) : input.value);
+  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (busy.current || !canSubmit) return;
+    if (!isValidGiveawayPhone(form.phone)) {
+      setPhoneError(GIVEAWAY_PHONE_ERROR);
+      phoneInput.current?.setCustomValidity(GIVEAWAY_PHONE_ERROR);
+      phoneInput.current?.focus();
+      phoneInput.current?.reportValidity();
+      return;
+    }
+    setPhoneError('');
     busy.current = true;
     setSaving(true);
     setError('');
     try {
-      const result = await enterGiveaway(form);
+      const result = await enterGiveaway({ ...form, phone: normalizeGiveawayPhone(form.phone) });
       onEntered(result);
     } catch (err) {
       setError(giveawayErrorMessage(err));
@@ -58,11 +77,14 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
           <label htmlFor="giveaway-phone" className="mb-2 block text-sm font-bold text-slate-800">Teléfono de Costa Rica</label>
           <div className="flex items-center gap-3">
             <span className="text-sm font-bold text-slate-500">+506</span>
-            <input id="giveaway-phone" name="phone" type="tel" inputMode="numeric" autoComplete="tel-national"
-              required pattern="[0-9]{8}" maxLength={8} aria-describedby="giveaway-phone-help"
-              value={form.phone} onChange={(event) => update('phone', event.target.value.replace(/\D/g, '').slice(0, 8))} className={fieldClass} />
+            <input ref={phoneInput} id="giveaway-phone" name="phone" type="tel" inputMode="tel" autoComplete="tel-national"
+              required aria-invalid={Boolean(phoneError)} aria-describedby={phoneError ? 'giveaway-phone-help giveaway-phone-error' : 'giveaway-phone-help'}
+              value={form.phone} onChange={(event) => updatePhone(event.currentTarget)}
+              onBlur={(event) => updatePhone(event.currentTarget, true)}
+              onInvalid={(event) => updatePhone(event.currentTarget, true)} className={fieldClass} />
           </div>
-          <p id="giveaway-phone-help" className="mt-2 text-xs text-slate-500">Ingresá los 8 dígitos, sin el código de país.</p>
+          <p id="giveaway-phone-help" className="mt-2 text-xs text-slate-500">Ingresá 8 dígitos que empiecen con 2, 4, 5, 6, 7 u 8. Podés pegar el número con +506 o 506, espacios o guiones.</p>
+          {phoneError && <p id="giveaway-phone-error" role="alert" className="mt-2 text-sm text-red-700">{phoneError}</p>}
         </div>
         <div>
           <label htmlFor="giveaway-email" className="mb-2 block text-sm font-bold text-slate-800">Correo electrónico</label>

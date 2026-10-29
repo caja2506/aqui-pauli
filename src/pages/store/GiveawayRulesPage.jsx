@@ -18,7 +18,7 @@ export default function GiveawayRulesPage() {
       </Section>
       <Section title="3. Requisitos y participación">
         <p>La participación es gratuita y no requiere una compra. Debés ser mayor de 18 años, tener dirección en Costa Rica y registrarte o ingresar con tu cuenta de la tienda.</p>
-        <p>Completá tu nombre, teléfono costarricense de 8 dígitos y correo electrónico; escogé el premio y aceptá las dos casillas obligatorias del formulario.</p>
+        <p>Completá tu nombre, teléfono costarricense de 8 dígitos que empiece con 2, 4, 5, 6, 7 u 8 y correo electrónico; escogé el premio y aceptá las dos casillas obligatorias del formulario. Podés ingresar el teléfono con +506 o 506, espacios o guiones.</p>
         <p>Se admite una inscripción por cuenta. Al guardarla recibís un número correlativo de participante; volver a enviar el formulario no genera participaciones adicionales.</p>
         <p>Después de inscribirte, comentá tu número de participante en la publicación del sorteo en Instagram <a href="https://www.instagram.com/aqui.paulina/" target="_blank" rel="noopener noreferrer" className={linkClass}>@aqui.paulina</a>.</p>
       </Section>
