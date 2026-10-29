@@ -97,7 +97,7 @@ export default function CartDrawer() {
               <span className="text-sm font-bold text-slate-500">Subtotal</span>
               <span className="text-xl font-black text-slate-900">{formatCRC(subtotal)}</span>
             </div>
-            <p className="text-[10px] text-slate-400">Envío se calcula en el checkout</p>
+            <p className="text-[10px] text-slate-400">Envío incluido a todo el país</p>
             <Link
               to="/checkout"
               onClick={() => setIsCartOpen(false)}

@@ -15,11 +15,12 @@ test("crcToUsd redondea a 2 decimales", () => {
 });
 
 test("envío: GAM, fuera, express Grecia", () => {
-  assert.equal(shippingCostCRC(null, "Grecia", "express"), 2000);
-  assert.equal(shippingCostCRC(null, "grecia", "normal"), 3500);
-  assert.equal(shippingCostCRC(null, "Upala", "normal"), 5500);
-  assert.equal(shippingCostCRC(null, "Upala", "express"), 5500);
-  assert.equal(shippingCostCRC({ normalOutside: 6000 }, "Upala"), 6000);
+  // Envío incluido: siempre ₡0
+  assert.equal(shippingCostCRC(null, "Grecia", "express"), 0);
+  assert.equal(shippingCostCRC(null, "grecia", "normal"), 0);
+  assert.equal(shippingCostCRC(null, "Upala", "normal"), 0);
+  assert.equal(shippingCostCRC(null, "Upala", "express"), 0);
+  assert.equal(shippingCostCRC({ normalOutside: 6000 }, "Upala"), 0);
 });
 
 // Firestore falso mínimo
@@ -40,8 +41,8 @@ test("computeTotalsCRC usa precios de Firestore, no del cliente", async () => {
   });
   const t = await computeTotalsCRC(db, [{ productId: "p1", variantId: "v1", quantity: 2, price: 1 }], { canton: "Grecia" });
   assert.equal(t.subtotal, 90000);
-  assert.equal(t.shippingCost, 3000);
-  assert.equal(t.total, 93000);
+  assert.equal(t.shippingCost, 0);
+  assert.equal(t.total, 90000);
   await assert.rejects(computeTotalsCRC(db, [{ productId: "p1", variantId: "v1", quantity: 0 }], {}));
   await assert.rejects(computeTotalsCRC(db, [{ productId: "x", variantId: "v1", quantity: 1 }], {}));
 });

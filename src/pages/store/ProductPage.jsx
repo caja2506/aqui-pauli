@@ -5,6 +5,7 @@ import { db } from '../../firebase';
 import { ShoppingCart, ArrowLeft, Check, Package, Truck } from 'lucide-react';
 import { formatCRC } from '../../utils/formatters';
 import { useCart } from '../../contexts/CartContext';
+import { cleanShippingPromise } from '../../utils/shippingText';
 import StatusBadge from '../../components/ui/StatusBadge';
 import { normalizeCommercialStatus } from '../../utils/constants';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -102,7 +103,7 @@ export default function ProductPage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">{product.name}</h1>
             {product.description && (
-              <p className="text-sm text-slate-500 mt-3 leading-relaxed">{product.description}</p>
+              <p className="text-sm text-slate-500 mt-3 leading-relaxed">{cleanShippingPromise(product.description)}</p>
             )}
           </div>
 

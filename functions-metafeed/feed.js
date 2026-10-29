@@ -22,6 +22,11 @@ function catInfo(p, cats) {
   const types = [sub ? path(sub) : top.name, ...roots.filter(c => c.id !== top.id).map(path)];
   return { product_type: types.join(", "), custom_label_0: top.name, custom_label_1: sub ? sub.name : "" };
 }
+// Descripciones antiguas prometían "envío incluido y pago contra entrega" (el checkout cobra el envío y no ofrece contra entrega)
+const OLD_PROMISE_RE = /env[ií]o\s+(?:incluido|gratis|gratuito)(?:\s+(?:a|en)\s+todo\s+(?:el\s+)?pa[ií]s)?(?:\s*(?:y|e|,|\+|\/)\s*(?:pago\s+)?(?:contra\s*entrega|contraentrega))?|(?:pago\s+)?contra\s*-?\s*entrega/gi;
+const SHIPPING_NOTE = "Envío incluido a todo el país. Elegís el método de pago al finalizar la compra.";
+const cleanDesc = (t) => { let used = false; return (t||"").replace(OLD_PROMISE_RE, () => (used ? "" : ((used = true), SHIPPING_NOTE))).replace(/\s*·\s*·\s*/g, " · ").replace(/\s*·\s*$/, "").replace(/\.\s*\./g, ".").trim(); };
+
 // products: [{id, ...fields}], variants: {pid:[{id,...}]}, brands: {id:name}
 function buildRows(products, variants, brands, cats = {}) {
   const rows = [], problems = [];
@@ -31,7 +36,7 @@ function buildRows(products, variants, brands, cats = {}) {
     const imgs = (p.images||[]).filter(u => /^https:\/\//.test(u));
     const vs = (variants[p.id]||[]).filter(v => v.active !== false).sort((a,b)=>(a.order||0)-(b.order||0));
     const ci = catInfo(p, cats);
-    const base = { ...ci, title: p.name, description: (p.description||"").trim() || `${p.name} - ${brand}. Disponible en Aquí Pauli, Costa Rica.`,
+    const base = { ...ci, title: p.name, description: cleanDesc(p.description) || `${p.name} - ${brand}. Disponible en Aquí Pauli, Costa Rica.`,
       condition: "new", link: `${SITE}/producto/${p.id}`, brand };
     const list = vs.length ? vs.map(v => ({ ...base, id: v.sku || `${p.id}-${v.id}`, item_group_id: vs.length>1 ? p.id : "",
         title: vs.length>1 && v.name ? `${p.name} - ${v.name}` : p.name,

@@ -119,7 +119,8 @@ exports.createOrderWithReservation = onCall(
           };
         });
 
-        const total = subtotal + shippingCost;
+        // Envío incluido: el servidor ignora cualquier costo de envío enviado por el cliente
+        const total = subtotal;
         const remainingTotal = hasBackorderItems ? total - depositTotal : 0;
 
         // ── 4. Crear orden ──

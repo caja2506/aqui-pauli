@@ -19,7 +19,12 @@ const DEFAULT_SHIPPING_PRICES = { normalGAM: 3500, normalOutside: 5500, expressG
 const norm = (s) => String(s || "").trim().toLowerCase();
 const inList = (list, canton) => !!canton && list.some((c) => norm(c) === norm(canton));
 
+// El envío va INCLUIDO en el precio (decisión de Carlos): nunca se cobra envío aparte.
+// Normal / Express quedan solo como elección de tiempo de entrega.
+const SHIPPING_INCLUDED = true;
+
 function shippingCostCRC(prices, canton, shippingType = "normal") {
+  if (SHIPPING_INCLUDED) return 0;
   const p = { ...DEFAULT_SHIPPING_PRICES, ...(prices || {}) };
   if (shippingType === "express" && inList(EXPRESS_CANTONES, canton)) return Number(p.expressGrecia);
   if (inList(GAM_CANTONES, canton)) return Number(p.normalGAM);
@@ -67,4 +72,4 @@ async function computeTotalsCRC(db, items, ship) {
   return { lines, subtotal, shippingCost, total: subtotal + shippingCost };
 }
 
-module.exports = { computeTotalsCRC, shippingCostCRC, GAM_CANTONES, EXPRESS_CANTONES };
+module.exports = { SHIPPING_INCLUDED, computeTotalsCRC, shippingCostCRC, GAM_CANTONES, EXPRESS_CANTONES };

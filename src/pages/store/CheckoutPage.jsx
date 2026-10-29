@@ -384,7 +384,7 @@ export default function CheckoutPage() {
                         <p className="text-xs text-slate-400">{opt.estimatedDays}</p>
                       </div>
                     </div>
-                    <span className="text-sm font-black text-rose-600">{formatCRC(opt.price)}</span>
+                    <span className="text-sm font-black text-emerald-600">{opt.price > 0 ? formatCRC(opt.price) : 'Envío incluido'}</span>
                   </label>
                 ))}
               </div>
@@ -463,7 +463,7 @@ export default function CheckoutPage() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Envío</span>
-                <span className="font-bold">{form.canton ? formatCRC(shippingCost) : '—'}</span>
+                <span className="font-bold">{shippingCost > 0 ? formatCRC(shippingCost) : 'Incluido'}</span>
               </div>
               <div className="flex justify-between text-lg pt-2 border-t border-slate-100">
                 <span className="font-black text-slate-900">Total</span>

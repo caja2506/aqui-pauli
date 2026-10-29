@@ -85,7 +85,12 @@ export function hasExpressAvailable(canton) {
 /**
  * Calcula el costo de envío según cantón y tipo
  */
+// Envío INCLUIDO en el precio (decisión de Carlos): no se cobra envío aparte.
+// Normal / Express quedan solo como elección de tiempo de entrega.
+export const SHIPPING_INCLUDED = true;
+
 export function calculateShippingCost(canton, shippingType = 'normal') {
+  if (SHIPPING_INCLUDED) return 0;
   const prices = getPricesSync();
 
   if (shippingType === 'express' && hasExpressAvailable(canton)) {
@@ -108,7 +113,7 @@ export function getShippingOptions(canton) {
     {
       type: 'normal',
       label: 'Envío Normal (Correos de Costa Rica)',
-      price: isInGAM(canton) ? prices.normalGAM : prices.normalOutside,
+      price: SHIPPING_INCLUDED ? 0 : (isInGAM(canton) ? prices.normalGAM : prices.normalOutside),
       estimatedDays: isInGAM(canton) ? '2-4 días hábiles' : '4-7 días hábiles',
     },
   ];
@@ -117,7 +122,7 @@ export function getShippingOptions(canton) {
     options.unshift({
       type: 'express',
       label: 'Envío Express (Solo Grecia)',
-      price: prices.expressGrecia,
+      price: SHIPPING_INCLUDED ? 0 : prices.expressGrecia,
       estimatedDays: '1-2 días hábiles',
     });
   }
