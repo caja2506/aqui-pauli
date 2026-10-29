@@ -20,6 +20,7 @@ import CatalogPage from './pages/store/CatalogPage';
 import ProductPage from './pages/store/ProductPage';
 import CheckoutPage from './pages/store/CheckoutPage';
 import OrderConfirmation from './pages/store/OrderConfirmation';
+import TilopayReturnPage from './pages/store/TilopayReturnPage';
 import MyOrdersPage from './pages/store/MyOrdersPage';
 import NotFoundPage from './pages/store/NotFoundPage';
 import { TerminosPage, DevolucionesPage, EnviosPage, PrivacidadPage } from './pages/store/LegalPages';
@@ -106,6 +107,7 @@ export default function App() {
           <Route path="/producto/:productId" element={<ProductPage />} />
           <Route path="/checkout" element={<CheckoutPage />} />
           <Route path="/orden-confirmada/:orderId" element={<OrderConfirmation />} />
+          <Route path="/tilopay/retorno/:orderId" element={<TilopayReturnPage />} />
           <Route path="/mi-cuenta" element={<MyOrdersPage />} />
           {/* Páginas legales */}
           <Route path="/terminos" element={<TerminosPage />} />

@@ -14,10 +14,11 @@
 //       createPendingOrder(methodId) → Promise<{orderId, orderNumber}>,
 //       onPaid({ orderId, orderNumber }) }
 //
-// Para agregar Tilopay: crear tilopayProvider y añadirlo a ONLINE_PROVIDERS.
+// Tilopay (tarjeta, colones) ya está registrado pero apagado por config; ver docs/payments-tilopay.md.
 // ==============================================
 import { Smartphone, Building } from 'lucide-react';
 import { paypalProvider } from './paypalProvider';
+import { tilopayProvider } from './tilopayProvider';
 
 export const MANUAL_METHODS = {
   sinpe: { id: 'sinpe', kind: 'manual', label: 'SINPE Móvil', icon: Smartphone },
@@ -26,6 +27,7 @@ export const MANUAL_METHODS = {
 
 export const ONLINE_PROVIDERS = {
   paypal: paypalProvider,
+  tilopay: tilopayProvider, // apagado hasta config/payments.tilopay.enabled === true
 };
 
 export function getPaymentMethod(id) {

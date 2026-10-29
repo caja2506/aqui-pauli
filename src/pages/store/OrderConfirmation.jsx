@@ -40,7 +40,7 @@ export default function OrderConfirmation() {
       </p>
       {online && (
         <p className={`text-sm font-bold mb-6 ${paid ? 'text-green-700' : 'text-amber-700'}`}>
-          {paid ? '✅ Pago recibido con PayPal.' : 'Tu pago con PayPal está en revisión; te avisaremos por WhatsApp.'}
+          {paid ? `✅ Pago recibido con ${paymentMethod === 'tilopay' ? 'tarjeta' : 'PayPal'}.` : `Tu pago con ${paymentMethod === 'tilopay' ? 'tarjeta' : 'PayPal'} está en revisión; te avisaremos por WhatsApp.`}
         </p>
       )}
 

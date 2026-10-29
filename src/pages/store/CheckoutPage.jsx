@@ -474,7 +474,7 @@ export default function CheckoutPage() {
               Al comprar aceptas los <Link to="/terminos" className="underline">términos</Link>, las <Link to="/devoluciones" className="underline">devoluciones</Link> y los <Link to="/envios" className="underline">envíos</Link>.
             </p>
             {OnlinePanel ? (
-              <p className="text-[11px] text-slate-400 text-center">Paga con los botones de PayPal de arriba para confirmar tu pedido.</p>
+              <p className="text-[11px] text-slate-400 text-center">Paga con el panel de pago de arriba para confirmar tu pedido.</p>
             ) : (
             <button
               type="submit"
