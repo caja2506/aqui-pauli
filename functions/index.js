@@ -14,6 +14,7 @@ const tilopay = require("./tilopay");
 const crm = require("./crm");
 const schedulers = require("./schedulers");
 const catalogBatch = require("./whatsapp/catalogBatchSync");
+const giveaway = require("./giveaway");
 
 // Re-exportar todo
 module.exports = {
@@ -24,4 +25,5 @@ module.exports = {
   ...crm,
   ...schedulers,
   ...catalogBatch,
+  ...giveaway,
 };
