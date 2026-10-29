@@ -5,6 +5,7 @@
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { getFirestore } = require("firebase-admin/firestore");
 const fetch = require("node-fetch");
+const { getMetaConfig, META_SYSTEM_USER_TOKEN } = require("../lib/metaConfig");
 
 const db = getFirestore();
 const GRAPH_API = "https://graph.facebook.com/v22.0";
@@ -91,11 +92,10 @@ async function mapProductToMeta(productId, productData) {
 // Acepta un array de items (variantes) y los envía en batch
 // ==============================================
 async function upsertProductInMeta(itemsArray) {
-  const catalogId = process.env.META_CATALOG_ID;
-  const token = process.env.META_SYSTEM_USER_TOKEN;
+  const { catalogId, token, missing, message } = getMetaConfig();
 
-  if (!catalogId || !token) {
-    console.warn("[CatalogSync] META_CATALOG_ID o META_SYSTEM_USER_TOKEN no configurados — omitiendo sync");
+  if (missing.length) {
+    console.warn(`[CatalogSync] ${message} — omitiendo sync`);
     return null;
   }
 
@@ -142,10 +142,9 @@ async function upsertProductInMeta(itemsArray) {
 // ELIMINAR PRODUCTO DE META CATALOG
 // ==============================================
 async function deleteProductFromMeta(retailerId) {
-  const catalogId = process.env.META_CATALOG_ID;
-  const token = process.env.META_SYSTEM_USER_TOKEN;
+  const { catalogId, token, missing } = getMetaConfig();
 
-  if (!catalogId || !token) return null;
+  if (missing.length) return null;
 
   try {
     const url = `${GRAPH_API}/${catalogId}/items_batch`;
@@ -179,6 +178,7 @@ async function deleteProductFromMeta(retailerId) {
 const onProductChange = onDocumentWritten(
   {
     document: "products/{productId}",
+    secrets: [META_SYSTEM_USER_TOKEN],
   },
   async (event) => {
     const productId = event.params.productId;
@@ -233,6 +233,7 @@ const onProductChange = onDocumentWritten(
 const onVariantChange = onDocumentWritten(
   {
     document: "products/{productId}/variants/{variantId}",
+    secrets: [META_SYSTEM_USER_TOKEN],
   },
   async (event) => {
     const productId = event.params.productId;

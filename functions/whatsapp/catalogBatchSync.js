@@ -6,6 +6,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { getFirestore } = require("firebase-admin/firestore");
 const { mapProductToMeta } = require("./catalogSync");
+const { getMetaConfig, META_SYSTEM_USER_TOKEN } = require("../lib/metaConfig");
 const fetch = require("node-fetch");
 
 const db = getFirestore();
@@ -18,6 +19,7 @@ const GRAPH_API = "https://graph.facebook.com/v22.0";
 const syncCatalogBatch = onCall(
   {
     timeoutSeconds: 300,
+    secrets: [META_SYSTEM_USER_TOKEN],
   },
   async (request) => {
     if (!request.auth) {
@@ -29,11 +31,10 @@ const syncCatalogBatch = onCall(
       throw new HttpsError("permission-denied", "Solo admins pueden sincronizar");
     }
 
-    const catalogId = process.env.META_CATALOG_ID;
-    const token = process.env.META_SYSTEM_USER_TOKEN;
+    const { catalogId, token, missing, message } = getMetaConfig();
 
-    if (!catalogId || !token) {
-      throw new HttpsError("failed-precondition", "META_CATALOG_ID o META_SYSTEM_USER_TOKEN no configurados");
+    if (missing.length) {
+      throw new HttpsError("failed-precondition", message);
     }
 
     console.log("[CatalogBatchSync] Iniciando sincronización batch...");
