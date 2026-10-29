@@ -10,6 +10,25 @@
 
 El banner aparece en inicio y catálogo durante el período. El formulario exige una cuenta registrada; una sesión anónima de compra no es suficiente. El login existente conserva el retorno a `/sorteo`.
 
+## Premio del catálogo
+
+La selección fija de dos perfumes fue reemplazada por un selector con búsqueda de productos cargados de Firestore. `functions/lib/giveawayCatalog.mjs` es la política única utilizada por el navegador y la función del servidor:
+
+- Producto activo, publicado, no borrado y no marcado `unlisted`.
+- Categoría de perfumes, colonias o fragancias, o una subcategoría de estas. Se usan las categorías reales de Firestore y sus relaciones `parentId`, no palabras del nombre del producto.
+- Precio de venta positivo y **estrictamente inferior a ₡50 000**. El banner conserva el texto comercial solicitado «hasta ₡50 000», pero formulario y bases aclaran que ₡50 000 exactos no califican.
+- Se usa el precio de la tarjeta del catálogo: primera variante activa según `order` y, en empate, ID del documento; su `price` con el fallback existente a `basePrice`. No se escoge la variante más barata. Sin variantes activas se usa el precio base mostrado.
+- No se filtra por stock, abastecimiento o estado comercial: también califican productos bajo pedido o sin stock. Un error de lectura de variantes muestra un error y no habilita un precio base potencialmente incorrecto.
+- Como la tienda muestra colones enteros, un precio que se redondea a ₡50 000 también queda excluido.
+
+La lista se carga al abrir el formulario y permite actualizar colonias y precios. El servidor vuelve a leer producto, variantes y categorías dentro de la transacción de inscripción. Si el catálogo cambia entre lecturas y escritura, la transacción reintenta y valida de nuevo. El cliente envía únicamente `productId`, nunca el nombre o precio como autoridad.
+
+Las nuevas entradas guardan `productId`, `productName`, `productPrice`, la variante canónica y `schemaVersion: 2`, con la versión de bases `2026-10-29-catalog-v2`. Los valores corresponden al catálogo al inscribirse; no se recalculan al consultar la participación.
+
+Las inscripciones anteriores conservan su número, premio y consentimientos. No se migra su elección, no se resetea el contador y no se asigna un precio inventado a los premios de la primera versión. El admin, CSV y comprobante usan el nombre guardado, con `prizeLabel` como compatibilidad para esas entradas.
+
+La confirmación destaca el número y pide comentarlo en la publicación del sorteo en Instagram `@aqui.paulina`. El enlace abre el perfil porque no se proporcionó una URL de publicación. La aplicación no publica comentarios automáticamente.
+
 ## Encender y apagar
 
 El botón del panel admin escribe el booleano `enabled` en `config/giveaway`, conservando los demás campos. También se puede cambiar ese campo desde la consola de Firestore:
@@ -24,7 +43,7 @@ El navegador escucha el flag y programa el cierre mientras la página está abie
 
 ## Datos y numeración
 
-La callable `enterGiveaway` recibe únicamente nombre, teléfono, correo, premio y las tres elecciones de consentimiento. Usa el UID autenticado como ID de `giveawayEntries/{uid}`. Cuando la cuenta tiene correo, ese correo es la autoridad; para proveedores sin correo, el formulario permite completar uno válido.
+La callable `enterGiveaway` recibe únicamente nombre, teléfono, correo, `productId` y las tres elecciones de consentimiento. Usa el UID autenticado como ID de `giveawayEntries/{uid}`. Cuando la cuenta tiene correo, ese correo es la autoridad; para proveedores sin correo, el formulario permite completar uno válido.
 
 La creación de la inscripción y el incremento de `giveawayCounters/2026-10-perfumes.lastNumber` ocurren en una sola transacción. Los números empiezan en 1. Dos envíos del mismo usuario devuelven la inscripción original; varios usuarios concurrentes obtienen números distintos. El cliente no puede aportar UID, número, fecha o campaña, ni escribir el contador.
 
@@ -34,7 +53,7 @@ Las reglas permiten `get` del propio documento a usuarios registrados y lectura/
 
 ## Administración y privacidad
 
-La lista muestra número, nombre, teléfono, correo, premio, fecha de Costa Rica y autorización promocional. El CSV incluye esos mismos campos, codificación UTF-8 con BOM y protección contra fórmulas de hojas de cálculo. La descarga ocurre localmente por acción del administrador.
+La lista muestra número, nombre, teléfono, correo, colonia escogida, precio al inscribirse, fecha de Costa Rica y autorización promocional. El CSV incluye esos campos y el ID del producto, codificación UTF-8 con BOM y protección contra fórmulas de hojas de cálculo. La descarga ocurre localmente por acción del administrador. Las filas anteriores sin precio registrado lo dejan vacío en el CSV.
 
 Las solicitudes de acceso, rectificación, revocación o eliminación se reciben por DM a `@aqui.paulina`, como indica el consentimiento. La atención de esas solicitudes corresponde al responsable; esta entrega no agrega un botón de borrado masivo ni un flujo de mensajes. Si se atiende una eliminación en las herramientas administrativas del proyecto, se conserva el contador sin renumerar a las demás personas y se revisan también las copias CSV exportadas.
 

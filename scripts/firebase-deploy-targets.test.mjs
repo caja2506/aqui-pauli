@@ -14,6 +14,8 @@ test('sorteo aislado publica únicamente su función y reglas aunque incluya fro
 
 test('correcciones del sorteo y sus reglas conservan el despliegue aislado', () => {
   assert.equal(firebaseDeployTargets(['functions/giveaway.js', 'firestore.rules']), isolated);
+  assert.equal(firebaseDeployTargets(['functions/giveaway.js', 'functions/lib/giveawayCatalog.mjs',
+    'functions/lib/giveawayConfig.json', 'functions/test/giveaway.test.js']), isolated);
 });
 
 test('cambios de funciones compartidas, dependencias o endpoints existentes conservan el deploy original', () => {

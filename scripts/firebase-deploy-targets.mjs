@@ -11,6 +11,7 @@ const existingFunctions = [
 ];
 const giveawayFiles = new Set([
   'functions/giveaway.js', 'functions/lib/giveawayConfig.json',
+  'functions/lib/giveawayCatalog.mjs',
   'functions/test/giveaway.test.js', 'functions/test/firestore-giveaway.emulator.test.js',
 ]);
 
