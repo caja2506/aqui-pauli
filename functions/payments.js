@@ -180,7 +180,7 @@ exports.capturePayPalOrder = onCall(
 
     try {
       // 1. Obtener access token de PayPal
-      const isProduction = clientId.startsWith("A"); // PayPal live keys start with 'A'
+      const isProduction = process.env.PAYPAL_ENV === "live"; // environment comes from PAYPAL_ENV, not the Client ID prefix
       const baseUrl = isProduction
         ? "https://api-m.paypal.com"
         : "https://api-m.sandbox.paypal.com";
