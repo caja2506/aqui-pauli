@@ -3,9 +3,12 @@ const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const { db, FieldValue, notifyAdminsTelegram, logAutomation, generateOrderNumber } = require("./utils");
 const { updateCrmOnOrderPaid, updateCrmOnOrderCreated } = require("./crm");
+const { sendPaidOrderEmail } = require("./lib/orderEmail");
 
 const telegramBotToken = defineSecret("TELEGRAM_BOT_TOKEN");
 const telegramChatId = defineSecret("TELEGRAM_CHAT_ID");
+const gmailSmtpUser = defineSecret("GMAIL_SMTP_USER");
+const gmailSmtpAppPassword = defineSecret("GMAIL_SMTP_APP_PASSWORD");
 
 // Anticipo bajo pedido: 20%
 const BACKORDER_DEPOSIT_PERCENT = 0.20;
@@ -184,7 +187,7 @@ exports.createOrderWithReservation = onCall(
 // TRIGGER: Cambios de estado en pedido
 // ==============================================
 exports.onOrderStatusChange = onDocumentUpdated(
-  { document: "orders/{orderId}", secrets: [telegramBotToken, telegramChatId] },
+  { document: "orders/{orderId}", secrets: [telegramBotToken, telegramChatId, gmailSmtpUser, gmailSmtpAppPassword] },
   async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
@@ -234,6 +237,18 @@ exports.onOrderStatusChange = onDocumentUpdated(
           telegramBotToken,
           telegramChatId,
         });
+
+        // Email a Carlos y Pame (config/notifications). Nunca rompe el flujo del pedido.
+        try {
+          const r = await sendPaidOrderEmail({
+            db, orderId, order: after,
+            items: itemsSnap.docs.map((d) => d.data()),
+            user: gmailSmtpUser.value(), pass: gmailSmtpAppPassword.value(),
+          });
+          console.log(`[orderEmail] ${orderId}: ${r.result}${r.reason ? " (" + r.reason + ")" : ""}`);
+        } catch (e) {
+          console.error("[orderEmail] fallo inesperado:", e.message);
+        }
 
         // Actualizar CRM
         await updateCrmOnOrderPaid(after, orderId);
