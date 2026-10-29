@@ -6,6 +6,7 @@ import { ShoppingCart, ArrowLeft, Check, Package, Truck } from 'lucide-react';
 import { formatCRC } from '../../utils/formatters';
 import { useCart } from '../../contexts/CartContext';
 import StatusBadge from '../../components/ui/StatusBadge';
+import { normalizeCommercialStatus } from '../../utils/constants';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
 export default function ProductPage() {
@@ -61,7 +62,7 @@ export default function ProductPage() {
     setTimeout(() => setAddedToCart(false), 2000);
   };
 
-  const canBuy = selectedVariant && (selectedVariant.commercialStatus === 'disponible' || selectedVariant.commercialStatus === 'bajo_pedido');
+  const canBuy = selectedVariant && (['disponible', 'bajo_pedido'].includes(normalizeCommercialStatus(selectedVariant.commercialStatus)));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -123,8 +124,8 @@ export default function ProductPage() {
                     className={`px-4 py-2.5 rounded-xl border text-sm font-bold transition-all ${selectedVariant?.id === v.id
                       ? 'bg-rose-600 text-white border-rose-600 shadow-md'
                       : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300'
-                    } ${v.commercialStatus === 'agotado' ? 'opacity-50 line-through' : ''}`}
-                    disabled={v.commercialStatus === 'agotado'}
+                    } ${normalizeCommercialStatus(v.commercialStatus) === 'agotado' ? 'opacity-50 line-through' : ''}`}
+                    disabled={normalizeCommercialStatus(v.commercialStatus) === 'agotado'}
                   >
                     {v.name}
                   </button>

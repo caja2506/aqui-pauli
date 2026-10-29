@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { collection, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -12,8 +12,13 @@ import { db } from '../firebase';
 export function useCollection(collectionName, options = {}) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt(n => n + 1), []);
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
     const constraints = [];
 
     if (options.whereConditions) {
@@ -30,14 +35,32 @@ export function useCollection(collectionName, options = {}) {
       ? query(collection(db, collectionName), ...constraints)
       : collection(db, collectionName);
 
+    // Si Firestore no responde (red/proxy bloqueando), no dejar el skeleton para siempre
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        setError(new Error('timeout'));
+        setLoading(false);
+      }
+    }, 15000);
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      settled = true;
+      clearTimeout(timer);
       const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setData(docs);
+      setError(null);
+      setLoading(false);
+    }, (err) => {
+      settled = true;
+      clearTimeout(timer);
+      console.error(`[useCollection:${collectionName}]`, err);
+      setError(err);
       setLoading(false);
     });
 
-    return () => unsubscribe();
-  }, [collectionName, JSON.stringify(options)]);
+    return () => { clearTimeout(timer); unsubscribe(); };
+  }, [collectionName, JSON.stringify(options), attempt]);
 
-  return { data, loading };
+  return { data, loading, error, retry };
 }

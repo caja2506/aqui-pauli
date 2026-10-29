@@ -3,9 +3,13 @@ import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
 import ProductCard from '../../components/storefront/ProductCard';
 import EmptyState from '../../components/ui/EmptyState';
+import LoadError from '../../components/ui/LoadError';
+
+// Normaliza: minúsculas y sin tildes/diacríticos
+const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
 export default function CatalogPage() {
-  const { data: products, loading: loadingProducts } = useCollection('products');
+  const { data: products, loading: loadingProducts, error: productsError, retry: retryProducts } = useCollection('products');
   const { data: brands } = useCollection('brands');
   const { data: categories } = useCollection('categories');
 
@@ -14,16 +18,29 @@ export default function CatalogPage() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [showFilters, setShowFilters] = useState(false);
 
+  const brandNames = useMemo(() => Object.fromEntries(brands.map(b => [b.id, b.name])), [brands]);
+  const categoryById = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c])), [categories]);
+
   const activeProducts = useMemo(() => {
+    const tokens = norm(search).split(/\s+/).filter(Boolean);
     return products.filter(p => {
       if (!p.active || p.deleted) return false;
-      const s = search.toLowerCase();
-      const matchesSearch = !s || (p.name || '').toLowerCase().includes(s) || (p.description || '').toLowerCase().includes(s);
+      let matchesSearch = true;
+      if (tokens.length) {
+        const catNames = (p.categoryRefs || []).flatMap(ref => {
+          const c = categoryById[ref.id];
+          if (!c) return [];
+          const parent = c.parentId ? categoryById[c.parentId] : null;
+          return [c.name, parent && parent.name];
+        });
+        const hay = norm([p.name, p.description, p.brandRef && brandNames[p.brandRef.id], ...catNames].filter(Boolean).join(' '));
+        matchesSearch = tokens.every(t => hay.includes(t));
+      }
       const matchesBrand = !selectedBrand || (p.brandRef && p.brandRef.id === selectedBrand);
       const matchesCategory = !selectedCategory || (p.categoryRefs || []).some(ref => ref.id === selectedCategory);
       return matchesSearch && matchesBrand && matchesCategory;
     });
-  }, [products, search, selectedBrand, selectedCategory]);
+  }, [products, search, selectedBrand, selectedCategory, brandNames, categoryById]);
 
   const hasActiveFilters = search || selectedBrand || selectedCategory;
 
@@ -110,7 +127,9 @@ export default function CatalogPage() {
       )}
 
       {/* Products Grid */}
-      {loadingProducts ? (
+      {productsError ? (
+        <LoadError onRetry={retryProducts} />
+      ) : loadingProducts ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="bg-slate-100 rounded-3xl animate-pulse aspect-[3/4]" />

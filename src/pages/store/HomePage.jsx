@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Truck, Shield, CreditCard, ShoppingBag } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
 import ProductCard from '../../components/storefront/ProductCard';
+import LoadError from '../../components/ui/LoadError';
 
 export default function HomePage() {
-  const { data: products } = useCollection('products', { orderByField: 'createdAt', orderDirection: 'desc' });
+  const { data: products, loading, error, retry } = useCollection('products', { orderByField: 'createdAt', orderDirection: 'desc' });
   const activeProducts = products.filter(p => p.active && !p.deleted).slice(0, 8);
 
   return (
@@ -75,7 +76,15 @@ export default function HomePage() {
           </Link>
         </div>
 
-        {activeProducts.length > 0 ? (
+        {error ? (
+          <LoadError onRetry={retry} />
+        ) : loading ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="bg-slate-100 rounded-3xl animate-pulse aspect-[3/4]" />
+            ))}
+          </div>
+        ) : activeProducts.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
             {activeProducts.map(product => (
               <ProductCard key={product.id} product={product} />

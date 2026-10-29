@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingCart, Eye } from 'lucide-react';
 import { formatCRC } from '../../utils/formatters';
+import { normalizeCommercialStatus } from '../../utils/constants';
 import StatusBadge from '../ui/StatusBadge';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -25,7 +26,7 @@ export default function ProductCard({ product }) {
 
   const price = mainVariant?.price || product.basePrice || 0;
   const imageUrl = (product.images && product.images[0]) || mainVariant?.imageUrl || '';
-  const commercialStatus = mainVariant?.commercialStatus || 'disponible';
+  const commercialStatus = normalizeCommercialStatus(mainVariant?.commercialStatus);
   const canBuy = mainVariant && (commercialStatus === 'disponible' || commercialStatus === 'bajo_pedido');
 
   const handleViewOptions = (e) => {

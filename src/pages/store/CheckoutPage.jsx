@@ -99,7 +99,7 @@ export default function CheckoutPage() {
       <div className="max-w-lg mx-auto px-4 py-20 text-center">
         <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto mb-4" />
         <h2 className="text-xl font-black text-slate-900 mb-2">Tu carrito está vacío</h2>
-        <Link to="/catalogo" className="text-sm font-bold text-rose-600">← Ir al catálogo</Link>
+        <Link to="/catalogo" className="inline-flex items-center justify-center mt-4 px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-2xl transition-all">Ver catálogo</Link>
       </div>
     );
   }
@@ -249,8 +249,8 @@ export default function CheckoutPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-      <Link to="/carrito" className="inline-flex items-center gap-1 text-sm font-bold text-rose-600 hover:text-rose-700 mb-6">
-        <ArrowLeft className="w-4 h-4" /> Volver al carrito
+      <Link to="/catalogo" className="inline-flex items-center gap-1 text-sm font-bold text-rose-600 hover:text-rose-700 mb-6">
+        <ArrowLeft className="w-4 h-4" /> Seguir comprando
       </Link>
 
       <h1 className="text-2xl font-black text-slate-900 tracking-tight mb-8">Checkout</h1>

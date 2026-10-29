@@ -39,9 +39,9 @@ export default function CartDrawer() {
               <Link
                 to="/catalogo"
                 onClick={() => setIsCartOpen(false)}
-                className="text-sm font-bold text-rose-600 hover:text-rose-700"
+                className="px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-2xl transition-all"
               >
-                Explorar catálogo →
+                Ver catálogo
               </Link>
             </div>
           ) : (

@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { Package, ChevronRight, ShoppingBag, LogIn } from 'lucide-react';
 import { formatCRC, formatDateTime } from '../../utils/formatters';
-import { ORDER_STATUS_LABELS } from '../../utils/constants';
+import { ORDER_STATUS_LABELS, humanizeStatus } from '../../utils/constants';
 
 const PAYMENT_STATUS_LABELS = {
   pendiente: { text: '💳 Pendiente', color: 'bg-red-50 text-red-600' },
@@ -97,7 +97,7 @@ export default function MyOrdersPage() {
         {orders.map(order => {
           const items = order.itemsSummary || [];
           const total = order.total || (order.subtotal || 0) + (order.shippingCost || 0);
-          const statusLabel = ORDER_STATUS_LABELS[order.status] || order.status;
+          const statusLabel = ORDER_STATUS_LABELS[order.status] || humanizeStatus(order.status);
           const paymentInfo = PAYMENT_STATUS_LABELS[order.paymentStatus] || PAYMENT_STATUS_LABELS.pendiente;
 
           return (

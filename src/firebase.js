@@ -1,6 +1,6 @@
 // --- CONFIGURACIÓN DE FIREBASE (aqui-pauli) ---
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
@@ -16,7 +16,8 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+// Detecta automáticamente redes/proxies que bloquean el streaming (WebChannel) y cae a long polling
+export const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
 export const functions = getFunctions(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

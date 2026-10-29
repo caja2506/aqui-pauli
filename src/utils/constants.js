@@ -72,6 +72,32 @@ export const COMMERCIAL_STATUS_LABELS = {
   bajo_pedido: 'Bajo Pedido',
 };
 
+const COMMERCIAL_STATUS_ALIASES = {
+  no_disponible: 'agotado',
+  sin_stock: 'agotado',
+  sin_inventario: 'agotado',
+  out_of_stock: 'agotado',
+  agotado: 'agotado',
+  disponible: 'disponible',
+  in_stock: 'disponible',
+  en_stock: 'disponible',
+  bajo_pedido: 'bajo_pedido',
+  made_to_order: 'bajo_pedido',
+};
+
+// Normaliza estados comerciales crudos (ej. 'NO_DISPONIBLE', 'Bajo Pedido') a la clave canónica.
+export function normalizeCommercialStatus(status) {
+  if (!status) return 'disponible';
+  const key = String(status).trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return COMMERCIAL_STATUS_ALIASES[key] || key;
+}
+
+// Convierte un estado crudo desconocido ('ALGO_RARO') a texto legible ('Algo raro').
+export function humanizeStatus(status) {
+  const t = String(status || '').trim().replace(/[_-]+/g, ' ').toLowerCase();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
+}
+
 // --- Tipos de abastecimiento ---
 export const SUPPLY_TYPES = {
   STOCK_PROPIO: 'stock_propio',
