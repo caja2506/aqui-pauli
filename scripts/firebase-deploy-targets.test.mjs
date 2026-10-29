@@ -16,6 +16,9 @@ test('correcciones del sorteo y sus reglas conservan el despliegue aislado', () 
   assert.equal(firebaseDeployTargets(['functions/giveaway.js', 'firestore.rules']), isolated);
   assert.equal(firebaseDeployTargets(['functions/giveaway.js', 'functions/lib/giveawayCatalog.mjs',
     'functions/lib/giveawayConfig.json', 'functions/test/giveaway.test.js']), isolated);
+  assert.equal(firebaseDeployTargets(['functions/lib/giveawayPhone.mjs']), isolated);
+  assert.equal(firebaseDeployTargets(['functions/giveaway.js', 'functions/lib/giveawayPhone.mjs',
+    'functions/test/giveaway.test.js', 'src/pages/store/GiveawayPage.jsx']), isolated);
 });
 
 test('cambios de funciones compartidas, dependencias o endpoints existentes conservan el deploy original', () => {

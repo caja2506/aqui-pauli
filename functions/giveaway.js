@@ -5,6 +5,7 @@ const { Timestamp } = require("firebase-admin/firestore");
 const { db } = require("./utils");
 const config = require("./lib/giveawayConfig.json");
 const { selectGiveawayProduct } = require("./lib/giveawayCatalog.mjs");
+const { GIVEAWAY_PHONE_ERROR, isValidGiveawayPhone, normalizeGiveawayPhone } = require("./lib/giveawayPhone.mjs");
 
 const START_MS = Date.parse(config.startsAt);
 const END_MS = Date.parse(config.endsAt);
@@ -34,8 +35,8 @@ function validatedInput(data, auth) {
   if (fullName.length < 3 || fullName.length > 120) {
     throw new HttpsError("invalid-argument", "Ingresá tu nombre completo (entre 3 y 120 caracteres).");
   }
-  if (typeof data.phone !== "string" || !/^\d{8}$/.test(data.phone.trim())) {
-    throw new HttpsError("invalid-argument", "Ingresá un teléfono de Costa Rica de 8 dígitos.");
+  if (!isValidGiveawayPhone(data.phone)) {
+    throw new HttpsError("invalid-argument", GIVEAWAY_PHONE_ERROR);
   }
   if (typeof data.email !== "string") {
     throw new HttpsError("invalid-argument", "Ingresá un correo electrónico válido.");
@@ -58,7 +59,7 @@ function validatedInput(data, auth) {
   if (data.promotionsConsent !== undefined && typeof data.promotionsConsent !== "boolean") {
     throw new HttpsError("invalid-argument", "La autorización para promociones debe ser una elección válida.");
   }
-  return { fullName, phone: data.phone.trim(), email, productId: data.productId,
+  return { fullName, phone: normalizeGiveawayPhone(data.phone), email, productId: data.productId,
     eligibilityAccepted: true, privacyConsent: true, promotionsConsent: data.promotionsConsent === true };
 }
 
