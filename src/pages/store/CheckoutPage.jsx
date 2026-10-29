@@ -130,7 +130,7 @@ export default function CheckoutPage() {
 
   const shippingCost = form.canton ? calculateShippingCost(form.canton, form.shippingType) : 0;
   const total = subtotal + shippingCost;
-  // "Bajo pedido": se aparta con el 25% de esas líneas; stock y envío se pagan completos.
+  // "Bajo pedido": se aparta con el 50% de esas líneas; stock y envío se pagan completos.
   // Solo aplica a pagos manuales (SINPE, transferencia, efectivo); los online cobran el total.
   const backorder = computeBackorder(items, shippingCost);
   const showDeposit = backorder.hasBackorder && backorder.depositTotal > 0;

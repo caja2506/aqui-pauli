@@ -4,7 +4,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatCRC } from '../../utils/formatters';
 import { SINPE_INFO } from '../../utils/constants';
-import { computeBackorder, BACKORDER_DEPOSIT_LABEL, BACKORDER_BALANCE_TIMING } from '../../utils/backorder';
+import { computeBackorder, BACKORDER_DEPOSIT_PERCENT, BACKORDER_DEPOSIT_LABEL, BACKORDER_BALANCE_TIMING } from '../../utils/backorder';
 import CopyButton from '../../components/ui/CopyButton';
 import { CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -12,6 +12,29 @@ import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 
 // Número de WhatsApp Business de Aquí Pauli (formato internacional sin +)
 const WHATSAPP_NUMBER = '50671613342';
+
+// Un cambio de política no modifica el apartado ya guardado de un pedido.
+// Ambos creadores existentes lo persisten: cliente en backorderDeposit,
+// callable en depositTotal/backorderDeposit. No se escribe ni migra el pedido.
+function savedBackorder(order) {
+  if (!order) return null;
+  const summary = computeBackorder(order.itemsSummary || [], order.shippingCost);
+  const deposit = order.backorderDeposit ?? order.depositTotal;
+  if (!summary.hasBackorder || typeof deposit !== 'number' || !Number.isFinite(deposit)
+      || deposit < 0 || deposit > summary.backorderSubtotal) return summary;
+  const balanceDue = summary.backorderSubtotal - deposit;
+  return { ...summary, depositTotal: deposit, balanceDue, payNowTotal: summary.total - balanceDue };
+}
+
+function depositLabelFor(backorder) {
+  if (!backorder?.hasBackorder || !(backorder.backorderSubtotal > 0)) return null;
+  if (backorder.depositTotal === Math.round(backorder.backorderSubtotal * BACKORDER_DEPOSIT_PERCENT)) {
+    return BACKORDER_DEPOSIT_LABEL;
+  }
+  // Pedidos creados con la política anterior conservan su importe y su texto.
+  if (backorder.depositTotal === Math.round(backorder.backorderSubtotal * 0.25)) return '25%';
+  return null;
+}
 
 export default function OrderConfirmation() {
   const { orderId } = useParams();
@@ -35,9 +58,9 @@ export default function OrderConfirmation() {
   const paymentMethod = location.state?.paymentMethod || savedOrder?.paymentMethod || '';
   const isSinpe = paymentMethod === 'sinpe' || paymentMethod === 'sinpe_movil';
   const totalNum = Number(total) || 0;
-  // "Bajo pedido": se aparta con el 25% de esas líneas; stock y envío se pagan completos.
-  const backorder = location.state?.backorder
-    || (savedOrder ? computeBackorder(savedOrder.itemsSummary || [], savedOrder.shippingCost) : null);
+  // Nuevos pedidos: 50% solo de Bajo pedido. Al cargar, prima el apartado guardado.
+  const backorder = savedBackorder(savedOrder) || location.state?.backorder || null;
+  const depositLabel = depositLabelFor(backorder);
   const hasDeposit = !!backorder?.hasBackorder && backorder.depositTotal > 0 && backorder.payNowTotal < backorder.total;
   const amountToPay = hasDeposit ? backorder.payNowTotal : totalNum;
 
@@ -48,7 +71,7 @@ export default function OrderConfirmation() {
 
   // Mensaje pre-llenado para WhatsApp
   const waMessage = encodeURIComponent(
-    `¡Hola! 👋 Mi pedido es *${orderNumber}*${amountToPay ? `. Pagué *${formatCRC(amountToPay)}*${hasDeposit ? ` (apartado, ${BACKORDER_DEPOSIT_LABEL} de los productos bajo pedido)` : ''} por SINPE Móvil` : ''}.\n\nAdjunto mi comprobante de pago 📎`
+    `¡Hola! 👋 Mi pedido es *${orderNumber}*${amountToPay ? `. Pagué *${formatCRC(amountToPay)}*${hasDeposit ? (depositLabel ? ` (apartado, ${depositLabel} de los productos bajo pedido)` : ' (apartado acordado)') : ''} por SINPE Móvil` : ''}.\n\nAdjunto mi comprobante de pago 📎`
   );
   const waLink = `https://wa.me/${WHATSAPP_NUMBER}?text=${waMessage}`;
 
@@ -85,7 +108,7 @@ export default function OrderConfirmation() {
                 </div>
                 {hasDeposit && (
                   <div className="text-sm text-blue-900 mt-2 space-y-1" data-testid="deposit-detail">
-                    <p>Tu pedido incluye productos «Bajo pedido». Pagás hoy los productos en stock y el envío completos, más el {BACKORDER_DEPOSIT_LABEL} de los productos bajo pedido ({formatCRC(backorder.depositTotal)}).</p>
+                    <p>Tu pedido incluye productos «Bajo pedido». Pagás hoy los productos en stock y el envío completos, más {depositLabel ? `el ${depositLabel} de los productos bajo pedido` : 'el apartado acordado para los productos bajo pedido'} ({formatCRC(backorder.depositTotal)}).</p>
                     <p>Total del pedido: <strong>{formatCRC(backorder.total)}</strong> · Saldo restante: <strong>{formatCRC(backorder.balanceDue)}</strong></p>
                     <p>El saldo se paga {BACKORDER_BALANCE_TIMING}.</p>
                   </div>
