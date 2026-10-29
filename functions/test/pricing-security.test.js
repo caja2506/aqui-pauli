@@ -95,11 +95,23 @@ test("rechaza productos inexistentes, desactivados o eliminados", async () => {
   }
 });
 
-test("stock corrupto o abastecimiento desconocido falla cerrado", async () => {
-  for (const fields of [{ stock: -1 }, { reservedStock: -1 }, { stock: "20" }, { stock: 1.5 },
-    { stock: 1, reservedStock: 2 }, { supplyType: "inventado" }]) {
+test("stock físico corrupto o abastecimiento desconocido falla cerrado", async () => {
+  for (const fields of [{ stock: -1 }, { stock: "20" }, { stock: 1.5 },
+    { stock: Infinity }, { stock: Number.MAX_SAFE_INTEGER + 1 }, { supplyType: "inventado" }]) {
     const f = fixture(); Object.assign(f.store["products/p1/variants/v1"], fields);
     await assert.rejects(computeTotalsCRC(f.db, [item()], {}));
+  }
+});
+
+test("reservedStock heredado no rompe cotización ni modifica catálogo", async () => {
+  for (const reservedStock of [-1, -12, 21, 0.5, "invalid", null]) {
+    const f = fixture();
+    f.store["products/p1/variants/v1"].reservedStock = reservedStock;
+    const before = structuredClone(f.store);
+    const result = await computeTotalsCRC(f.db, [item()], {}, { transaction: f.transaction });
+    assert.equal(result.totalMinor, 3702);
+    assert.deepEqual(f.store, before);
+    assert.equal(f.direct.length, 0);
   }
 });
 

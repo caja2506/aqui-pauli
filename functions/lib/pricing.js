@@ -1,6 +1,7 @@
 // Prices and fulfillment fields come from the catalog, never from checkout input.
 // All monetary arithmetic uses integer CRC centavos; shipping remains INCLUDED.
 const { parseMinorCRC, minorToCRC } = require("./paymentMoney");
+const { normalizeInventoryStock } = require("./inventoryStock");
 
 const GAM_CANTONES = [
   "San José", "Escazú", "Desamparados", "Goicoechea", "Alajuelita",
@@ -79,9 +80,9 @@ async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
 
     const supplyType = variant.supplyType ?? product.supplyType ?? "stock_propio";
     if (!["stock_propio", "bajo_pedido"].includes(supplyType)) throw new Error("Abastecimiento del catálogo inválido");
-    if (variant.stock !== undefined) safeInteger(variant.stock, "Stock");
-    if (variant.reservedStock !== undefined) safeInteger(variant.reservedStock, "Stock reservado");
-    if ((variant.reservedStock ?? 0) > (variant.stock ?? 0)) throw new Error("Stock reservado mayor que stock");
+    // A stale reservation counter must not break a quote. Physical stock still
+    // validates strictly; callers normalize again inside their stock transaction.
+    normalizeInventoryStock(variant, { context: "pricing" });
 
     // A configured zero/negative/malformed variant price is an error. Only an
     // absent value inherits basePrice; falsy values must not hide a catalog error.
