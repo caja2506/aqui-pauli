@@ -4,6 +4,7 @@ import { ArrowRight, Truck, Shield, CreditCard, ShoppingBag } from 'lucide-react
 import { useCollection } from '../../hooks/useCollection';
 import ProductCard from '../../components/storefront/ProductCard';
 import LoadError from '../../components/ui/LoadError';
+import GiveawayBanner from '../../components/storefront/GiveawayBanner';
 
 export default function HomePage() {
   const { data: products, loading, error, retry } = useCollection('products', { orderByField: 'createdAt', orderDirection: 'desc' });
@@ -11,6 +12,7 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen">
+      <GiveawayBanner />
       {/* Hero */}
       <section className="relative bg-gradient-to-b from-rose-200 via-rose-100 to-white overflow-hidden">
         <div className="absolute inset-0 opacity-30">

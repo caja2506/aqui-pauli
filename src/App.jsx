@@ -23,6 +23,8 @@ import OrderConfirmation from './pages/store/OrderConfirmation';
 import TilopayReturnPage from './pages/store/TilopayReturnPage';
 import MyOrdersPage from './pages/store/MyOrdersPage';
 import NotFoundPage from './pages/store/NotFoundPage';
+import GiveawayPage from './pages/store/GiveawayPage';
+import GiveawayRulesPage from './pages/store/GiveawayRulesPage';
 import { TerminosPage, DevolucionesPage, EnviosPage, PrivacidadPage } from './pages/store/LegalPages';
 
 // --- Admin Pages ---
@@ -33,6 +35,7 @@ import ProductsPage from './pages/admin/ProductsPage';
 import OrdersPage from './pages/admin/OrdersPage';
 import CrmPage from './pages/admin/CrmPage';
 import ShippingPage from './pages/admin/ShippingPage';
+import GiveawayAdminPage from './pages/admin/GiveawayAdminPage';
 
 // ========================================
 // Layout: Storefront (public)
@@ -109,6 +112,8 @@ export default function App() {
           <Route path="/orden-confirmada/:orderId" element={<OrderConfirmation />} />
           <Route path="/tilopay/retorno/:orderId" element={<TilopayReturnPage />} />
           <Route path="/mi-cuenta" element={<MyOrdersPage />} />
+          <Route path="/sorteo" element={<GiveawayPage />} />
+          <Route path="/sorteo/bases" element={<GiveawayRulesPage />} />
           {/* Páginas legales */}
           <Route path="/terminos" element={<TerminosPage />} />
           <Route path="/devoluciones" element={<DevolucionesPage />} />
@@ -129,6 +134,7 @@ export default function App() {
           <Route path="pedidos" element={<OrdersPage />} />
           <Route path="crm" element={<CrmPage />} />
           <Route path="envios" element={<ShippingPage />} />
+          <Route path="sorteo" element={<GiveawayAdminPage />} />
         </Route>
 
       </Routes>
