@@ -146,6 +146,8 @@ export default function OrdersPage() {
 
   const paymentStatusColors = {
     pendiente: 'bg-yellow-100 text-yellow-700',
+    parcial: 'bg-amber-100 text-amber-800',
+    pagado: 'bg-green-100 text-green-700',
     verificando: 'bg-blue-100 text-blue-700',
     verificado: 'bg-green-100 text-green-700',
     rechazado: 'bg-red-100 text-red-700',
@@ -257,6 +259,7 @@ export default function OrdersPage() {
                   {order.paymentProofUrl && <span className="text-[9px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full flex items-center gap-1"><Image className="w-3 h-3" />Comprobante</span>}
                   {order.paymentStatus === 'verificado' && <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">✅ Verificado</span>}
                   {order.paymentStatus === 'verificando' && <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ Verificando</span>}
+                  {order.paymentStatus === 'parcial' && <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">Apartado recibido · saldo pendiente</span>}
                   {order.paymentStatus === 'revision_humana' && (
                     <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1">
                       👁️ SINPE - Revisión
@@ -316,6 +319,10 @@ export default function OrdersPage() {
                           <div className="flex justify-between"><span className="text-slate-400">Subtotal</span><span>{formatCRC(order.subtotal || order.depositTotal || 0)}</span></div>
                           <div className="flex justify-between"><span className="text-slate-400">Envío ({order.shippingType || 'normal'})</span><span>{formatCRC(order.shippingCost || 0)}</span></div>
                           <div className="flex justify-between font-black text-slate-900 pt-1 border-t"><span>Total</span><span>{formatCRC(total)}</span></div>
+                          {order.paymentStatus === 'parcial' && <>
+                            <div className="flex justify-between text-emerald-700"><span>Pago recibido</span><span className="font-bold">{formatCRC(order.paymentAmount || 0)}</span></div>
+                            <div className="flex justify-between text-amber-800"><span>Saldo pendiente</span><span className="font-bold">{formatCRC(order.remainingTotal || 0)}</span></div>
+                          </>}
                         </div>
                       </div>
 
@@ -326,9 +333,9 @@ export default function OrdersPage() {
                           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                             <div className="p-4 flex items-center justify-between border-b border-slate-100">
                               <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase ${paymentStatusColors[order.paymentStatus] || paymentStatusColors.pendiente}`}>
-                                {order.paymentStatus || 'pendiente'}
+                                {order.paymentStatus === 'parcial' ? 'Apartado recibido · saldo pendiente' : (order.paymentStatus || 'pendiente')}
                               </span>
-                              {order.paymentStatus === 'verificando' && (
+                              {order.paymentStatus === 'verificando' && order.paymentMethod !== 'paypal' && !order.paypal && (
                                 <div className="flex gap-2">
                                   <button onClick={() => handleApprovePayment(order.id)} className="flex items-center gap-1 text-[10px] font-bold bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors">
                                     <CheckCircle className="w-3 h-3" /> Aprobar

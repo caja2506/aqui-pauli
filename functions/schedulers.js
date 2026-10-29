@@ -33,6 +33,7 @@ exports.cleanExpiredReservations = onSchedule(
           if (order.status !== "pendiente_pago" || typeof order.createdAt !== "string"
               || !Number.isFinite(Date.parse(order.createdAt)) || Date.parse(order.createdAt) >= Date.parse(todayStart)
               || order.paymentMethod === "tilopay" || Object.prototype.hasOwnProperty.call(order, "tilopay")
+              || order.paymentMethod === "paypal" || Object.prototype.hasOwnProperty.call(order, "paypal")
               || Object.prototype.hasOwnProperty.call(order, "inventoryReservation")
               || Object.prototype.hasOwnProperty.call(order, "fulfillment")
               || ["pagado", "verificado", "test_paid", "reembolsado", "refunded"].includes(order.paymentStatus)

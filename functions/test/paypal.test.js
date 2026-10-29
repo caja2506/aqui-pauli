@@ -74,6 +74,8 @@ test("payload y verificación de orden PayPal", () => {
   assert.equal(pp.verifyOrderMatches(body, { orderId: "o1", usdTotal: 22.15 }), null);
   assert.ok(pp.verifyOrderMatches(body, { orderId: "o2", usdTotal: 22.15 }));
   assert.ok(pp.verifyOrderMatches(body, { orderId: "o1", usdTotal: 22.16 }));
+  assert.equal(pp.verifyOrderMatches({ ...body, id: "PP1" }, { orderId: "o1", usdTotal: 22.15, paypalOrderId: "PP1" }), null);
+  assert.ok(pp.verifyOrderMatches({ ...body, id: "PP2" }, { orderId: "o1", usdTotal: 22.15, paypalOrderId: "PP1" }));
 });
 
 test("interpretCapture", () => {
@@ -82,4 +84,72 @@ test("interpretCapture", () => {
   assert.equal(pp.interpretCapture(mk("COMPLETED", "PENDING")).state, "pending");
   assert.equal(pp.interpretCapture(mk("COMPLETED", "DECLINED")).state, "declined");
   assert.equal(pp.interpretCapture({ status: "APPROVED" }).state, "other");
+});
+
+test("PayPal cotiza 50% Bajo pedido + stock y envío completos, igual que SINPE", async () => {
+  const { paymentQuote } = require("../lib/paypalDeposit");
+  const { computeBackorder } = await import("../../src/utils/backorder.js");
+  const lines = [{ productId: "bag", variantId: "v1", quantity: 1, unitPrice: 32000, lineTotal: 32000, supplyType: "bajo_pedido" },
+    { productId: "perfume", variantId: "v1", quantity: 1, unitPrice: 47000, lineTotal: 47000, supplyType: "stock_propio" }];
+  const quote = paymentQuote({ lines, subtotal: 79000, shippingCost: 5000, total: 84000 }, { rate: 500, bufferPct: 0 });
+  const client = computeBackorder(lines.map((line) => ({ ...line, price: line.unitPrice })), 5000);
+  assert.equal(quote.crcTotal, 84000);
+  assert.equal(quote.crcPayNow, 68000);
+  assert.equal(quote.crcPayNow, client.payNowTotal);
+  assert.equal(quote.crcBalanceDue, 16000);
+  assert.equal(quote.crcBalanceDue, client.balanceDue);
+  assert.equal(quote.usdTotal, 136);
+  const payload = pp.buildOrderPayload({ orderId: "o1", usdTotal: quote.usdTotal, partial: true });
+  assert.equal(payload.purchase_units[0].amount.value, "136.00");
+  assert.match(payload.purchase_units[0].description, /Apartado 50%/);
+});
+
+test("PayPal conserva pago completo para stock y no cobra mínimos USD sobre un apartado CRC cero", () => {
+  const { paymentQuote } = require("../lib/paypalDeposit");
+  const stock = paymentQuote({ lines: [{ lineTotal: 32000, supplyType: "stock_propio" }], subtotal: 32000, shippingCost: 0, total: 32000 }, { rate: 500 });
+  assert.equal(stock.crcPayNow, 32000);
+  assert.equal(stock.crcBalanceDue, 0);
+  assert.equal(stock.usdTotal, 64);
+  assert.throws(() => paymentQuote({ lines: [{ lineTotal: 0.1, supplyType: "bajo_pedido" }], subtotal: 0.1, shippingCost: 0, total: 0.1 }, { rate: 500 }), /mayor que cero/);
+});
+
+test("PayPal exige coincidencia exacta de la cotización mostrada, incluso saldo, moneda y tipo de cambio", () => {
+  const { paymentQuote, quoteMatches, quoteFromAttempt } = require("../lib/paypalDeposit");
+  const quote = paymentQuote({ lines: [{ lineTotal: 32000, supplyType: "bajo_pedido" }], subtotal: 32000, shippingCost: 0, total: 32000 }, { rate: 500 });
+  assert.equal(quoteMatches(quoteFromAttempt({ ...quote, orderId: "PP1" }), quote), true);
+  for (const changed of [undefined, { ...quote, crcPayNow: 1 }, { ...quote, usdTotal: "32" },
+    { ...quote, crcBalanceDue: 0 }, { ...quote, fxRate: 501 }, { ...quote, currency: "CRC" }, { ...quote, depositPercent: 1 }]) {
+    assert.equal(quoteMatches(changed, quote), false);
+  }
+});
+
+test("PayPal rechaza montos ausentes, NaN, infinitos y purchase_units adicionales", () => {
+  const body = pp.buildOrderPayload({ orderId: "o1", usdTotal: 32 });
+  for (const value of [undefined, "NaN", "Infinity", "", "0", "32.001", "3200", "32oops"]) {
+    const order = structuredClone(body); order.purchase_units[0].amount.value = value;
+    assert.ok(pp.verifyOrderMatches(order, { orderId: "o1", usdTotal: 32 }));
+  }
+  assert.ok(pp.verifyOrderMatches({ ...body, purchase_units: [...body.purchase_units, ...body.purchase_units] }, { orderId: "o1", usdTotal: 32 }));
+});
+
+test("PayPal comprueba moneda, monto e identidad de una única captura efectiva", () => {
+  const order = pp.buildOrderPayload({ orderId: "o1", usdTotal: 32 });
+  order.purchase_units[0].payments = { captures: [{ id: "CAP1", status: "COMPLETED", amount: { currency_code: "USD", value: "32.00" } }] };
+  assert.equal(pp.verifyCaptureMatches(order, { usdTotal: 32 }), null);
+  for (const patch of [{ amount: { currency_code: "CRC", value: "32.00" } }, { amount: { currency_code: "USD", value: "64.00" } },
+    { id: "" }, { amount: { currency_code: "USD", value: "NaN" } }]) {
+    const changed = structuredClone(order); Object.assign(changed.purchase_units[0].payments.captures[0], patch);
+    assert.ok(pp.verifyCaptureMatches(changed, { usdTotal: 32 }));
+  }
+  order.purchase_units[0].payments.captures.push(order.purchase_units[0].payments.captures[0]);
+  assert.ok(pp.verifyCaptureMatches(order, { usdTotal: 32 }));
+});
+
+test("PayPal POST pide representación completa y conserva idempotencia sin hacer solicitudes reales", async () => {
+  let request;
+  const result = await pp.ppFetch("/v2/checkout/orders/PP1/capture", { env: "sandbox", token: "fake", method: "POST", requestId: "cap-PP1",
+    fetchFn: async (url, options) => { request = { url, options }; return { ok: true, status: 201, json: async () => ({ id: "PP1" }) }; } });
+  assert.equal(result.ok, true);
+  assert.equal(request.options.headers.Prefer, "return=representation");
+  assert.equal(request.options.headers["PayPal-Request-Id"], "cap-PP1");
 });

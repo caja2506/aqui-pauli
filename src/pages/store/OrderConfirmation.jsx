@@ -9,6 +9,7 @@ import CopyButton from '../../components/ui/CopyButton';
 import { CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
+import { backorderFromPaypalQuote } from '../../services/payments/paypalQuote';
 
 // Número de WhatsApp Business de Aquí Pauli (formato internacional sin +)
 const WHATSAPP_NUMBER = '50671613342';
@@ -53,19 +54,27 @@ export default function OrderConfirmation() {
     return () => { cancelled = true; };
   }, [user, orderId]);
 
-  const orderNumber = location.state?.orderNumber || savedOrder?.orderNumber || orderId;
-  const total = location.state?.total || savedOrder?.total || '';
-  const paymentMethod = location.state?.paymentMethod || savedOrder?.paymentMethod || '';
+  const orderNumber = savedOrder?.orderNumber || location.state?.orderNumber || orderId;
+  const total = savedOrder?.total ?? location.state?.total ?? '';
+  const paymentMethod = savedOrder?.paymentMethod || location.state?.paymentMethod || '';
   const isSinpe = paymentMethod === 'sinpe' || paymentMethod === 'sinpe_movil';
+  const isPaypal = paymentMethod === 'paypal';
   const totalNum = Number(total) || 0;
   // Nuevos pedidos: 50% solo de Bajo pedido. Al cargar, prima el apartado guardado.
-  const backorder = savedBackorder(savedOrder) || location.state?.backorder || null;
+  const paypalQuote = savedOrder?.paypal || location.state?.paypalQuote;
+  const backorder = (isPaypal && backorderFromPaypalQuote(paypalQuote))
+    || savedBackorder(savedOrder) || location.state?.backorder || null;
   const depositLabel = depositLabelFor(backorder);
-  const hasDeposit = !!backorder?.hasBackorder && backorder.depositTotal > 0 && backorder.payNowTotal < backorder.total;
+  const fullyPaid = savedOrder && ['pagado', 'verificado'].includes(savedOrder.paymentStatus);
+  const hasDeposit = !!backorder?.hasBackorder && backorder.depositTotal > 0 && backorder.payNowTotal < backorder.total
+    && !(isPaypal && fullyPaid);
   const amountToPay = hasDeposit ? backorder.payNowTotal : totalNum;
 
-  const paid = !!location.state?.paid;
-  const online = !!location.state?.online;
+  const paid = savedOrder ? !!fullyPaid || (isPaypal && savedOrder.paymentStatus === 'parcial') : !!location.state?.paid;
+  const online = savedOrder ? ['paypal', 'tilopay'].includes(paymentMethod) : !!location.state?.online;
+  const paypalReceived = paid && typeof savedOrder?.paymentAmount === 'number' ? savedOrder.paymentAmount : amountToPay;
+  const paypalRemaining = fullyPaid ? 0 : (typeof savedOrder?.remainingTotal === 'number'
+    ? savedOrder.remainingTotal : backorder?.balanceDue || 0);
 
   const needsProof = isSinpe || paymentMethod === 'transferencia';
 
@@ -88,11 +97,26 @@ export default function OrderConfirmation() {
       </p>
       {online && (
         <p className={`text-sm font-bold mb-6 ${paid ? 'text-green-700' : 'text-amber-700'}`}>
-          {paid ? `✅ Pago recibido con ${paymentMethod === 'tilopay' ? 'tarjeta' : 'PayPal'}.` : `Tu pago con ${paymentMethod === 'tilopay' ? 'tarjeta' : 'PayPal'} está en revisión; te avisaremos por WhatsApp.`}
+          {paid ? (isPaypal && hasDeposit ? '✅ Apartado recibido con PayPal.' : `✅ Pago recibido con ${paymentMethod === 'tilopay' ? 'tarjeta' : 'PayPal'}.`)
+            : `Tu pago con ${paymentMethod === 'tilopay' ? 'tarjeta' : 'PayPal'} está en revisión; te avisaremos por WhatsApp.`}
         </p>
       )}
 
       {isGuest && <div className="mb-6 text-left"><SaveAccountPrompt /></div>}
+
+      {isPaypal && (savedOrder || paypalQuote) && (
+        <div className="bg-sky-50 border-2 border-sky-200 rounded-2xl p-5 text-left mb-6 space-y-2" data-testid="paypal-confirmation">
+          <h2 className="text-base font-black text-sky-900">{hasDeposit ? 'Tu apartado con PayPal' : 'Tu pago con PayPal'}</h2>
+          <p className="text-sm text-sky-900">{paid ? 'Monto recibido' : 'Monto del pago en revisión'}: <strong>{formatCRC(paypalReceived)}</strong>
+            {hasDeposit ? ` (apartado ${depositLabel || 'acordado'})` : ''}</p>
+          <p className="text-sm text-sky-900">Total del pedido: <strong>{formatCRC(totalNum || backorder?.total || 0)}</strong></p>
+          <p className="text-sm text-sky-900">Saldo pendiente: <strong>{formatCRC(paypalRemaining)}</strong></p>
+          {hasDeposit && <>
+            <p className="text-sm text-sky-900">El pago incluye los productos en stock y el envío completos, más {depositLabel ? `el ${depositLabel} de los productos Bajo pedido` : 'el apartado acordado'}.</p>
+            <p className="text-sm text-sky-900">El saldo se paga {BACKORDER_BALANCE_TIMING}.</p>
+          </>}
+        </div>
+      )}
 
       {isSinpe && (
         <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl p-5 text-left mb-6" data-testid="sinpe-instructions">

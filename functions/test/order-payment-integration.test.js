@@ -5,12 +5,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createMemoryFirestore } = require("./helpers/memoryFirestore");
 const { makeSnapshot, snapshotFingerprint } = require("../lib/tilopayOrder");
+const realPaypalApi = require("../lib/paypalApi");
 
 const ROOT = path.resolve(__dirname, "..");
 const OID = "Order12345678";
 const ORDER = `orders/${OID}`;
 const VARIANT = "products/p1/variants/v1";
-class HttpsError extends Error { constructor(code, message) { super(message); this.code = code; } }
+class HttpsError extends Error { constructor(code, message, details) { super(message); this.code = code; this.details = details; } }
 const wrap = (...args) => args.at(-1);
 
 function loadHandlers(seed, options = {}) {
@@ -47,11 +48,10 @@ function loadHandlers(seed, options = {}) {
       effects.email++; effects.emailData = data; effects.emailMessages.push(data);
       return options.emailResult || { result: "sent" };
     } },
-    [path.join(ROOT, "lib/fx.js")]: { getFxRate: async () => ({ rate: 500, bufferPct: 0 }), crcToUsd: (amount) => (amount / 500).toFixed(2) },
+    [path.join(ROOT, "lib/fx.js")]: { getFxRate: async () => ({ rate: 500, bufferPct: 0, source: "fixed", date: "2026-10-29" }), crcToUsd: (amount) => Number((amount / 500).toFixed(2)) },
     [path.join(ROOT, "lib/paypalApi.js")]: {
-      getAccessToken: async () => "fake-token", buildOrderPayload: (data) => data,
-      verifyOrderMatches: () => null,
-      interpretCapture: () => ({ state: "completed", capture: { id: "CAP1", status: "COMPLETED", amount: { value: "180.00" } } }),
+      ...realPaypalApi,
+      getAccessToken: async () => "fake-token",
       ppFetch: async (url, config) => {
         effects.paypal.push({ url, config });
         if (options.onPaypal) return options.onPaypal(url, config, memory);
@@ -375,16 +375,20 @@ test("Telegram partial failure returned by utils is review, never a claimed succ
 });
 
 test("PayPal capture rechecks method after provider consultation and before capture", async () => {
-  const h = loadHandlers({ [ORDER]: baseOrder({ paymentMethod: "paypal", paypal: { orderId: "PP1", usdTotal: "180.00" } }) }, {
-    onPaypal: async (url, _config, memory) => {
-      assert.equal(url, "/v2/checkout/orders/PP1");
-      await memory.db.doc(ORDER).update({ paymentMethod: "tilopay", tilopay: { attemptsById: {} } });
-      return { ok: true, data: { id: "PP1", status: "APPROVED" } };
-    },
-  });
-  await assert.rejects(h.paypal.paypalCaptureOrder(request({ paypalOrderId: "PP1" })), { code: "failed-precondition" });
-  assert.equal(h.effects.paypal.length, 1);
-  assert.equal(h.get(ORDER).paymentStatus, "pendiente");
+  const provider = fakePaypalProvider();
+  let changeMethod = false;
+  const h = loadHandlers(paypalCatalog(), { onPaypal: async (url, config, memory) => {
+    const result = await provider.fetch(url, config);
+    if (changeMethod && config.method !== "POST") {
+      await memory.db.doc(`orders/${created.orderId}`).update({ paymentMethod: "tilopay", tilopay: { attemptsById: {} } });
+    }
+    return result;
+  } });
+  const created = await createPaypalCheckout(h, [cartLine("p2", "v2")]);
+  changeMethod = true;
+  await assert.rejects(h.paypal.paypalCaptureOrder(request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId })), { code: "failed-precondition" });
+  assert.equal(provider.charges, 0);
+  assert.equal(h.get(`orders/${created.orderId}`).paymentStatus, "pendiente");
 });
 
 function legacyReservationSeed(patch = {}) {
@@ -585,4 +589,482 @@ test("endpoint discovery does not resolve missing Gmail secrets; the trigger bin
   await h.orders.onOrderStatusChange(event("pendiente_pago", "pagado"));
   assert.equal(h.effects.emailData.user, "sender@example.invalid");
   assert.equal(h.effects.emailData.pass, "fake-runtime-password");
+});
+
+// PayPal integration: actual canonical pricing, quote/capture handlers and API
+// payload/validation helpers. Only transport, credentials and FX are test doubles.
+function paypalCatalog() {
+  const seed = catalog();
+  seed[VARIANT].price = 47000;
+  seed["products/p2"] = { active: true, name: "Rasasi", basePrice: 32000 };
+  seed["products/p2/variants/v2"] = {
+    active: true, name: "100 ml", price: 32000, supplyType: "bajo_pedido", stock: 0, reservedStock: 0,
+  };
+  return seed;
+}
+const cartLine = (productId, variantId, extra = {}) => ({ productId, variantId, quantity: 1, ...extra });
+function fakePaypalProvider(options = {}) {
+  const orders = new Map();
+  const requests = new Map();
+  let nextId = 0;
+  const provider = { charges: 0, orders, options, async fetch(url, config = {}) {
+    if (url === "/v2/checkout/orders" && config.method === "POST") {
+      assert.ok(config.requestId, "every create must have a stable idempotency key");
+      if (requests.has(config.requestId)) return structuredClone(requests.get(config.requestId));
+      const id = `TESTPP${++nextId}`;
+      const detail = { id, intent: config.body.intent, status: "APPROVED", purchase_units: structuredClone(config.body.purchase_units) };
+      orders.set(id, detail);
+      const response = { ok: true, status: 201, data: { id, status: "CREATED" } };
+      requests.set(config.requestId, response);
+      return structuredClone(response);
+    }
+    const match = /^\/v2\/checkout\/orders\/([^/]+)(\/capture)?$/.exec(url);
+    assert.ok(match, `unexpected PayPal path: ${url}`);
+    const order = orders.get(match[1]);
+    assert.ok(order, `unknown PayPal order: ${match[1]}`);
+    if (!match[2]) {
+      const detail = structuredClone(order);
+      if (options.detailPatch) options.detailPatch(detail);
+      return { ok: true, status: 200, data: detail };
+    }
+    assert.equal(config.method, "POST");
+    assert.ok(config.requestId, "capture must have an idempotency key");
+    if (requests.has(config.requestId)) return structuredClone(requests.get(config.requestId));
+    provider.charges++;
+    order.status = "COMPLETED";
+    const capture = { id: `CAP-${order.id}`, status: options.pending ? "PENDING" : "COMPLETED",
+      amount: structuredClone(order.purchase_units[0].amount) };
+    if (options.capturePatch) options.capturePatch(capture);
+    order.purchase_units[0].payments = { captures: [capture] };
+    const response = { ok: true, status: 201, data: structuredClone(order) };
+    requests.set(config.requestId, response);
+    return structuredClone(response);
+  } };
+  return provider;
+}
+async function createPaypalCheckout(h, items, extra = {}) {
+  const quote = await h.paypal.paypalGetQuote({ data: { items, canton: "Grecia", shippingType: "normal" } });
+  const result = await h.orders.createOrderWithReservation(request({
+    customerName: "Ana", paymentMethod: "paypal", shippingAddress: { canton: "Grecia" }, items, ...extra,
+  }));
+  const pp = await h.paypal.paypalCreateOrder(request({ orderId: result.orderId, expectedQuote: quote }));
+  return { ...result, ...pp, quote };
+}
+
+for (const scenario of [
+  { name: "Rasasi Bajo pedido", items: [cartLine("p2", "v2", { price: 1, supplyType: "stock_propio" })], total: 32000, due: 16000, balance: 16000, deposit: 16000, usd: 32, stockQuantity: 0 },
+  { name: "mixto: stock completo más apartado", items: [cartLine("p1", "v1", { price: 1, supplyType: "bajo_pedido" }), cartLine("p2", "v2", { price: 1, supplyType: "stock_propio" })], total: 79000, due: 63000, balance: 16000, deposit: 16000, usd: 126, stockQuantity: 1 },
+  { name: "solo stock: pago completo", items: [cartLine("p1", "v1")], total: 47000, due: 47000, balance: 0, deposit: 0, usd: 94, stockQuantity: 1 },
+]) {
+  test(`PayPal quote/create/capture: ${scenario.name}; importes canónicos iguales a SINPE`, async () => {
+    const provider = fakePaypalProvider();
+    const h = loadHandlers(paypalCatalog(), { onPaypal: provider.fetch });
+    const created = await createPaypalCheckout(h, scenario.items, {
+      total: 1, subtotal: 1, shippingCost: -999, paymentAmount: 1,
+      depositTotal: 1, remainingTotal: 1, backorderDeposit: 1,
+    });
+    const orderPath = `orders/${created.orderId}`;
+    const quote = created.quote;
+    assert.equal(quote.crcTotal, scenario.total);
+    assert.equal(quote.crcPayNow, scenario.due);
+    assert.equal(quote.crcBalanceDue, scenario.balance);
+    assert.equal(quote.crcDepositTotal, scenario.deposit);
+    assert.equal(Number(quote.usdTotal), scenario.usd);
+    assert.equal(quote.crcShipping, 0); // El catálogo vigente incluye el envío.
+    const { computeBackorder: computeClientBackorder } = await import("../../src/utils/backorder.js");
+    const calculated = computeClientBackorder(h.get(orderPath).itemsSummary, 0);
+    assert.equal(quote.crcPayNow, calculated.payNowTotal);
+    assert.equal(quote.crcBalanceDue, calculated.balanceDue);
+    const post = h.effects.paypal.find((call) => call.url === "/v2/checkout/orders");
+    assert.equal(post.config.body.purchase_units[0].amount.value, scenario.usd.toFixed(2));
+    assert.equal(post.config.body.purchase_units[0].amount.currency_code, "USD");
+    assert.equal(post.config.body.purchase_units[0].custom_id, created.orderId);
+    const result = await h.paypal.paypalCaptureOrder(request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId,
+      amount: 1, total: 1, remainingTotal: 0, paymentStatus: "pagado" }));
+    assert.equal(result.result, "captured");
+    assert.equal(result.partial, scenario.balance > 0);
+    const order = h.get(orderPath);
+    assert.equal(order.total, scenario.total);
+    assert.equal(order.paymentAmount, scenario.due);
+    assert.equal(order.remainingTotal, scenario.balance);
+    assert.equal(order.paymentTransactionId, `CAP-${created.paypalOrderId}`);
+    assert.equal(order.paymentStatus, scenario.balance ? "parcial" : "pagado");
+    assert.equal(order.status, scenario.balance ? "pendiente_pago" : "pagado");
+    if (scenario.balance) {
+      assert.equal(order.depositStatus, "pagado");
+      assert.equal(order.remainingStatus, "pendiente");
+      assert.equal(order.backorderDepositPaid, true);
+      assert.equal(order.backorderRemainingPaid, false);
+      const bajo = order.itemsSummary.find((line) => line.supplyType === "bajo_pedido");
+      assert.equal(bajo.depositPaid, true);
+      assert.equal(bajo.remainingPaid, false);
+      const item = h.get(`${orderPath}/items/${bajo.itemId}`);
+      assert.equal(item.depositPaid, true);
+      assert.equal(item.remainingPaid, false);
+      // A deposit cannot trigger the full-payment fulfillment path.
+      await h.orders.onOrderStatusChange({ ...event("pendiente_pago", "pendiente_pago"), params: { orderId: created.orderId } });
+      assert.equal(h.get(orderPath).fulfillment, undefined);
+      assert.equal(h.effects.telegram + h.effects.email, 0);
+      assert.equal(h.get(VARIANT).stock, 10);
+      assert.equal(h.get(VARIANT).reservedStock, scenario.stockQuantity);
+    } else {
+      const paidEvent = { ...event("pendiente_pago", "pagado"), params: { orderId: created.orderId } };
+      await Promise.all([h.orders.onOrderStatusChange(paidEvent), h.orders.onOrderStatusChange(paidEvent)]);
+      assert.equal(h.get(VARIANT).stock, 9);
+      assert.equal(h.get(VARIANT).reservedStock, 0);
+      assert.equal(h.get(orderPath).status, "por_preparar");
+      assert.equal(h.effects.telegram, 1);
+      assert.equal(h.effects.email, 1);
+    }
+    assert.equal(provider.charges, 1);
+  });
+}
+
+test("PayPal rejects stale or forged displayed quote before contacting payment provider", async () => {
+  const provider = fakePaypalProvider();
+  const h = loadHandlers(paypalCatalog(), { onPaypal: provider.fetch });
+  const items = [cartLine("p2", "v2")];
+  const quote = await h.paypal.paypalGetQuote({ data: { items, canton: "Grecia" } });
+  const { orderId } = await h.orders.createOrderWithReservation(request({ customerName: "Ana", paymentMethod: "paypal", items }));
+  for (const expectedQuote of [undefined, null, {}, { crcTotal: 32000, usdTotal: 64, currency: "USD" },
+    { ...quote, crcPayNow: 1 }, { ...quote, usdTotal: 1 }, { ...quote, crcBalanceDue: 0 }]) {
+    await assert.rejects(h.paypal.paypalCreateOrder(request({ orderId, expectedQuote })), { code: "failed-precondition" });
+  }
+  assert.equal(h.effects.paypal.length, 0);
+  await h.db.doc("products/p2/variants/v2").update({ price: 40000 });
+  await assert.rejects(h.paypal.paypalCreateOrder(request({ orderId, expectedQuote: quote })), (error) => {
+    assert.equal(error.code, "failed-precondition");
+    assert.equal(error.details.quote.crcPayNow, 20000);
+    assert.equal(error.details.quote.crcBalanceDue, 20000);
+    return true;
+  });
+  assert.equal(h.effects.paypal.length, 0);
+});
+
+test("PayPal quote never accepts client supplyType, price, shipping or deposit as authority", async () => {
+  const h = loadHandlers(paypalCatalog());
+  const quote = await h.paypal.paypalGetQuote({ data: {
+    items: [cartLine("p1", "v1", { price: 1, supplyType: "bajo_pedido" }), cartLine("p2", "v2", { price: 1, supplyType: "stock_propio" })],
+    shippingCost: -100000, crcPayNow: 1, depositPercent: 0, remainingTotal: 0,
+  } });
+  assert.equal(quote.crcTotal, 79000);
+  assert.equal(quote.crcPayNow, 63000);
+  assert.equal(quote.crcBalanceDue, 16000);
+  assert.equal(quote.crcBackorderSubtotal, 32000);
+  assert.equal(quote.depositPercent, 0.5);
+});
+
+test("PayPal concurrent/retried create reuses one provider order and captures deposit only once", async () => {
+  const provider = fakePaypalProvider();
+  const h = loadHandlers(paypalCatalog(), { onPaypal: provider.fetch });
+  const items = [cartLine("p2", "v2")];
+  const quote = await h.paypal.paypalGetQuote({ data: { items, canton: "Grecia" } });
+  const { orderId } = await h.orders.createOrderWithReservation(request({ customerName: "Ana", paymentMethod: "paypal", items }));
+  const body = request({ orderId, expectedQuote: quote });
+  const creates = await Promise.all([h.paypal.paypalCreateOrder(body), h.paypal.paypalCreateOrder(body)]);
+  assert.equal(creates[0].paypalOrderId, creates[1].paypalOrderId);
+  assert.equal(provider.orders.size, 1);
+  const retried = await h.paypal.paypalCreateOrder(body);
+  assert.equal(retried.paypalOrderId, creates[0].paypalOrderId);
+  const capture = request({ orderId, paypalOrderId: retried.paypalOrderId });
+  await Promise.all([h.paypal.paypalCaptureOrder(capture), h.paypal.paypalCaptureOrder(capture)]);
+  await h.paypal.paypalCaptureOrder(capture);
+  assert.equal(provider.charges, 1);
+  assert.equal(h.get(`orders/${orderId}`).paymentAmount, 16000);
+  assert.equal(h.get(`orders/${orderId}`).remainingTotal, 16000);
+  assert.equal(h.get(`orders/${orderId}`).paymentStatus, "parcial");
+  await assert.rejects(h.paypal.paypalCreateOrder(body), { code: "failed-precondition" });
+  assert.equal(provider.orders.size, 1);
+});
+
+test("PayPal does not capture legacy full-total backorder attempts after deposit rollout", async () => {
+  const h = loadHandlers({ ...paypalCatalog(), [ORDER]: baseOrder({ paymentMethod: "paypal", total: 32000,
+    hasBackorder: true, backorderDeposit: 16000, remainingTotal: 16000,
+    paypal: { orderId: "OLD-FULL", usdTotal: 64, crcTotal: 32000 } }),
+    [`${ORDER}/items/item_0`]: { ...cartLine("p2", "v2"), lineTotal: 32000, price: 32000, supplyType: "bajo_pedido" },
+  });
+  await assert.rejects(h.paypal.paypalCaptureOrder(request({ paypalOrderId: "OLD-FULL" })), { code: "failed-precondition" });
+  assert.equal(h.effects.paypal.length, 0);
+  assert.equal(h.get(ORDER).paymentStatus, "pendiente");
+});
+
+test("PayPal create and capture cannot target another customer's order", async () => {
+  const provider = fakePaypalProvider();
+  const h = loadHandlers(paypalCatalog(), { onPaypal: provider.fetch });
+  const created = await createPaypalCheckout(h, [cartLine("p2", "v2")]);
+  const beforeCalls = h.effects.paypal.length;
+  for (const auth of [undefined, { uid: "attacker" }]) {
+    const code = auth ? "permission-denied" : "unauthenticated";
+    await assert.rejects(h.paypal.paypalCreateOrder({ auth, data: { orderId: created.orderId, expectedQuote: created.quote } }), { code });
+    await assert.rejects(h.paypal.paypalCaptureOrder({ auth, data: { orderId: created.orderId, paypalOrderId: created.paypalOrderId } }), { code });
+  }
+  assert.equal(h.effects.paypal.length, beforeCalls);
+  assert.equal(provider.charges, 0);
+});
+
+for (const [label, mutate] of [
+  ["amount", (detail) => { detail.purchase_units[0].amount.value = "64.00"; }],
+  ["currency", (detail) => { detail.purchase_units[0].amount.currency_code = "EUR"; }],
+  ["owner", (detail) => { detail.purchase_units[0].custom_id = "otherOrder"; }],
+  ["provider order id", (detail) => { detail.id = "DIFFERENT-ORDER"; }],
+]) {
+  test(`PayPal rejects provider order ${label} mismatch before capture`, async () => {
+    const provider = fakePaypalProvider();
+    const h = loadHandlers(paypalCatalog(), { onPaypal: provider.fetch });
+    const created = await createPaypalCheckout(h, [cartLine("p2", "v2")]);
+    provider.options.detailPatch = mutate;
+    await assert.rejects(h.paypal.paypalCaptureOrder(request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId })), { code: "failed-precondition" });
+    assert.equal(provider.charges, 0);
+    assert.equal(h.get(`orders/${created.orderId}`).paymentStatus, "pendiente");
+  });
+}
+
+for (const [label, mutate] of [
+  ["amount", (capture) => { capture.amount.value = "64.00"; }],
+  ["currency", (capture) => { capture.amount.currency_code = "EUR"; }],
+]) {
+  test(`PayPal never credits a capture with unexpected ${label}`, async () => {
+    const provider = fakePaypalProvider({ capturePatch: mutate });
+    const h = loadHandlers(paypalCatalog(), { onPaypal: provider.fetch });
+    const created = await createPaypalCheckout(h, [cartLine("p2", "v2")]);
+    await assert.rejects(h.paypal.paypalCaptureOrder(request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId })), { code: "failed-precondition" });
+    const order = h.get(`orders/${created.orderId}`);
+    assert.notEqual(order.paymentStatus, "pagado");
+    assert.notEqual(order.paymentStatus, "parcial");
+    assert.equal(order.backorderDepositPaid, false);
+    assert.equal(order.paymentAmount, 0);
+    assert.equal(order.remainingTotal, 16000);
+    assert.equal(h.effects.telegram + h.effects.email, 0);
+  });
+}
+
+test("PayPal pending capture does not credit deposit until provider confirms completion", async () => {
+  const provider = fakePaypalProvider({ pending: true });
+  const h = loadHandlers(paypalCatalog(), { onPaypal: provider.fetch });
+  const created = await createPaypalCheckout(h, [cartLine("p2", "v2")]);
+  const body = request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId });
+  const pending = await h.paypal.paypalCaptureOrder(body);
+  assert.equal(pending.result, "pending");
+  assert.equal(h.get(`orders/${created.orderId}`).paymentStatus, "verificando");
+  assert.equal(h.get(`orders/${created.orderId}`).backorderDepositPaid, false);
+  assert.equal(h.get(`orders/${created.orderId}`).paymentAmount, 0);
+  provider.orders.get(created.paypalOrderId).purchase_units[0].payments.captures[0].status = "COMPLETED";
+  const completed = await h.paypal.paypalCaptureOrder(body);
+  assert.equal(completed.result, "captured");
+  assert.equal(h.get(`orders/${created.orderId}`).paymentStatus, "parcial");
+  assert.equal(h.get(`orders/${created.orderId}`).remainingTotal, 16000);
+  assert.equal(provider.charges, 1);
+});
+
+test("PayPal partial payment cannot be overwritten by manual proof or manual approval", async () => {
+  const provider = fakePaypalProvider();
+  const h = loadHandlers({ ...paypalCatalog(), "users_roles/admin": { role: "admin" } }, { onPaypal: provider.fetch });
+  const created = await createPaypalCheckout(h, [cartLine("p2", "v2")]);
+  await h.paypal.paypalCaptureOrder(request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId }));
+  const original = h.get(`orders/${created.orderId}`);
+  await assert.rejects(h.payments.submitPaymentProof(request({ orderId: created.orderId, amount: 32000, transactionId: "FAKE" })), { code: "failed-precondition" });
+  await assert.rejects(h.payments.approvePaymentManually(request({ orderId: created.orderId }, "admin")), { code: "failed-precondition" });
+  assert.deepEqual(h.get(`orders/${created.orderId}`), original);
+});
+
+test("Legacy reservation cleanup never expires a paid PayPal backorder deposit", async () => {
+  for (const paypalPatch of [{ paymentMethod: "paypal" }, { paymentMethod: "sinpe", paypal: { orderId: "PP1", captureStatus: "COMPLETED" } }]) {
+    const h = loadHandlers({ ...paypalCatalog(), [ORDER]: baseOrder({ ...paypalPatch,
+      createdAt: "2020-01-01T00:00:00.000Z", paymentStatus: "parcial", paymentAmount: 16000,
+      total: 32000, remainingTotal: 16000, depositStatus: "pagado", backorderDepositPaid: true,
+      reservedItems: [], // Bajo-pedido-only legacy carts have no stock reservation marker.
+    }) });
+    await h.schedulers.cleanExpiredReservations();
+    assert.equal(h.get(ORDER).status, "pendiente_pago");
+    assert.equal(h.get(ORDER).paymentStatus, "parcial");
+    assert.equal(h.get(ORDER).legacyReservationReleasedAt, undefined);
+    assert.equal(h.get(ORDER).paymentAmount, 16000);
+  }
+});
+
+
+test("PayPal recovers a lost create response using the same immutable provider request", async () => {
+  const provider = fakePaypalProvider();
+  let responseLost = false;
+  const h = loadHandlers(paypalCatalog(), { onPaypal: async (url, config) => {
+    const response = await provider.fetch(url, config);
+    if (!responseLost && url === "/v2/checkout/orders" && config.method === "POST") {
+      responseLost = true;
+      throw new Error("network response lost after provider created order");
+    }
+    return response;
+  } });
+  const items = [cartLine("p2", "v2")];
+  const quote = await h.paypal.paypalGetQuote({ data: { items, canton: "Grecia" } });
+  const { orderId } = await h.orders.createOrderWithReservation(request({ customerName: "Ana", paymentMethod: "paypal", items }));
+  const body = request({ orderId, expectedQuote: quote });
+  await assert.rejects(h.paypal.paypalCreateOrder(body));
+  assert.equal(provider.orders.size, 1);
+  const recovered = await h.paypal.paypalCreateOrder(body);
+  assert.equal(provider.orders.size, 1);
+  assert.equal(recovered.paypalOrderId, [...provider.orders.keys()][0]);
+  const postIds = h.effects.paypal.filter(({ url }) => url === "/v2/checkout/orders").map(({ config }) => config.requestId);
+  assert.equal(new Set(postIds).size, 1);
+  assert.equal(h.get(`orders/${orderId}`).paypal.crcPayNow, 16000);
+});
+
+test("PayPal recovers a lost capture response without issuing a second charge", async () => {
+  const provider = fakePaypalProvider();
+  let responseLost = false;
+  const h = loadHandlers(paypalCatalog(), { onPaypal: async (url, config) => {
+    const response = await provider.fetch(url, config);
+    if (!responseLost && url.endsWith("/capture")) {
+      responseLost = true;
+      throw new Error("network response lost after provider captured order");
+    }
+    return response;
+  } });
+  const created = await createPaypalCheckout(h, [cartLine("p2", "v2")]);
+  const body = request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId });
+  await assert.rejects(h.paypal.paypalCaptureOrder(body));
+  assert.equal(provider.charges, 1);
+  assert.equal(h.get(`orders/${created.orderId}`).paymentAmount, 0);
+  await h.paypal.paypalCaptureOrder(body);
+  assert.equal(provider.charges, 1);
+  assert.equal(h.effects.paypal.filter(({ url }) => url.endsWith("/capture")).length, 1);
+  assert.equal(h.get(`orders/${created.orderId}`).paymentAmount, 16000);
+  assert.equal(h.get(`orders/${created.orderId}`).remainingTotal, 16000);
+  assert.equal(h.get(`orders/${created.orderId}`).paymentStatus, "parcial");
+});
+
+test("PayPal consults a minimal capture response before crediting the verified amount", async () => {
+  const provider = fakePaypalProvider();
+  const h = loadHandlers(paypalCatalog(), { onPaypal: async (url, config) => {
+    const response = await provider.fetch(url, config);
+    return url.endsWith("/capture") ? { ok: true, status: 201, data: { id: response.data.id, status: "COMPLETED" } } : response;
+  } });
+  const created = await createPaypalCheckout(h, [cartLine("p2", "v2")]);
+  const result = await h.paypal.paypalCaptureOrder(request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId }));
+  assert.equal(result.result, "captured");
+  assert.equal(provider.charges, 1);
+  assert.equal(h.effects.paypal.filter(({ url, config }) => url === `/v2/checkout/orders/${created.paypalOrderId}` && config.method !== "POST").length, 2);
+  assert.equal(h.get(`orders/${created.orderId}`).paymentAmount, 16000);
+  assert.equal(h.get(`orders/${created.orderId}`).remainingTotal, 16000);
+});
+
+for (const switchType of ["stock_propio", "bajo_pedido"]) {
+  test(`PayPal rejects catalog supplyType changed to ${switchType} after the inventory reservation`, async () => {
+    const provider = fakePaypalProvider();
+    const h = loadHandlers(paypalCatalog(), { onPaypal: provider.fetch });
+    const item = switchType === "stock_propio" ? cartLine("p2", "v2") : cartLine("p1", "v1");
+    const items = [item];
+    const { orderId } = await h.orders.createOrderWithReservation(request({ customerName: "Ana", paymentMethod: "paypal", items }));
+    const original = h.get(`orders/${orderId}`);
+    await h.db.doc(`products/${item.productId}/variants/${item.variantId}`).update({ supplyType: switchType, stock: 10 });
+    const quote = await h.paypal.paypalGetQuote({ data: { items, canton: "Grecia" } });
+    await assert.rejects(h.paypal.paypalCreateOrder(request({ orderId, expectedQuote: quote })), { code: "failed-precondition" });
+    assert.equal(h.effects.paypal.length, 0);
+    assert.equal(provider.charges, 0);
+    assert.deepEqual(h.get(`orders/${orderId}`).inventoryReservation, original.inventoryReservation);
+    assert.equal(h.get(`orders/${orderId}`).paymentStatus, "pendiente");
+  });
+}
+
+test("PayPal capture credits immutable approved lines even if mutable catalog and children changed", async () => {
+  const provider = fakePaypalProvider();
+  const h = loadHandlers(paypalCatalog(), { onPaypal: provider.fetch });
+  const created = await createPaypalCheckout(h, [cartLine("p1", "v1"), cartLine("p2", "v2")]);
+  const orderPath = `orders/${created.orderId}`;
+  await h.db.doc("products/p2/variants/v2").update({ price: 99000, supplyType: "stock_propio" });
+  await h.db.doc(`${orderPath}/items/item_1`).update({ price: 1, lineTotal: 1, supplyType: "stock_propio", quantity: 99 });
+  await h.db.doc(`${orderPath}/items/injected`).set({ ...cartLine("p1", "v1"), quantity: 99, lineTotal: 1 });
+  await h.db.doc(orderPath).update({ total: 1, remainingTotal: 0, itemsSummary: [] });
+  await h.paypal.paypalCaptureOrder(request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId }));
+  const paid = h.get(orderPath);
+  assert.equal(paid.total, 79000);
+  assert.equal(paid.paymentAmount, 63000);
+  assert.equal(paid.remainingTotal, 16000);
+  assert.equal(paid.paymentStatus, "parcial");
+  const backorder = paid.itemsSummary.find((line) => line.productId === "p2");
+  assert.equal(backorder.supplyType, "bajo_pedido");
+  assert.equal(backorder.lineTotal, 32000);
+  assert.equal(backorder.quantity, 1);
+  assert.equal(h.get(`${orderPath}/items/item_1`).lineTotal, 32000);
+  assert.equal(h.get(`${orderPath}/items/injected`), undefined);
+  assert.equal(provider.charges, 1);
+});
+
+
+test("PayPal rejects a stock order created without its canonical server reservation", async () => {
+  const items = [cartLine("p1", "v1")];
+  const h = loadHandlers({ ...paypalCatalog(),
+    [ORDER]: baseOrder({ paymentMethod: "paypal", total: 47000, subtotal: 47000 }),
+    [`${ORDER}/items/item_0`]: { ...items[0], price: 47000, lineTotal: 47000, supplyType: "stock_propio" },
+  });
+  const quote = await h.paypal.paypalGetQuote({ data: { items, canton: "Grecia" } });
+  await assert.rejects(h.paypal.paypalCreateOrder(request({ expectedQuote: quote })), { code: "failed-precondition" });
+  assert.equal(h.effects.paypal.length, 0);
+  assert.equal(h.get(ORDER).paypal, undefined);
+  assert.equal(h.get(ORDER).paymentStatus, "pendiente");
+  assert.equal(h.get(VARIANT).reservedStock, 0);
+});
+
+test("PayPal does not resend an ambiguous create after its safe idempotency window", async () => {
+  const provider = fakePaypalProvider();
+  const h = loadHandlers(paypalCatalog(), { onPaypal: async (url, config) => {
+    await provider.fetch(url, config);
+    throw new Error("create response lost after PayPal accepted request");
+  } });
+  const items = [cartLine("p2", "v2")];
+  const quote = await h.paypal.paypalGetQuote({ data: { items, canton: "Grecia" } });
+  const { orderId } = await h.orders.createOrderWithReservation(request({ customerName: "Ana", paymentMethod: "paypal", items }));
+  const body = request({ orderId, expectedQuote: quote });
+  await assert.rejects(h.paypal.paypalCreateOrder(body));
+  const orderPath = `orders/${orderId}`;
+  assert.equal(h.get(orderPath).paypal.status, "CREATING");
+  assert.equal(h.get(orderPath).paypal.orderId, "");
+  const callCount = h.effects.paypal.length;
+  await h.db.doc(orderPath).update({ "paypal.createdAt": new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString() });
+  await assert.rejects(h.paypal.paypalCreateOrder(body), { code: "failed-precondition" });
+  assert.equal(h.effects.paypal.length, callCount);
+  assert.equal(provider.orders.size, 1);
+  assert.equal(provider.charges, 0);
+  assert.equal(h.get(orderPath).paymentStatus, "pendiente");
+});
+
+test("PayPal already-paid legacy full payment does not reopen historical deposit balance", async () => {
+  const seed = { [ORDER]: baseOrder({ paymentMethod: "paypal", total: 32000, subtotal: 32000,
+    paymentStatus: "pagado", status: "pagado", paymentAmount: 32000,
+    hasBackorder: true, backorderDeposit: 16000, remainingTotal: 16000,
+    paypal: { orderId: "OLD-FULL", usdTotal: 64, crcTotal: 32000, captureStatus: "COMPLETED", captureId: "OLD-CAP" },
+  }) };
+  const h = loadHandlers(seed);
+  const result = await h.paypal.paypalCaptureOrder(request({ paypalOrderId: "OLD-FULL" }));
+  assert.equal(result.result, "already_paid");
+  assert.equal(result.partial, false);
+  assert.equal(result.crcPayNow, 32000);
+  assert.equal(result.crcBalanceDue, 0);
+  assert.equal(result.captureId, "OLD-CAP");
+  assert.equal(h.effects.paypal.length, 0);
+  assert.deepEqual(h.get(ORDER), seed[ORDER]);
+});
+
+
+test("PayPal capture representation without purchase-unit binding is consulted before credit", async () => {
+  const provider = fakePaypalProvider();
+  const h = loadHandlers(paypalCatalog(), { onPaypal: async (url, config) => {
+    const response = await provider.fetch(url, config);
+    if (url.endsWith("/capture")) {
+      // Orders v2 capture responses may include capture amount/currency/status
+      // while omitting the parent purchase unit's custom_id and amount.
+      delete response.data.purchase_units[0].custom_id;
+      delete response.data.purchase_units[0].amount;
+    }
+    return response;
+  } });
+  const created = await createPaypalCheckout(h, [cartLine("p2", "v2")]);
+  const result = await h.paypal.paypalCaptureOrder(request({ orderId: created.orderId, paypalOrderId: created.paypalOrderId }));
+  assert.equal(result.result, "captured");
+  assert.equal(result.partial, true);
+  assert.equal(provider.charges, 1);
+  assert.equal(h.effects.paypal.filter(({ url }) => url.endsWith("/capture")).length, 1);
+  assert.equal(h.effects.paypal.filter(({ url, config }) => url === `/v2/checkout/orders/${created.paypalOrderId}` && config.method !== "POST").length, 2);
+  assert.equal(h.get(`orders/${created.orderId}`).paymentStatus, "parcial");
+  assert.equal(h.get(`orders/${created.orderId}`).paymentAmount, 16000);
+  assert.equal(h.get(`orders/${created.orderId}`).remainingTotal, 16000);
 });
