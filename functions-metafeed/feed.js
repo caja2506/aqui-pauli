@@ -41,7 +41,8 @@ function buildRows(products, variants, brands, cats = {}) {
     const list = vs.length ? vs.map(v => ({ ...base, id: v.sku || `${p.id}-${v.id}`, item_group_id: vs.length>1 ? p.id : "",
         title: vs.length>1 && v.name ? `${p.name} - ${v.name}` : p.name,
         availability: avail(v), price: v.price || p.basePrice, image_link: v.imageUrl || imgs[0], additional_image_link: imgs.filter(u=>u!==(v.imageUrl||imgs[0])).slice(0,10).join(",") }))
-      : [{ ...base, id: p.id, item_group_id: "", availability: "in stock", price: p.basePrice, image_link: imgs[0], additional_image_link: imgs.slice(1,11).join(",") }];
+      // Sin variantes no se puede comprar: fuera de stock (no mostrar como disponible en Meta/WhatsApp)
+      : [{ ...base, id: p.id, item_group_id: "", availability: "out of stock", price: p.basePrice, image_link: imgs[0], additional_image_link: imgs.slice(1,11).join(",") }];
     for (const r of list) {
       const miss = ["id","title","description","availability","price","link","image_link","brand"].filter(k => !r[k]);
       if (!(Number(r.price) > 0)) miss.push("price");
