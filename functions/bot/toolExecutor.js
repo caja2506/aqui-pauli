@@ -389,9 +389,7 @@ async function createOrUpdateCart({ items } = {}, { sessionId } = {}) {
 
     // Leer config de envío del sistema
     const shippingConfig = await getShippingConfig();
-    const shippingCost = (shippingConfig.freeShippingThreshold && subtotal >= shippingConfig.freeShippingThreshold)
-      ? 0
-      : shippingConfig.standardCost;
+    const shippingCost = 0; // envío incluido
 
     // Detectar bajo_pedido
     const hasBackorder = validatedItems.some(i => i.supplyType === "bajo_pedido");

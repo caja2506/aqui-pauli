@@ -1,7 +1,7 @@
 const { db } = require("./utils");
 
 // ==============================================
-// CONFIGURACIÓN DE ENVÍO — lee de Firestore o usa defaults
+// CONFIGURACIÓN DE ENVÍO — el envío va INCLUIDO (₡0); solo el % de anticipo se lee de Firestore
 // ==============================================
 async function getShippingConfig() {
   try {
@@ -9,8 +9,8 @@ async function getShippingConfig() {
     if (snap.exists) {
       const data = snap.data();
       return {
-        standardCost: data.standardCost || 2500,
-        freeShippingThreshold: data.freeShippingThreshold || null,
+        standardCost: 0, // envío incluido: se ignora settings/shipping.standardCost
+        freeShippingThreshold: null,
         expressMultiplier: data.expressMultiplier || 2,
         backorderDepositPercent: data.backorderDepositPercent || 20,
       };
@@ -20,7 +20,7 @@ async function getShippingConfig() {
   }
   // Defaults
   return {
-    standardCost: 2500,
+    standardCost: 0, // envío incluido
     freeShippingThreshold: null,
     expressMultiplier: 2,
     backorderDepositPercent: 20,
@@ -123,9 +123,7 @@ async function createChatOrder(contactId, orderData) {
     // Calcular totales
     const shippingConfig = await getShippingConfig();
     const subtotal = resolvedItems.reduce((sum, i) => sum + i.lineTotal, 0);
-    const shippingCost = (shippingConfig.freeShippingThreshold && subtotal >= shippingConfig.freeShippingThreshold)
-      ? 0
-      : shippingConfig.standardCost;
+    const shippingCost = 0; // envío incluido
 
     // Detectar items bajo_pedido y calcular anticipo 20%
     const backorderItems = resolvedItems.filter(i => i.supplyType === "bajo_pedido");
@@ -327,7 +325,7 @@ async function modifyChatOrder(contactId, orderData) {
     // Combinar items existentes + nuevos
     const allItems = [...existingItems, ...newItems];
     const subtotal = allItems.reduce((sum, i) => sum + (i.lineTotal || i.price * (i.quantity || 1)), 0);
-    const shippingCost = order.shippingCost || 2500;
+    const shippingCost = 0; // envío incluido
     const total = subtotal + shippingCost;
     const now = new Date().toISOString();
 

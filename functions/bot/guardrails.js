@@ -31,8 +31,6 @@ function validateResponse(aiResponse, session, catalogProducts) {
         if (v.price) catalogPrices.add(v.price);
       }
     }
-    // Agregar precio de envío estándar
-    catalogPrices.add(2500);
 
     for (const match of priceMatches) {
       const price = parseInt(match.replace(/[₡,.\s]/g, ""));
@@ -136,8 +134,6 @@ function _isPriceValid(price, catalogPrices) {
   for (const cp of catalogPrices) {
     for (let mult = 1; mult <= 10; mult++) {
       if (Math.abs(price - cp * mult) < 10) return true;
-      // Con envío
-      if (Math.abs(price - (cp * mult + 2500)) < 10) return true;
     }
   }
 

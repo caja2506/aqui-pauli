@@ -68,7 +68,7 @@ function _formatOrderCreated(data, session) {
     `🔖 *Número de pedido:* ${data.orderNumber}\n\n` +
     `📦 *Productos:*\n${itemsList}\n\n` +
     `📍 *Envío a:* ${address}\n` +
-    `🚚 *Envío:* ₡${(data.shippingCost || 0).toLocaleString()}\n` +
+    `🚚 *Envío:* Incluido\n` +
     `💰 *Subtotal:* ₡${(data.subtotal || 0).toLocaleString()}\n` +
     `💰 *Total:* ₡${(data.total || 0).toLocaleString()}\n`;
 
@@ -135,7 +135,7 @@ function formatToolError(toolName, error, session) {
 /**
  * Formatear resumen de pedido para confirmación (antes de crear)
  */
-function formatOrderSummary(items, address, shippingCost = 2500) {
+function formatOrderSummary(items, address, shippingCost = 0) {
   const itemsList = items
     .map(i => `• ${i.productName} x${i.quantity || 1} — ₡${(i.price || 0).toLocaleString()}`)
     .join("\n");
@@ -146,7 +146,7 @@ function formatOrderSummary(items, address, shippingCost = 2500) {
   return `📋 *Resumen de tu pedido:*\n\n` +
     `📦 *Productos:*\n${itemsList}\n\n` +
     `📍 *Envío a:* ${address || "Por confirmar"}\n` +
-    `🚚 *Envío:* ₡${shippingCost.toLocaleString()}\n` +
+    `🚚 *Envío:* Incluido\n` +
     `💰 *Total:* ₡${total.toLocaleString()}\n\n` +
     `💳 *Pago:* SINPE 7095-6070 / IBAN CR15081400011020004961\n\n` +
     `¿Todo correcto? ¿Procedo? 😊`;

@@ -1,3 +1,4 @@
+import { SHIPPING_INCLUDED } from '../../services/shippingService';
 import { useState, useEffect } from 'react';
 import { Truck, Save, Loader2, RefreshCw } from 'lucide-react';
 import { getShippingPrices, saveShippingPrices } from '../../services/shippingService';
@@ -72,7 +73,14 @@ export default function ShippingPage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {SHIPPING_INCLUDED && (
+          <div role="alert" className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
+            <p className="font-black">Precios de envío desactivados: el envío va incluido.</p>
+            <p className="text-xs mt-1">La tienda, PayPal y el bot de WhatsApp cobran ₡0 de envío. Los valores de abajo se conservan pero no se aplican; Normal y Express solo son una elección de tiempo de entrega.</p>
+          </div>
+        )}
+
+        <div className={`grid grid-cols-1 md:grid-cols-3 gap-6 ${SHIPPING_INCLUDED ? 'opacity-50 pointer-events-none select-none' : ''}`} aria-disabled={SHIPPING_INCLUDED}>
           {/* GAM */}
           <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-5 border border-blue-100">
             <div className="flex items-center gap-2 mb-3">
@@ -148,18 +156,18 @@ export default function ShippingPage() {
 
         {/* Guardar */}
         <div className="flex items-center justify-between mt-8 pt-6 border-t border-slate-100">
-          <p className="text-xs text-slate-400">Los cambios se aplican de inmediato en el checkout</p>
+          <p className="text-xs text-slate-400">Con envío incluido, estos precios no se aplican en el checkout</p>
           <button
             onClick={handleSave}
-            disabled={saving}
-            className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-black text-sm transition-all active:scale-95 shadow-lg ${
+            disabled={saving || SHIPPING_INCLUDED}
+            className={`flex items-center gap-2 px-6 py-3 disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl font-black text-sm transition-all active:scale-95 shadow-lg ${
               saved
                 ? 'bg-green-500 text-white'
                 : 'bg-indigo-600 hover:bg-indigo-700 text-white'
             }`}
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Save className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-            {saving ? 'Guardando...' : saved ? '¡Guardado!' : 'Guardar Precios'}
+            {SHIPPING_INCLUDED ? 'Guardar Precios (desactivado)' : saving ? 'Guardando...' : saved ? '¡Guardado!' : 'Guardar Precios'}
           </button>
         </div>
       </div>

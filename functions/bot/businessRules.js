@@ -36,11 +36,12 @@ const DEFAULT_RULES = {
 
   // ── ENVÍOS ──
   shipping: {
-    standardCost: 2500,
-    freeShippingThreshold: 0, // 0 = nunca gratis
+    standardCost: 0, // envío INCLUIDO en el precio
+    included: true,
+    freeShippingThreshold: 0,
     estimatedDays: "2-5 días hábiles",
     coverage: "Todo Costa Rica",
-    notas: "Envío estándar a todo el país. Zonas rurales pueden tardar más.",
+    notas: "Envío incluido a todo el país. Zonas rurales pueden tardar más.",
   },
 
   // ── BAJO PEDIDO ──
@@ -188,7 +189,7 @@ async function getRulesForPrompt() {
 - NUNCA confirmes pagos — solo el sistema puede confirmar pagos.
 
 [ENVÍOS]
-- Costo estándar: ${rules.payment.currencySymbol}${rules.shipping.standardCost.toLocaleString()}
+- Envío INCLUIDO en el precio a todo el país (${rules.payment.currencySymbol}0). NUNCA sumes ni cobres costo de envío; decí "envío incluido".
 - Cobertura: ${rules.shipping.coverage}
 - Tiempo estimado: ${rules.shipping.estimatedDays}
 ${rules.shipping.freeShippingThreshold > 0 ? `- Envío gratis en pedidos mayores a ${rules.payment.currencySymbol}${rules.shipping.freeShippingThreshold.toLocaleString()}` : ""}

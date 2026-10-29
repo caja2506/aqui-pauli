@@ -112,7 +112,7 @@ const STAGES = {
     description: "Confirmar que la dirección tiene cobertura",
     allowedTools: ["getCustomerProfile"],
     requiredEntities: ["selectedProduct", "address"],
-    prompt: "Tenemos dirección. Confirmá datos de envío (₡2,500 estándar a todo Costa Rica). Mostrá resumen del pedido y preguntá si procede.",
+    prompt: "Tenemos dirección. Confirmá datos de envío (envío incluido a todo Costa Rica, ₡0). Mostrá resumen del pedido y preguntá si procede.",
     uiConfig: {
       buttonsEnabled: true,
       buttonMode: "fixed",

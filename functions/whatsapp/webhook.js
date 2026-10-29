@@ -577,7 +577,7 @@ async function processOrderMessage(message, phone) {
       let reply = `✅ *¡Pedido confirmado!*\n\n` +
         `🔖 *Número:* ${result.orderNumber}\n\n` +
         `📦 *Productos:*\n${itemsList}\n\n` +
-        `🚚 *Envío:* ₡${result.shippingCost.toLocaleString()}\n` +
+        `🚚 *Envío:* Incluido\n` +
         `💰 *Total:* ₡${result.total.toLocaleString()}\n\n` +
         `💳 *Pago:* SINPE Móvil / Transferencia\n` +
         `📱 *SINPE:* 7095-6070\n` +
