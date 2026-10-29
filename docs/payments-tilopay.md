@@ -1,73 +1,151 @@
-# Tilopay (tarjeta, cobro en colones) — apagado por defecto
+# Tilopay: implementación revisada de pagos en CRC
 
-Estado: **código listo, sin desplegar y sin activar**. Faltan la afiliación de Carlos en Tilopay, las credenciales y las pruebas.
+Base de esta entrega: `caja2506/aqui-pauli`, commit `2e8de4ab00ee337bc693ac2f98a3d4175eda95ef`, después de aplicar el diff revisado. Son archivos completos de reemplazo. No se ejecutaron cobros, envíos, cambios de configuración ni despliegues.
 
-## Flujo (Hosted Payment Page)
-1. Checkout muestra "Tarjeta (Tilopay)" solo si `tilopayGetConfig` devuelve `enabled: true`
-   (`src/services/payments/tilopayProvider.js`). Si las funciones no están desplegadas, la opción no aparece.
-2. Botón "Pagar con tarjeta" (`TilopayPanel`): valida el formulario → crea el pedido pendiente (`orders`, `paymentMethod: "tilopay"`) →
-   `tilopayCreatePayment({orderId})`.
-3. `tilopayCreatePayment` (servidor):
-   - Recalcula el total en **colones** con `functions/lib/pricing.js` (ignora cualquier precio del cliente; si difiere, corrige el pedido y guarda `priceCorrectedByServer`).
-   - `POST /api/v1/login` → token (cache en memoria) → `POST /api/v1/processPayment` con `currency: "CRC"`, `amount` con 2 decimales,
-     `orderNumber = <orderNumber>-T<intento>` (único por intento), `redirect = <TILOPAY_RETURN_BASE>/tilopay/retorno/<orderId>`.
-   - Guarda `orders/{id}.tilopay = { mode, attempts, orderNumber, orderNumbers[], crcTotal, currency }` y devuelve la `url`.
-4. El navegador va a la página de pago de Tilopay y vuelve a `/tilopay/retorno/:orderId` (`TilopayReturnPage`).
-5. `tilopayConfirm` (servidor) **no usa lo que vuelve en la URL**: llama `POST /api/v1/consult` por cada `orderNumber` del pedido y exige:
-   transacción tipo Payment, `code == "1"`, `currency == "CRC"`, `amount == total del servidor`, y entorno coherente con el modo
-   (en `live` se rechaza `environment` "Test"). Si todo cuadra, marca `paymentStatus/status = "pagado"` en una transacción (idempotente), lo que
-   dispara `onOrderStatusChange` (inventario, correo de pago, CRM) igual que PayPal. Si algo no cuadra: `revision_manual`.
-   Resultados: `paid | already_paid | test_paid | review | declined | not_found` (ver "Endurecimiento" abajo: es la versión vigente).
+Esta versión corrige el flujo de inicio, consulta, autorización, inventario y retorno del navegador. **No implementa webhook/OrderHash ni captura separada**, conforme al alcance acordado. Un pago autorizado sin captura permanece en revisión; no habilita entrega.
 
-## Funciones (us-central1, `functions/tilopay.js`)
-| Función | Qué hace |
+## 1. Configuración obligatoria
+
+| Ubicación | Dato | Regla |
+|---|---|---|
+| Firebase Secret Manager | `TILOPAY_API_USER` | Usuario de la integración del comercio. |
+| Firebase Secret Manager | `TILOPAY_API_PASSWORD` | Contraseña de la integración. |
+| Firebase Secret Manager | `TILOPAY_KEY` | Key de la integración. No se guarda en Firestore ni en React. |
+| Parámetro de Functions | `TILOPAY_RETURN_BASE` | Origen HTTPS y eventual ruta base del sitio. Valor existente por defecto: `https://aquipauli.com`. |
+| `config/payments.tilopay` | `enabled` | Booleano; solo `true` habilita el inicio de pagos. |
+| `config/payments.tilopay` | `mode` | Cadena explícita `test` o `live`. Configuración ausente/inválida deshabilita el inicio. |
+| `config/payments.tilopay` | `merchantId` | Cadena obligatoria con el ID real del comercio. No usar el número del ejemplo de la documentación. |
+| `config/payments.tilopay` | `orderPrefix` | Prefijo real, sin el guion separador final; por ejemplo, el `PFC…` confirmado para la integración. Cadena vacía solo si no existe prefijo. |
+| `users_roles/{uid}` | `role` | `admin` o `tester` para iniciar/consultar intentos de prueba. El parámetro de URL `tilopay_test=1` no concede permisos. |
+
+El modo de la aplicación no cambia el ambiente de Tilopay. Hay que verificar que la integración del proveedor esté en el ambiente correspondiente. El servidor contrasta el ambiente observado con el almacenado al crear el intento.
+
+Se mantienen los nombres de las tres funciones públicas y sus argumentos:
+
+| Función | Entrada | Salida relevante |
+|---|---|---|
+| `tilopayGetConfig` | Ninguna | `{ enabled, mode }`, sin secretos. |
+| `tilopayCreatePayment` | `{ orderId }`, sesión Firebase | URL del mismo intento o estado del pedido. Puede devolver otro `orderId` propio si ya existe un checkout equivalente pendiente. |
+| `tilopayConfirm` | `{ orderId }`, sesión Firebase | `paid`, `already_paid`, `test_paid`, `pending`, `review` o `declined`. En esta entrega `retry` siempre es `false`. |
+
+El `functions/index.js` y el cliente `tilopayClient` del commit base ya exportan/consumen estas funciones: no requieren reemplazo. No hay nuevas dependencias de producción. Los nuevos helpers usan módulos nativos de Node y dependencias Firebase ya existentes.
+
+## 2. Inicio del pago y monto inmutable
+
+El cliente proporciona el identificador del pedido. El servidor verifica su dueño; si aparecen `uid` y `customerUid`, deben coincidir. Un pedido de otro método, cerrado, con PayPal adjunto o ya pagado no puede abrir un pago Tilopay nuevo.
+
+Una transacción de Firestore lee el padre, la colección real de items y el catálogo. Valida entre 1 y 50 líneas, cantidades enteras de 1 a 99, identificadores y ausencia de variantes duplicadas. Precio, nombre, imagen y `supplyType` vienen del catálogo. Las operaciones de dinero usan centavos enteros, sin redondear importes inválidos. **Se conserva la política existente de envío incluido**; esta entrega no introduce un cobro de envío.
+
+La transacción escribe siempre los items y el resumen canónicos, aunque el total enviado por el navegador coincida por casualidad. Guarda un snapshot con dueño, productos, cantidades, precios, moneda, total, dirección y contacto. El intento conserva su huella SHA-256, importe, ambiente, comercio, prefijo y huella de la key utilizada.
+
+En live se reserva inventario con un marcador `inventoryReservation` creado por servidor. En test no se reserva inventario real. El snapshot y las reservas quedan protegidos de escrituras del navegador, incluso del administrador.
+
+La referencia externa es `AP-<token aleatorio generado por servidor>-T1`. Se reserva antes de llamar a Tilopay. No se deriva de un `orderNumber` editable por cliente ni se sobrescribe con la referencia recibida. El número visible del pedido sigue siendo el del comercio.
+
+## 3. Referencias, prefijo del comercio y registro de pagos
+
+Para un intento enviado como `ORDEN-T1`, la coincidencia permitida es exactamente `ORDEN-T1` o exactamente `<orderPrefix>-ORDEN-T1`. Si el prefijo configurado es `PFC123`, se acepta `PFC123-ORDEN-T1`; no se acepta `PFC999-ORDEN-T1`, un sufijo parcial ni un prefijo deducido de la propia respuesta. El `merchantId` también debe coincidir y no puede faltar.
+
+Se conserva `orderNumber` como identidad enviada y `returnedOrderNumber` como evidencia recibida. `consult` usa siempre la referencia enviada. Cambiar la configuración actual no altera el contexto histórico de un intento.
+
+Colecciones protegidas, solo servidor:
+
+| Colección | Propósito |
 |---|---|
-| `tilopayGetConfig` | `{enabled, mode}` desde Firestore (sin secretos) |
-| `tilopayCreatePayment` | autenticado, dueño del pedido; devuelve URL de pago |
-| `tilopayConfirm` | autenticado, dueño del pedido; confirma con `consult` |
+| `tilopayReferences` | Reserva única de referencia externa y asociación con pedido/intento/dueño. |
+| `tilopayTx` | Asociación única de comercio + ambiente + ID de transacción. El ID del documento es un hash, sin eliminar caracteres ni crear colisiones por sanitización. |
+| `tilopayCheckoutLocks` | Bloqueo de compras equivalentes del mismo dueño mientras un intento permanece sin resolver. |
 
-## Configuración
-- **Secrets de Firebase** (aún NO creados): `TILOPAY_API_USER`, `TILOPAY_API_PASSWORD`, `TILOPAY_KEY`
-  (del Panel de Tilopay → "Integración con plataformas"). Crearlos con `firebase functions:secrets:set <NOMBRE>` **antes** de desplegar
-  `tilopayCreatePayment` y `tilopayConfirm`. Nunca pegarlos en chat ni en el repo.
-- Param opcional `TILOPAY_RETURN_BASE` (por defecto `https://aquipauli.com`). No se toma del cliente.
-- Firestore `config/payments`: `{ tilopay: { enabled: false, mode: "test" } }`.
-  - `enabled` debe ser exactamente `true` para mostrarse.
-  - `mode: "test"` → la opción solo aparece en `/checkout?tilopay_test=1` (como el sandbox de PayPal).
-  - `mode: "live"` (valor por defecto si falta) → aparece para todos y se rechazan transacciones de entorno "Test".
+El bloqueo del checkout depende de dueño, variantes y cantidades. No cambia al modificar precio, dirección o modo test/live. No pretende impedir compras distintas legítimas. Un pago liquidado permite una compra posterior de los mismos productos; una incertidumbre mantiene el bloqueo.
 
-## Puesta en marcha (cuando Tilopay apruebe a Carlos)
-1. Registro de developer en https://tilopay.com/developers/registro (credenciales de pruebas) o usar el modo de pruebas de la cuenta aprobada.
-2. Crear los 3 secrets.
-3. `firebase deploy --only functions:tilopayGetConfig,functions:tilopayCreatePayment,functions:tilopayConfirm` (CI solo despliega Hosting).
-4. En Firestore: `config/payments.tilopay = { enabled: true, mode: "test" }`; probar en `/checkout?tilopay_test=1` con las tarjetas de
-   https://tilopay.com/developers/tarjetas-de-prueba. Verificar un pago aprobado, uno rechazado y uno abandonado.
-5. Cambiar el modo de la cuenta a producción en el panel de Tilopay, poner `mode: "live"`, hacer una compra real pequeña y reembolsarla desde el panel.
+## 4. Timeouts y reintentos
 
-## Endurecimiento (revisión de seguridad, oct 2026)
-- **Modo test**: `tilopayCreatePayment`/`tilopayConfirm` solo funcionan para cuentas con `users_roles/{uid}.role` = `admin` o `tester`
-  (aunque alguien conozca `?tilopay_test=1`). Un pago de prueba aprobado deja `paymentStatus: "test_paid"` y **no cambia `status`**:
-  nunca "pagado", así que no dispara inventario, Telegram, correo ni CRM. Si `config/payments.tilopay.mode` falta o no es `"live"`, se trata como `test`.
-- **Solo se acredita con `capture == "Capture"`**, `type == Payment`, `code == 1`, `id_tilopay`, moneda CRC, monto igual al del **intento**,
-  entorno reconocido (`Test`/`Production`/`PROD`/`TEST`) y coherente con el modo del intento. `Authorize`/vacío/desconocido → `pending_capture`;
-  respuesta ilegible o incompleta → `pending_reconciliation` (ambos: `paymentStatus: "verificando"`, `status: "revision_manual"` en live).
-- **Intentos** (`orders/{id}.tilopay.attemptsById.a1, a2…`): se reservan en una transacción ANTES de `processPayment`; guardan monto, moneda,
-  `orderVersion` (huella de total/envío/líneas), modo, `orderNumber` enviado (`AP-<idDelDocumento>-T<n>`) y el `returnedOrderNumber` completo
-  que devuelve Tilopay. Si hay un intento abierto con el mismo monto/versión se reutiliza su URL (no se crea T2). Si el pedido cambió entre el
-  inicio del pago y la confirmación, el cobro va a revisión (no se acredita solo).
-- **Registro** `tilopayTx/{entorno}_{id_tilopay}`: una transacción no puede acreditar dos pedidos (solo servidor; sin reglas de cliente).
-- Toda transición (aprobado, rechazado, mismatch, revisión) es una transacción de Firestore y nunca baja un pedido ya pagado; un cobro extra
-  sobre un pedido pagado queda marcado `tilopay.duplicatePaymentNeedsReview`.
-- `config/payments.tilopay.merchantId` (opcional): si está y Tilopay devuelve `merchantId`, deben coincidir; también se envía a `consult`.
-- Sin webhook ni llamada de captura (`processModification`) hasta tener la especificación de Tilopay.
+`processPayment` ocurre fuera de las transacciones de Firestore y se invoca una sola vez por reserva. Dos llamadas simultáneas al mismo pedido no crean dos solicitudes al proveedor. React añade una exclusión inmediata de clics, conserva el pedido en la sesión antes de llamar a la función y adopta el pedido original si el servidor lo indica.
 
-## Pendientes / por verificar con Tilopay
-- Especificación del webhook de `processPayment` y algoritmo de `OrderHash` (pedir a soporte@tilopay.com). Hoy se confirma solo con `consult`.
-- Si `orderNumber` acepta guiones y el formato `AP-…-T1` (se asume que sí; ver en modo de pruebas).
-- Valor exacto de `environment` en producción en `consult` (en docs solo aparece "Test"); el código solo depende de reconocer "test".
-- Códigos de estado de `billToState` (se envía `CR-A`, `CR-SJ`, etc.).
-- Plazo de liquidación y comisiones: 4,25 % + US$0,35 por transacción con tarjeta (https://tilopay.com/tarifas).
+Timeout, HTTP 500, JSON ilegible o respuesta sin URL válida dejan el intento para conciliación. No equivalen a un fallo definitivo. Una consulta vacía puede significar que aún no se pagó una HPP existente; no invalida por sí sola la página externa.
 
-## Pruebas
-`cd functions && npm test` (incluye `test/tilopay.test.js`: payload en CRC, `consult`, rechazo de monto/moneda/entorno distinto, pedido ajeno,
-precio del cliente ignorado, pago de un intento anterior, idempotencia).
+Esta versión no abandona intentos por edad ni crea `T2` automáticamente. Puede reutilizar una URL abierta del mismo intento si el pedido y su snapshot siguen intactos, tras consultar su estado. Un rechazo, un intento sin URL recuperable o un resultado incierto pueden requerir resolución administrativa. No borrar `.tilopay`, registros, bloqueos ni reservas para forzar un nuevo pago.
+
+La ausencia de caducidad automática también implica que una reserva de inventario abandonada puede permanecer retenida. Su liberación requiere resolver/cancelar el pedido desde el servidor; no se libera el bloqueo de pago por un plazo local. La aplicación administrativa actual no incorpora un flujo nuevo de cancelación Tilopay: las reglas bloquean cancelar/eliminar un pedido con intento iniciado desde el navegador.
+
+## 5. Consulta y acreditación
+
+Una respuesta aceptable exige un sobre `type=200`, lista `response`, ausencia de error y filas bien formadas. Un error que contiene «not found» no prueba ausencia de pago. Se validan identidad, comercio, ambiente, ID transaccional, moneda CRC, decimal exacto y monto del intento.
+
+| Evidencia del proveedor | Efecto |
+|---|---|
+| `Payment`, código `1`, `Capture`, identidad y monto coherentes, live | Puede acreditar el pedido si snapshot, referencia, registro global y estado del negocio también son válidos. |
+| La misma evidencia en test | `test_paid`; no prepara, descuenta inventario ni envía avisos de venta. |
+| `Authorize` | `pending_capture`; no marca pagado. |
+| Refund, modificación, tipo desconocido o filas contradictorias | Revisión; no infiere un saldo cobrado. |
+| Fallo de red, respuesta incompleta o ambiente desconocido | Conciliación pendiente; no abre otro cobro. |
+| Captura de un pedido cancelado o con contenido distinto | Registra evidencia para revisión; no reabre el pedido. |
+
+Se vuelven a consultar todos los intentos históricos disponibles (hasta 100, con concurrencia limitada a 4), incluidos rechazos previos. No hay un recorte que deje invisibles los intentos posteriores al quinto ni un retorno temprano por `already_paid` que impida detectar un movimiento adicional.
+
+La evidencia consultada se liga a una huella del contexto del intento. Si ese contexto cambia durante la consulta, no se acredita la respuesta anterior. Una autorización/rechazo tardío no reemplaza el ID ni la captura de un pago ya acreditado. Una transacción adicional conserva el pago original y activa revisión. Las contradicciones de integridad, duplicidad o legado no se borran automáticamente por una consulta posterior limpia.
+
+## 6. Inventario, CRM y avisos
+
+El trigger de pago lee el estado actual, no asume que el evento recibido es el último. Inventario, consumo de reserva, CRM, interacción determinista y marcador `fulfillment.state=applied` se escriben en una sola transacción. Un evento duplicado o concurrente no repite esos efectos. Una cancelación concurrente impide preparar el pedido.
+
+Para Tilopay, los productos y datos de entrega se toman del snapshot live capturado. Se exige concordancia de intento, ID de transacción, importe y huella, sin alertas de revisión. `reservedStock` solo disminuye por una reserva identificada de ese pedido; no consume reservas de otros compradores.
+
+El navegador del administrador no puede marcar pagado ni adelantar `pagado → por_preparar`. Solo puede gestionar `por_preparar → enviado → entregado` después del fulfillment verificado y mientras no haya alertas. Las notas y el tracking sin cambio de estado conservan su permiso.
+
+Correo y Telegram tienen reclamaciones persistentes por canal. No existe una transacción atómica entre Firestore y esos servicios: ante un envío ambiguo se conserva `sending` o `needs_review` sin reenviarlo automáticamente. Puede hacer falta recuperar un aviso manualmente. No se afirma entrega externa «exactamente una vez».
+
+Los callables de comprobantes/aprobación manual y PayPal rechazan pedidos Tilopay o cualquier pedido con datos `.tilopay`, y vuelven a verificar los datos en sus transacciones. La modificación de PayPal está acotada a este cruce de métodos; no constituye una auditoría integral de PayPal.
+
+## 7. Pedidos anteriores y despliegue coordinado
+
+Los intentos del diff anterior no tienen `schemaVersion: 2` ni snapshot completo. Se pueden consultar para diagnóstico, pero quedan en revisión. No se fabrica un snapshot usando el carrito actual para acreditar una transacción histórica. Tampoco se abre otro pago para ocultar el legado.
+
+Las reservas históricas sin `inventoryReservation` requieren conciliación de inventario. No se supone que los subitems actuales describan una reserva anterior. Un pedido histórico que esté esperando su evento de pago sin snapshot nuevo se detendrá para revisión en el helper nuevo.
+
+Secuencia de incorporación recomendada:
+
+1. Deshabilitar nuevos inicios de pago durante el reemplazo. Conservar la posibilidad de conciliar los intentos abiertos y registrar cuáles quedan en revisión.
+2. Copiar todos los archivos del paquete respetando sus rutas, incluidos los nuevos helpers. No reemplazar solo `functions/tilopay.js`.
+3. Ejecutar las pruebas. Aplicar las reglas y Functions de forma coordinada, con el inicio de pagos todavía deshabilitado. Las funciones afectadas son `tilopayGetConfig`, `tilopayCreatePayment`, `tilopayConfirm`, `createOrderWithReservation`, `onOrderStatusChange`, `deleteOrder`, `submitPaymentProof`, `approvePaymentManually`, `paypalCreateOrder` y `paypalCaptureOrder`; `paypalGetQuote` usa el pricing compartido actualizado. También se reemplaza el cron `cleanExpiredReservations` para que no expire intentos Tilopay históricos.
+4. Incorporar el frontend. Verificar la configuración real de comercio/prefijo y secretos mediante las herramientas del proyecto, sin copiar valores de las pruebas.
+5. Probar test con rol autorizado y comprobar que no hay efectos comerciales. Resolver los intentos heredados antes de reabrir compras equivalentes.
+6. Antes de habilitar live para clientes, confirmar con Tilopay el comportamiento de captura del comercio y validar un pago controlado y su conciliación. Esa prueba real no fue ejecutada en esta revisión.
+
+## 8. Webhook, OrderHash y captura separada
+
+El retorno del navegador no aporta evidencia financiera confiable. `code`, `auth`, `order`, `returnData` u otros parámetros de URL no deciden el pago. Solicitar `hashVersion: V2` no equivale a verificar `OrderHash`.
+
+No se añadió un webhook con un algoritmo supuesto. Hace falta el contrato de `processPayment` y la especificación de firma/OrderHash de Tilopay. Sin webhook ni un conciliador programado, si el comprador paga y cierra la pestaña, el pedido puede permanecer pendiente hasta que alguien vuelva a consultar con la misma sesión. Las devoluciones posteriores tampoco se detectan espontáneamente.
+
+La documentación de HPP define `capture: "1"` como autorización y captura. Por eso no corresponde añadir una segunda captura indiscriminada en producción. Si `consult` informa `Authorize`, la evidencia observada todavía no es una captura. Puede depender de la configuración o del procesamiento del comercio; la causa real requiere contrastar el ID con Tilopay. Esta entrega conserva el pago pendiente y no llama a `processModification`.
+
+## 9. Pruebas reproducibles
+
+Desde la raíz del repositorio:
+
+```bash
+node scripts/test-tilopay.cjs
+```
+
+El runner ejecuta las cinco suites de seguridad del servicio, parser, dinero, pricing e integración de pedidos. No necesita credenciales ni hace llamadas reales a Tilopay, PayPal, SMTP o Telegram. El doble de Firestore implementa versiones, consultas, reintentos y commits atómicos para las pruebas de carreras; no sustituye al emulador.
+
+Pruebas de reglas, con Firebase CLI y las dependencias de desarrollo `@firebase/rules-unit-testing` y `firebase` disponibles en la resolución de módulos:
+
+```bash
+firebase emulators:exec --only firestore --project demo-aqui-pauli-audit --config firebase.tilopay-emulator.json "node scripts/test-tilopay.cjs --rules"
+```
+
+El runner de reglas exige `FIRESTORE_EMULATOR_HOST` en localhost y el proyecto de prueba es `demo-aqui-pauli-audit`. La suite borra únicamente la base del emulador. No ejecutar contra un proyecto real. El CLI utilizado para la verificación requirió Java 21.
+
+Se verificaron 76 pruebas de lógica y concurrencia, 11 pruebas reales de reglas y 6 pruebas originales de compatibilidad PayPal: **93 aprobadas, ninguna fallida u omitida** en esas ejecuciones. Las seis pruebas PayPal originales siguen en el repositorio y se ejecutan con `node functions/test/paypal.test.js`. También se verificó sintaxis JavaScript y se compilaron los dos componentes JSX con esbuild. Esto no equivale a un build completo de Vite, una prueba de navegador de extremo a extremo ni una prueba de captura del comercio real.
+
+## Fuentes de contrato
+
+- [HPP / processPayment](https://tilopay.com/developers/api/hosted-payment-page/process-payment).
+- [Consulta de transacciones](https://tilopay.com/developers/api/procesos-operativos/consult).
+- [Reintentos y unicidad de orderNumber](https://tilopay.com/developers/reintentos-seguros).
+- [Autenticación y expires_in](https://tilopay.com/developers/api/autenticacion).
+- [Webhooks](https://tilopay.com/developers/api/webhooks).
+- [Firestore: eventos, orden e idempotencia](https://firebase.google.com/docs/functions/firestore-events).
+- [Firestore: reglas sobre campos y SDK de servidor](https://firebase.google.com/docs/firestore/security/rules-fields).
