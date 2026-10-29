@@ -108,7 +108,13 @@ function buildProcessPayload({ key, redirect, orderId, order, orderNumber, crcTo
  */
 function interpretConsult(data, { orderNumber, crcTotal, mode = "live" }) {
   const rows = Array.isArray(data?.response) ? data.response : [];
-  const mine = rows.filter((r) => String(r.orderNumber) === String(orderNumber));
+  // Tilopay devuelve el orderNumber con un prefijo de comercio (p. ej. "PFC031932-TPTEST-A-T2"); se acepta
+  // el exacto o ese prefijo (2-5 letras + dígitos + "-"), nunca un sufijo arbitrario.
+  const want = String(orderNumber);
+  const mine = rows.filter((r) => {
+    const n = String(r.orderNumber ?? "");
+    return n === want || (n.endsWith(`-${want}`) && /^[A-Za-z]{2,5}\d+$/.test(n.slice(0, -(want.length + 1))));
+  });
   if (mine.length === 0) return { state: "not_found" };
   const payments = mine.filter((r) => !r.type || String(r.type).toLowerCase() === "payment");
   const approved = payments.filter((r) => String(r.code) === "1");

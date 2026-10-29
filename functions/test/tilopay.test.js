@@ -57,6 +57,14 @@ test("interpretConsult: aprobado exige code 1, CRC y monto igual", () => {
   assert.equal(tp.interpretConsult({ response: [row({ type: "Refund" })] }, { orderNumber: "A-T1", crcTotal: 90000 }).state, "declined");
 });
 
+test("interpretConsult: acepta el prefijo de comercio que Tilopay antepone (PFC031932-…) pero no sufijos arbitrarios", () => {
+  const r = (n) => tp.interpretConsult({ response: [row({ orderNumber: n })] }, { orderNumber: "A-T1", crcTotal: 90000 }).state;
+  assert.equal(r("PFC031932-A-T1"), "approved");
+  assert.equal(r("XA-T1"), "not_found");
+  assert.equal(r("OTRO-A-T1"), "not_found");
+  assert.equal(r("12-A-T1"), "not_found");
+});
+
 test("interpretConsult: transacción de pruebas se rechaza en live y se acepta en test", () => {
   const t = row({ environment: "Test" });
   assert.equal(tp.interpretConsult({ response: [t] }, { orderNumber: "A-T1", crcTotal: 90000, mode: "live" }).state, "mismatch");
