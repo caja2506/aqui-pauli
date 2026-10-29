@@ -158,23 +158,23 @@ test('checkout de stock cobra el total y no presenta apartado', () => {
   assert.doesNotMatch(html, /data-testid="deposit-summary"/);
 });
 
-test('Bajo pedido de ₡47.000 renderiza SINPE, apartado ₡11.750 y saldo ₡35.250', () => {
+test('Bajo pedido de ₡47.000 renderiza SINPE, apartado ₡23.500 y saldo ₡23.500', () => {
   const { html } = renderPage(CHECKOUT, { items: [line('bajo_pedido', 47000)], paymentMethod: 'sinpe' });
   assert.match(html, /data-testid="deposit-summary"/);
-  contains(html, `Apartá con ${formatCRC(11750)} (25%)`);
-  contains(html, `Saldo restante ${formatCRC(35250)}`);
+  contains(html, `Apartá con ${formatCRC(23500)} (50%)`);
+  contains(html, `Saldo restante ${formatCRC(23500)}`);
   contains(html, '8310-0015');
   contains(html, 'Carlos Jiménez Arias');
 });
 
-test('mixto paga stock y envío completos más 25% únicamente de Bajo pedido', () => {
+test('mixto paga stock y envío completos más 50% únicamente de Bajo pedido', () => {
   const { html } = renderPage(CHECKOUT, {
     items: [line('stock_propio', 30000), line('bajo_pedido', 10000)], shippingCost: 5000,
   });
-  contains(html, `Apartá con ${formatCRC(37500)} (25%)`);
-  contains(html, `Saldo restante ${formatCRC(7500)}`);
+  contains(html, `Apartá con ${formatCRC(40000)} (50%)`);
+  contains(html, `Saldo restante ${formatCRC(5000)}`);
   contains(html, `Total del pedido ${formatCRC(45000)}`);
-  contains(html, `de los productos bajo pedido (${formatCRC(2500)})`);
+  contains(html, `de los productos bajo pedido (${formatCRC(5000)})`);
 });
 
 test('carrito lateral abierto renderiza Bajo pedido y acceso a checkout', () => {
@@ -189,17 +189,24 @@ test('carrito lateral abierto renderiza Bajo pedido y acceso a checkout', () => 
 test('confirmación SINPE recargada calcula el apartado desde el pedido guardado', () => {
   const { html } = renderPage(CONFIRMATION, { savedOrder: {
     orderNumber: 'AP-RENDER', total: 47000, paymentMethod: 'sinpe', shippingCost: 0,
+    backorderDeposit: 23500, depositTotal: 23500,
     itemsSummary: [line('bajo_pedido', 47000)],
   } });
   assert.match(html, /data-testid="sinpe-instructions"/);
   contains(html, 'AP-RENDER');
-  contains(html, `Monto a pagar ahora (apartado) ${formatCRC(11750)}`);
-  contains(html, `Saldo restante: ${formatCRC(35250)}`);
-  contains(html, '25% de los productos bajo pedido');
+  contains(html, `Monto a pagar ahora (apartado) ${formatCRC(23500)}`);
+  contains(html, `Saldo restante: ${formatCRC(23500)}`);
+  contains(html, '50% de los productos bajo pedido');
   contains(html, '8310-0015');
   contains(html, 'Carlos Jiménez Arias');
   assert.match(html, /aria-label="Copiar monto"/);
-  assert.match(html, /href="https:\/\/wa\.me\//);
+  const whatsappHref = html.match(/href="(https:\/\/wa\.me\/[^"]+)"/)?.[1];
+  assert.ok(whatsappHref, 'Missing WhatsApp proof link');
+  const message = new URL(whatsappHref.replaceAll('&amp;', '&')).searchParams.get('text');
+  assert.ok(message.includes(`Pagué *${formatCRC(23500)}*`), 'WhatsApp must show the agreed payment amount');
+  assert.ok(message.includes('apartado, 50% de los productos bajo pedido'));
+  assert.ok(message.includes('AP-RENDER'));
+  assert.ok(!message.includes('25%'));
 });
 
 test('PayPal conserva recomendado, primera opción y total completo del pedido mixto', () => {
@@ -214,4 +221,36 @@ test('PayPal conserva recomendado, primera opción y total completo del pedido m
   assert.match(html, /data-testid="paypal-panel"/);
   assert.doesNotMatch(html, /data-testid="deposit-summary"/);
   assert.doesNotMatch(html, /type="submit"/);
+});
+
+
+test('confirmación y WhatsApp conservan el apartado guardado del 25% en pedidos anteriores', () => {
+  for (const field of ['backorderDeposit', 'depositTotal']) {
+    const { html } = renderPage(CONFIRMATION, { savedOrder: {
+      orderNumber: 'AP-ANTERIOR', total: 47000, paymentMethod: 'sinpe', shippingCost: 0,
+      itemsSummary: [line('bajo_pedido', 47000)], [field]: 11750,
+    }, locationState: { backorder: {
+      hasBackorder: true, total: 47000, backorderSubtotal: 47000,
+      depositTotal: 23500, balanceDue: 23500, payNowTotal: 23500,
+    } } });
+    contains(html, `Monto a pagar ahora (apartado) ${formatCRC(11750)}`);
+    contains(html, `Saldo restante: ${formatCRC(35250)}`);
+    contains(html, '25% de los productos bajo pedido');
+    assert.doesNotMatch(html, /50%/);
+    const href = html.match(/href="(https:\/\/wa\.me\/[^"]+)"/)[1].replace(/&amp;/g, '&');
+    const message = new URL(href).searchParams.get('text');
+    assert.ok(message.includes(formatCRC(11750)));
+    assert.ok(message.includes('25% de los productos bajo pedido'));
+    assert.ok(message.includes('AP-ANTERIOR'));
+  }
+});
+
+test('confirmación de stock no aplica el apartado del 50%', () => {
+  const { html } = renderPage(CONFIRMATION, { savedOrder: {
+    orderNumber: 'AP-STOCK', total: 30000, paymentMethod: 'sinpe', shippingCost: 0,
+    itemsSummary: [line('stock_propio', 30000)], backorderDeposit: 0,
+  } });
+  contains(html, `Monto a pagar ${formatCRC(30000)}`);
+  assert.doesNotMatch(html, /data-testid="deposit-detail"/);
+  assert.doesNotMatch(html, /50%/);
 });

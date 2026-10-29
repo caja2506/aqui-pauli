@@ -73,7 +73,7 @@ exports.createOrderWithReservation = onCall(
           reserves.push({ ref, line, ...stock });
         }
 
-        // Bajo pedido: 25% solo de las líneas bajo pedido; stock y envío se pagan completos (igual que el checkout web).
+        // Bajo pedido: 50% solo de las líneas bajo pedido; stock y envío se pagan completos (igual que el checkout web).
         const backorder = computeBackorder(canonical, totals.shippingCost);
         const orderItems = canonical.map((line, index) => {
           const depositAmount = backorder.depositByLine[index];

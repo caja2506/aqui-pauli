@@ -4,6 +4,7 @@ import { doc, onSnapshot, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { ShoppingCart, ArrowLeft, Check, Package, Truck } from 'lucide-react';
 import { formatCRC } from '../../utils/formatters';
+import { BACKORDER_DEPOSIT_LABEL } from '../../utils/backorder';
 import { useCart } from '../../contexts/CartContext';
 import { cleanShippingPromise } from '../../utils/shippingText';
 import StatusBadge from '../../components/ui/StatusBadge';
@@ -159,7 +160,7 @@ export default function ProductPage() {
               <StatusBadge status={selectedVariant.commercialStatus} type="commercial" />
               {selectedVariant.supplyType === 'bajo_pedido' && (
                 <span className="text-xs text-amber-600 font-bold flex items-center gap-1">
-                  <Package className="w-3.5 h-3.5" /> Se aparta con el 25% de este producto
+                  <Package className="w-3.5 h-3.5" /> Se aparta con el {BACKORDER_DEPOSIT_LABEL} de este producto
                 </span>
               )}
             </div>

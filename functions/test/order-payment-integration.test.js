@@ -127,6 +127,47 @@ test("createOrder: canonical prices/supplyType/owner; ignores client financial f
   assert.equal(order.inventoryReservation.state, "reserved");
 });
 
+test("createOrder: persiste anticipo 50% solo Bajo pedido, saldo y líneas iguales al checkout", async () => {
+  const seed = catalog();
+  seed[VARIANT].price = 30000;
+  seed["products/p2"] = { active: true, name: "Perfume bajo pedido", basePrice: 10000 };
+  seed["products/p2/variants/v2"] = {
+    active: true, name: "50 ml", price: 10000, supplyType: "bajo_pedido", stock: 0, reservedStock: 0,
+  };
+  const h = loadHandlers(seed);
+  const result = await h.orders.createOrderWithReservation(request({
+    customerName: "Ana", paymentMethod: "sinpe", shippingCost: 999,
+    depositTotal: 1, backorderDeposit: 1, remainingTotal: 1,
+    items: [
+      { productId: "p1", variantId: "v1", quantity: 1, price: 1, supplyType: "bajo_pedido" },
+      { productId: "p2", variantId: "v2", quantity: 1, price: 1, supplyType: "stock_propio" },
+    ],
+  }));
+  const orderPath = `orders/${result.orderId}`;
+  const order = h.get(orderPath);
+  const { computeBackorder: computeClientBackorder } = await import("../../src/utils/backorder.js");
+  const client = computeClientBackorder(order.itemsSummary, order.shippingCost);
+  assert.equal(order.total, 40000);
+  assert.equal(order.shippingCost, 0); // La tarifa real del catálogo sigue siendo envío incluido.
+  assert.equal(order.hasBackorder, true);
+  assert.equal(order.hasBackorderItems, true);
+  assert.equal(order.depositTotal, 5000);
+  assert.equal(order.backorderDeposit, 5000);
+  assert.equal(order.remainingTotal, 5000);
+  assert.equal(order.depositTotal, client.depositTotal);
+  assert.equal(order.remainingTotal, client.balanceDue);
+  assert.equal(order.total - order.remainingTotal, client.payNowTotal);
+  assert.equal(client.payNowTotal, 35000); // Stock completo + mitad de Bajo pedido.
+  assert.deepEqual(order.itemsSummary.map((line) => line.depositAmount), [0, 5000]);
+  assert.equal(h.get(`${orderPath}/items/item_0`).depositAmount, 0);
+  assert.equal(h.get(`${orderPath}/items/item_1`).depositAmount, 5000);
+  assert.equal(order.itemsSummary.reduce((sum, line) => sum + line.depositAmount, 0), order.depositTotal);
+  assert.deepEqual(order.inventoryReservation.lines, [{ productId: "p1", variantId: "v1", quantity: 1 }]);
+  assert.equal(h.get(VARIANT).reservedStock, 1);
+  assert.equal(h.get("products/p2/variants/v2").reservedStock, 0);
+  assert.equal(order.paymentStatus, "pendiente");
+});
+
 test("createOrder: duplicate and invalid quantities make no reservation", async () => {
   for (const items of [
     [{ productId: "p1", variantId: "v1", quantity: -2 }],

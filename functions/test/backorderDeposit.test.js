@@ -16,31 +16,59 @@ test("sin líneas bajo pedido: se paga todo y no hay saldo", () => {
   assert.deepEqual(r.depositByLine, [0]);
 });
 
-test("solo bajo pedido: aparta 25% de las líneas; el saldo es 75%; envío se paga hoy", () => {
+test("solo bajo pedido: aparta 50% de las líneas; el saldo es 50%; envío se paga hoy", () => {
   const r = computeBackorder([L("bajo_pedido", 40000)], 3000);
   assert.equal(r.total, 43000);
-  assert.equal(r.depositTotal, 10000);
-  assert.equal(r.balanceDue, 30000);
-  assert.equal(r.payNowTotal, 13000); // 10.000 de anticipo + 3.000 de envío
+  assert.equal(r.depositTotal, 20000);
+  assert.equal(r.balanceDue, 20000);
+  assert.equal(r.payNowTotal, 23000); // 20.000 de anticipo + 3.000 de envío
 });
 
-test("pedido mixto: stock y envío completos + 25% de lo bajo pedido", () => {
+test("pedido mixto: stock y envío completos + 50% de lo bajo pedido", () => {
   const r = computeBackorder([L("stock_propio", 30000), L("bajo_pedido", 10000)], 5000);
   assert.equal(r.total, 45000);
   assert.equal(r.backorderSubtotal, 10000);
-  assert.equal(r.depositTotal, 2500);
-  assert.equal(r.balanceDue, 7500);
-  assert.equal(r.payNowTotal, 37500);
+  assert.equal(r.depositTotal, 5000);
+  assert.equal(r.balanceDue, 5000);
+  assert.equal(r.payNowTotal, 40000);
   assert.equal(r.payNowTotal + r.balanceDue, r.total);
-  assert.deepEqual(r.depositByLine, [0, 2500]);
+  assert.deepEqual(r.depositByLine, [0, 5000]);
 });
 
 test("varias líneas bajo pedido: la suma por línea es exactamente el anticipo", () => {
   const lines = [L("bajo_pedido", 33333), L("stock_propio", 1000), L("bajo_pedido", 33333), L("bajo_pedido", 33334)];
   const r = computeBackorder(lines, 0);
-  assert.equal(r.depositTotal, Math.round(100000 * 0.25));
+  assert.equal(r.depositTotal, Math.round(100000 * 0.5));
   assert.equal(r.depositByLine.reduce((a, b) => a + b, 0), r.depositTotal);
   assert.equal(r.depositByLine[1], 0);
+});
+
+test("monto impar: redondea el anticipo y conserva todo el saldo sin cobrar envío dos veces", () => {
+  const r = computeBackorder([L("stock_propio", 30000), L("bajo_pedido", 10001)], 5000);
+  assert.equal(r.depositTotal, 5001);
+  assert.equal(r.balanceDue, 5000);
+  assert.equal(r.payNowTotal, 40001);
+  assert.equal(r.payNowTotal + r.balanceDue, r.total);
+  assert.deepEqual(r.depositByLine, [0, 5001]);
+});
+
+test("redondeo acumulado: cuatro líneas de un colón nunca dejan anticipo negativo", () => {
+  const r = computeBackorder([1, 1, 1, 1].map((amount) => L("bajo_pedido", amount)), 0);
+  assert.equal(r.depositTotal, 2);
+  assert.equal(r.balanceDue, 2);
+  assert.deepEqual(r.depositByLine, [1, 0, 1, 0]);
+  assert.ok(r.depositByLine.every((amount) => amount >= 0));
+  assert.equal(r.depositByLine.reduce((a, b) => a + b, 0), r.depositTotal);
+});
+
+test("redondeo acumulado: varias líneas impares y una última pequeña conservan suma y límites", () => {
+  const amounts = [10001, 10001, 10001, 1];
+  const r = computeBackorder(amounts.map((amount) => L("bajo_pedido", amount)), 0);
+  assert.equal(r.depositTotal, 15002);
+  assert.equal(r.balanceDue, 15002);
+  assert.deepEqual(r.depositByLine, [5001, 5000, 5001, 0]);
+  assert.ok(r.depositByLine.every((amount, index) => amount >= 0 && amount <= amounts[index]));
+  assert.equal(r.depositByLine.reduce((a, b) => a + b, 0), r.depositTotal);
 });
 
 test("paridad con el checkout web (src/utils/backorder.js)", async () => {
@@ -50,6 +78,8 @@ test("paridad con el checkout web (src/utils/backorder.js)", async () => {
     [[L("bajo_pedido", 40000)], 3000],
     [[L("stock_propio", 30000), L("bajo_pedido", 10001)], 5000],
     [[L("bajo_pedido", 33333), L("bajo_pedido", 33333), L("bajo_pedido", 33334)], 1234],
+    [[1, 1, 1, 1].map((amount) => L("bajo_pedido", amount)), 0],
+    [[10001, 10001, 10001, 1].map((amount) => L("bajo_pedido", amount)), 0],
   ];
   for (const [lines, shipping] of cases) {
     const s = computeBackorder(lines, shipping);
@@ -59,5 +89,5 @@ test("paridad con el checkout web (src/utils/backorder.js)", async () => {
     }
   }
   // el checkout calcula líneas con price*quantity
-  assert.equal(web.computeBackorder([{ supplyType: "bajo_pedido", price: 20000, quantity: 2 }], 0).depositTotal, 10000);
+  assert.equal(web.computeBackorder([{ supplyType: "bajo_pedido", price: 20000, quantity: 2 }], 0).depositTotal, 20000);
 });
