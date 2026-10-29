@@ -11,6 +11,9 @@ export default function OrderConfirmation() {
   const total = location.state?.total || '';
   const paymentMethod = location.state?.paymentMethod || '';
 
+  const paid = !!location.state?.paid;
+  const online = !!location.state?.online;
+
   const needsProof = paymentMethod === 'sinpe' || paymentMethod === 'transferencia';
 
   // Mensaje pre-llenado para WhatsApp
@@ -28,11 +31,16 @@ export default function OrderConfirmation() {
       <p className="text-sm text-slate-500 mb-6">
         Tu pedido <span className="font-bold text-slate-700">{orderNumber}</span> ha sido registrado exitosamente.
       </p>
+      {online && (
+        <p className={`text-sm font-bold mb-6 ${paid ? 'text-green-700' : 'text-amber-700'}`}>
+          {paid ? '✅ Pago recibido con PayPal.' : 'Tu pago con PayPal está en revisión; te avisaremos por WhatsApp.'}
+        </p>
+      )}
 
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-left mb-6">
         <h3 className="text-sm font-bold text-amber-800 mb-2">Próximos pasos:</h3>
         <ul className="text-xs text-amber-700 space-y-1.5">
-          <li>• Realiza el pago con el método seleccionado</li>
+          {!online && <li>• Realiza el pago con el método seleccionado</li>}
           {needsProof && <li>• <strong>Envía tu comprobante por WhatsApp</strong> con el botón verde</li>}
           <li>• Recibirás actualizaciones por WhatsApp</li>
           <li>• Podrás rastrear tu pedido desde tu cuenta</li>

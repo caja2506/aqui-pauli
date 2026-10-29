@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, CreditCard, Smartphone, Building, ShoppingBag } from 'lucide-react';
+import { ArrowLeft, CreditCard, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { formatCRC } from '../../utils/formatters';
-import { PAYMENT_METHOD_LABELS } from '../../utils/constants';
+import { listPaymentMethods, getPaymentMethod, isOnlineMethod, ONLINE_PROVIDERS } from '../../services/payments/registry';
 import { getProvincias, getCantones, getDistritos, buscarPorCodigoPostal } from '../../data/costaRicaTerritorial';
 import { calculateShippingCost, getShippingOptions } from '../../services/shippingService';
 import { createOrder } from '../../services/orderService';
@@ -34,6 +34,19 @@ export default function CheckoutPage() {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [loadingCrm, setLoadingCrm] = useState(true);
+  // Disponibilidad de pasarelas online (PayPal, a futuro Tilopay)
+  const [availability, setAvailability] = useState({});
+  // Pedido pendiente ya creado para el intento de pago online actual (evita duplicados)
+  const pendingOrderRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Object.values(ONLINE_PROVIDERS).forEach(async (p) => {
+      const a = await p.getAvailability();
+      if (!cancelled) setAvailability(prev => ({ ...prev, [p.id]: a }));
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // Cargar datos del CRM para pre-llenar
   useEffect(() => {
@@ -141,8 +154,12 @@ export default function CheckoutPage() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const paymentMethods = listPaymentMethods(availability);
+  const selectedMethod = getPaymentMethod(form.paymentMethod);
+  const OnlinePanel = isOnlineMethod(form.paymentMethod) && availability[form.paymentMethod]?.available ? selectedMethod.Panel : null;
+
+  // Valida el formulario; devuelve true si todo está completo
+  const validateForm = () => {
     const newErrors = {};
     if (!form.name.trim()) newErrors.name = 'Nombre requerido';
     if (!form.phone.trim()) newErrors.phone = 'Teléfono requerido';
@@ -150,47 +167,70 @@ export default function CheckoutPage() {
     if (!form.canton) newErrors.canton = 'Cantón requerido';
     if (!form.distrito) newErrors.distrito = 'Distrito requerido';
     if (!form.señas.trim()) newErrors.señas = 'Señas requeridas';
-    if (!form.paymentMethod) newErrors.paymentMethod = 'Selecciona método de pago';
+    if (!form.paymentMethod || !paymentMethods.some(m => m.id === form.paymentMethod)) newErrors.paymentMethod = 'Selecciona método de pago';
     if (form.paymentMethod === 'sinpe' && !form.paymentPhone.trim()) {
       newErrors.paymentPhone = 'Teléfono de SINPE requerido';
     }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
+  const buildOrderData = (paymentMethod) => ({
+    uid: user.uid,
+    customerEmail: form.email,
+    customerName: form.name,
+    customerPhone: form.phone,
+    customerCedula: form.cedula,
+    paymentMethod,
+    paymentPhone: form.paymentPhone,
+    subtotal,
+    shippingCost,
+    shippingType: form.shippingType,
+    shippingAddress: {
+      provincia: form.provincia,
+      canton: form.canton,
+      distrito: form.distrito,
+      codigoPostal: form.codigoPostal,
+      señas: form.señas,
+    },
+    items: items.map(i => ({
+      productId: i.productId,
+      variantId: i.variantId,
+      productName: i.productName,
+      variantName: i.variantName,
+      imageUrl: i.imageUrl,
+      price: i.price,
+      quantity: i.quantity,
+      supplyType: i.supplyType,
+    })),
+  });
+
+  // Pasarelas online: crea (o reutiliza) el pedido pendiente justo antes de pagar
+  const createPendingOrder = async (paymentMethod) => {
+    const data = buildOrderData(paymentMethod);
+    const key = JSON.stringify(data);
+    if (pendingOrderRef.current?.key === key) return pendingOrderRef.current.order;
+    const order = await createOrder(data);
+    pendingOrderRef.current = { key, order };
+    return order;
+  };
+
+  const handleOnlinePaid = ({ orderId, orderNumber, paypalResult }) => {
+    clearCart();
+    navigate(`/orden-confirmada/${orderId}`, {
+      state: { orderNumber, total, paymentMethod: form.paymentMethod, paid: paypalResult !== 'pending', online: true },
+    });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    // Los métodos online pagan desde su propio panel
+    if (OnlinePanel) return;
+    if (!validateForm()) return;
 
     setSubmitting(true);
     try {
-      const result = await createOrder({
-        uid: user.uid,
-        customerEmail: form.email,
-        customerName: form.name,
-        customerPhone: form.phone,
-        customerCedula: form.cedula,
-        paymentMethod: form.paymentMethod,
-        paymentPhone: form.paymentPhone,
-        subtotal,
-        shippingCost,
-        shippingType: form.shippingType,
-        shippingAddress: {
-          provincia: form.provincia,
-          canton: form.canton,
-          distrito: form.distrito,
-          codigoPostal: form.codigoPostal,
-          señas: form.señas,
-        },
-        items: items.map(i => ({
-          productId: i.productId,
-          variantId: i.variantId,
-          productName: i.productName,
-          variantName: i.variantName,
-          imageUrl: i.imageUrl,
-          price: i.price,
-          quantity: i.quantity,
-          supplyType: i.supplyType,
-        })),
-      });
+      const result = await createOrder(buildOrderData(form.paymentMethod));
 
       clearCart();
       navigate(`/orden-confirmada/${result.orderId}`, { state: { orderNumber: result.orderNumber, total, paymentMethod: form.paymentMethod } });
@@ -206,7 +246,6 @@ export default function CheckoutPage() {
     }
   };
 
-  const paymentIcons = { paypal: CreditCard, sinpe: Smartphone, transferencia: Building };
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
@@ -336,8 +375,8 @@ export default function CheckoutPage() {
             <h2 className="font-black text-lg text-slate-900">Método de Pago</h2>
             {errors.paymentMethod && <p className="text-xs text-red-500">{errors.paymentMethod}</p>}
             <div className="space-y-2">
-              {Object.entries(PAYMENT_METHOD_LABELS).map(([key, label]) => {
-                const Icon = paymentIcons[key] || CreditCard;
+              {paymentMethods.map(({ id: key, label, icon }) => {
+                const Icon = icon || CreditCard;
                 return (
                   <label key={key} className={`flex items-center gap-3 p-4 rounded-xl border cursor-pointer transition-all ${form.paymentMethod === key ? 'border-rose-400 bg-rose-50' : 'border-slate-200 hover:border-rose-200'}`}>
                     <input type="radio" name="payment" value={key} checked={form.paymentMethod === key} onChange={() => handleChange('paymentMethod', key)} className="accent-rose-600" />
@@ -363,6 +402,17 @@ export default function CheckoutPage() {
                 </div>
                 <p className="text-[10px] text-blue-500">Subí tu comprobante después de realizar el pago</p>
               </div>
+            )}
+            {OnlinePanel && (
+              <OnlinePanel
+                items={items}
+                canton={form.canton}
+                shippingType={form.shippingType}
+                totalCRC={total}
+                validateForm={validateForm}
+                createPendingOrder={createPendingOrder}
+                onPaid={handleOnlinePaid}
+              />
             )}
           </div>
         </div>
@@ -399,6 +449,9 @@ export default function CheckoutPage() {
                 <span className="font-black text-rose-600">{formatCRC(total)}</span>
               </div>
             </div>
+            {OnlinePanel ? (
+              <p className="text-[11px] text-slate-400 text-center">Paga con los botones de PayPal de arriba para confirmar tu pedido.</p>
+            ) : (
             <button
               type="submit"
               disabled={submitting}
@@ -406,6 +459,7 @@ export default function CheckoutPage() {
             >
               {submitting ? 'Procesando...' : `Confirmar Pedido · ${formatCRC(total)}`}
             </button>
+            )}
           </div>
         </div>
       </form>

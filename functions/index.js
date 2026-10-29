@@ -9,6 +9,7 @@ initializeApp();
 // --- Módulos por dominio ---
 const orders = require("./orders");
 const payments = require("./payments");
+const paypal = require("./paypal");
 const crm = require("./crm");
 const messaging = require("./messaging");
 const schedulers = require("./schedulers");
@@ -20,6 +21,7 @@ const catalogBatch = require("./whatsapp/catalogBatchSync");
 module.exports = {
   ...orders,
   ...payments,
+  ...paypal,
   ...crm,
   ...messaging,
   ...schedulers,
