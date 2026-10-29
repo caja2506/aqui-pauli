@@ -120,8 +120,7 @@ export const CRM_FUNNEL_STAGES = [
   { key: 'inactivo', label: 'Inactivo', color: 'red' },
 ];
 
-// --- Anticipo bajo pedido ---
-export const BACKORDER_DEPOSIT_PERCENT = 0.20;
+// --- Anticipo bajo pedido: ver src/utils/backorder.js ---
 
 // --- Datos para pagar por SINPE Móvil (fuente única: checkout y confirmación) ---
 // `holder` = nombre del titular de la cuenta. Si queda vacío no se muestra.

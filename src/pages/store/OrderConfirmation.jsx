@@ -4,6 +4,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatCRC } from '../../utils/formatters';
 import { SINPE_INFO } from '../../utils/constants';
+import { computeBackorder, BACKORDER_DEPOSIT_LABEL, BACKORDER_BALANCE_TIMING } from '../../utils/backorder';
 import CopyButton from '../../components/ui/CopyButton';
 import { CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -32,12 +33,13 @@ export default function OrderConfirmation() {
   const orderNumber = location.state?.orderNumber || savedOrder?.orderNumber || orderId;
   const total = location.state?.total || savedOrder?.total || '';
   const paymentMethod = location.state?.paymentMethod || savedOrder?.paymentMethod || '';
-  const hasBackorder = location.state?.hasBackorder ?? !!(savedOrder?.hasBackorder || savedOrder?.hasBackorderItems);
-  const backorderDeposit = location.state?.backorderDeposit ?? Number(savedOrder?.backorderDeposit || savedOrder?.depositTotal || 0);
   const isSinpe = paymentMethod === 'sinpe' || paymentMethod === 'sinpe_movil';
   const totalNum = Number(total) || 0;
-  const hasDeposit = hasBackorder && backorderDeposit > 0 && backorderDeposit < totalNum;
-  const amountToPay = hasDeposit ? backorderDeposit : totalNum;
+  // "Bajo pedido": se aparta con el 25% de esas líneas; stock y envío se pagan completos.
+  const backorder = location.state?.backorder
+    || (savedOrder ? computeBackorder(savedOrder.itemsSummary || [], savedOrder.shippingCost) : null);
+  const hasDeposit = !!backorder?.hasBackorder && backorder.depositTotal > 0 && backorder.payNowTotal < backorder.total;
+  const amountToPay = hasDeposit ? backorder.payNowTotal : totalNum;
 
   const paid = !!location.state?.paid;
   const online = !!location.state?.online;
@@ -46,7 +48,7 @@ export default function OrderConfirmation() {
 
   // Mensaje pre-llenado para WhatsApp
   const waMessage = encodeURIComponent(
-    `¡Hola! 👋 Mi pedido es *${orderNumber}*${amountToPay ? `. Pagué *${formatCRC(amountToPay)}*${hasDeposit ? ' (anticipo del 20%)' : ''} por SINPE Móvil` : ''}.\n\nAdjunto mi comprobante de pago 📎`
+    `¡Hola! 👋 Mi pedido es *${orderNumber}*${amountToPay ? `. Pagué *${formatCRC(amountToPay)}*${hasDeposit ? ` (apartado, ${BACKORDER_DEPOSIT_LABEL} de los productos bajo pedido)` : ''} por SINPE Móvil` : ''}.\n\nAdjunto mi comprobante de pago 📎`
   );
   const waLink = `https://wa.me/${WHATSAPP_NUMBER}?text=${waMessage}`;
 
@@ -76,15 +78,17 @@ export default function OrderConfirmation() {
           <div className="space-y-3">
             {amountToPay > 0 && (
               <div>
-                <p className="text-xs font-bold text-blue-800 uppercase">{hasDeposit ? 'Monto a pagar ahora (anticipo 20%)' : 'Monto a pagar'}</p>
+                <p className="text-xs font-bold text-blue-800 uppercase">{hasDeposit ? 'Monto a pagar ahora (apartado)' : 'Monto a pagar'}</p>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-2xl font-black text-slate-900">{formatCRC(amountToPay)}</span>
                   <CopyButton text={amountToPay} label="Copiar" ariaLabel="Copiar monto" />
                 </div>
                 {hasDeposit && (
-                  <p className="text-sm text-blue-900 mt-1">
-                    Tu pedido incluye productos «Bajo pedido». Total del pedido: {formatCRC(totalNum)}. El resto ({formatCRC(totalNum - amountToPay)}) se paga después, cuando te avisemos.
-                  </p>
+                  <div className="text-sm text-blue-900 mt-2 space-y-1" data-testid="deposit-detail">
+                    <p>Tu pedido incluye productos «Bajo pedido». Pagás hoy los productos en stock y el envío completos, más el {BACKORDER_DEPOSIT_LABEL} de los productos bajo pedido ({formatCRC(backorder.depositTotal)}).</p>
+                    <p>Total del pedido: <strong>{formatCRC(backorder.total)}</strong> · Saldo restante: <strong>{formatCRC(backorder.balanceDue)}</strong></p>
+                    <p>El saldo se paga {BACKORDER_BALANCE_TIMING}.</p>
+                  </div>
                 )}
               </div>
             )}

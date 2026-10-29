@@ -13,7 +13,7 @@ const telegramChatId = defineSecret("TELEGRAM_CHAT_ID");
 // otros endpoints. Solo este trigger los necesita cuando se despliega/ejecuta.
 const gmailSmtpUser = "GMAIL_SMTP_USER";
 const gmailSmtpAppPassword = "GMAIL_SMTP_APP_PASSWORD";
-const BACKORDER_DEPOSIT_PERCENT = 0.20;
+const { computeBackorder } = require("./lib/backorderDeposit");
 const MAX_ORDER_EVENT_AGE_MS = 60 * 60 * 1000;
 const PAYMENT_METHODS = new Set(["sinpe", "sinpe_movil", "transferencia", "efectivo", "paypal", "tilopay"]);
 const clean = (value, max = 250) => typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -73,9 +73,10 @@ exports.createOrderWithReservation = onCall(
           reserves.push({ ref, line, ...stock });
         }
 
+        // Bajo pedido: 25% solo de las líneas bajo pedido; stock y envío se pagan completos (igual que el checkout web).
+        const backorder = computeBackorder(canonical, totals.shippingCost);
         const orderItems = canonical.map((line, index) => {
-          const depositAmount = line.supplyType === "bajo_pedido"
-            ? Math.round(line.lineTotal * BACKORDER_DEPOSIT_PERCENT) : 0;
+          const depositAmount = backorder.depositByLine[index];
           return {
             itemId: `item_${index}`, productId: line.productId, variantId: line.variantId,
             productName: line.productName || line.name || "", variantName: line.variantName || "",
@@ -84,8 +85,8 @@ exports.createOrderWithReservation = onCall(
             depositAmount, depositPaid: false, remainingPaid: false,
           };
         });
-        const hasBackorderItems = orderItems.some((line) => line.supplyType === "bajo_pedido");
-        const depositTotal = orderItems.reduce((sum, line) => sum + line.depositAmount, 0);
+        const hasBackorderItems = backorder.hasBackorder;
+        const depositTotal = backorder.depositTotal;
         // Todas las lecturas de productos, configuración y variantes terminaron antes de escribir.
         for (const reserve of reserves) transaction.update(reserve.ref, { reservedStock: reserve.reservedStock + reserve.line.quantity });
         transaction.set(orderRef, {
@@ -96,7 +97,8 @@ exports.createOrderWithReservation = onCall(
           paymentTransactionId: "", paymentAmount: 0, paymentDate: "",
           subtotal: totals.subtotal, shippingCost: totals.shippingCost, total: totals.total,
           shippingType, shippingAddress, trackingNumber: "", trackingUrl: "",
-          hasBackorderItems, depositTotal, remainingTotal: hasBackorderItems ? totals.total - depositTotal : 0,
+          hasBackorderItems, hasBackorder: hasBackorderItems, backorderDeposit: depositTotal, depositTotal,
+          remainingTotal: backorder.balanceDue,
           depositStatus: hasBackorderItems ? "pendiente" : "no_aplica",
           remainingStatus: hasBackorderItems ? "pendiente" : "no_aplica",
           backorderDepositPaid: false, backorderRemainingPaid: false,

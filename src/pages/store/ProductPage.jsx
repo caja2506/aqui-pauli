@@ -159,7 +159,7 @@ export default function ProductPage() {
               <StatusBadge status={selectedVariant.commercialStatus} type="commercial" />
               {selectedVariant.supplyType === 'bajo_pedido' && (
                 <span className="text-xs text-amber-600 font-bold flex items-center gap-1">
-                  <Package className="w-3.5 h-3.5" /> Requiere anticipo del 20%
+                  <Package className="w-3.5 h-3.5" /> Se aparta con el 25% de este producto
                 </span>
               )}
             </div>

@@ -129,6 +129,10 @@ export default function CheckoutPage() {
 
   const shippingCost = form.canton ? calculateShippingCost(form.canton, form.shippingType) : 0;
   const total = subtotal + shippingCost;
+  // "Bajo pedido": se aparta con el 25% de esas líneas; stock y envío se pagan completos.
+  // Solo aplica a pagos manuales (SINPE, transferencia, efectivo); los online cobran el total.
+  const backorder = computeBackorder(items, shippingCost);
+  const showDeposit = backorder.hasBackorder && backorder.depositTotal > 0;
   const shippingOptions = form.canton ? getShippingOptions(form.canton) : [];
 
   // Territorial data
@@ -261,7 +265,7 @@ export default function CheckoutPage() {
       const result = await createOrder(buildOrderData(form.paymentMethod));
 
       clearCart();
-      navigate(`/orden-confirmada/${result.orderId}`, { state: { orderNumber: result.orderNumber, total, paymentMethod: form.paymentMethod, hasBackorder: items.some(i => i.supplyType === 'bajo_pedido'), backorderDeposit: computeBackorderDeposit(total, items) } });
+      navigate(`/orden-confirmada/${result.orderId}`, { state: { orderNumber: result.orderNumber, total, paymentMethod: form.paymentMethod, backorder: computeBackorder(items, shippingCost) } });
     } catch (err) {
       console.error('Error creating order:', err);
       const errorMessage = err?.code === 'functions/failed-precondition'
@@ -495,6 +499,23 @@ export default function CheckoutPage() {
                 <span className="font-black text-slate-900">Total</span>
                 <span className="font-black text-rose-600">{formatCRC(total)}</span>
               </div>
+              {showDeposit && !OnlinePanel && (
+                <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3 space-y-1.5" data-testid="deposit-summary">
+                  <p className="text-sm font-black text-amber-900">Tu pedido incluye productos «Bajo pedido»</p>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-bold text-amber-900">Apartás hoy con ({BACKORDER_DEPOSIT_LABEL} de esos productos)</span>
+                    <span className="font-black text-amber-900">{formatCRC(backorder.payNowTotal)}</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800">Incluye los productos en stock y el envío completos, más el {BACKORDER_DEPOSIT_LABEL} de los productos bajo pedido ({formatCRC(backorder.depositTotal)}).</p>
+                  <div className="flex justify-between text-sm text-amber-900">
+                    <span>Total del pedido</span><span className="font-bold">{formatCRC(backorder.total)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-amber-900">
+                    <span>Saldo restante</span><span className="font-bold">{formatCRC(backorder.balanceDue)}</span>
+                  </div>
+                  <p className="text-xs text-amber-800">El saldo se paga {BACKORDER_BALANCE_TIMING}.</p>
+                </div>
+              )}
             </div>
             <p className="text-[10px] text-slate-400 text-center">
               Al comprar aceptas los <Link to="/terminos" className="underline">términos</Link>, las <Link to="/devoluciones" className="underline">devoluciones</Link> y los <Link to="/envios" className="underline">envíos</Link>.
@@ -507,7 +528,7 @@ export default function CheckoutPage() {
               disabled={submitting}
               className="w-full py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
-              {submitting ? 'Procesando...' : `Confirmar Pedido · ${formatCRC(total)}`}
+              {submitting ? 'Procesando...' : (showDeposit ? `Apartá con ${formatCRC(backorder.payNowTotal)} (${BACKORDER_DEPOSIT_LABEL})` : `Confirmar Pedido · ${formatCRC(total)}`)}
             </button>
             )}
           </div>
