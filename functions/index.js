@@ -10,6 +10,7 @@ initializeApp();
 const orders = require("./orders");
 const payments = require("./payments");
 const paypal = require("./paypal");
+const tilopay = require("./tilopay");
 const crm = require("./crm");
 const schedulers = require("./schedulers");
 const catalogBatch = require("./whatsapp/catalogBatchSync");
@@ -19,6 +20,7 @@ module.exports = {
   ...orders,
   ...payments,
   ...paypal,
+  ...tilopay,
   ...crm,
   ...schedulers,
   ...catalogBatch,
