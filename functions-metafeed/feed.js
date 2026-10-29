@@ -1,3 +1,6 @@
+// FUENTE ÚNICA del feed de Meta. Lo usan: metaFeed (functions-metafeed/feed.js es una COPIA
+// idéntica, ver functions-metafeed/README.md; un test verifica que no se desvíen) y el botón
+// "Sync WhatsApp" (syncCatalogBatch). IDs = SKU de variante (o ID de producto sin variantes).
 const SITE = "https://aqui-pauli.web.app";
 const HEAD = ["id","item_group_id","title","description","availability","condition","price","link","image_link","additional_image_link","brand","google_product_category","product_type","custom_label_0","custom_label_1"];
 const esc = v => { v = (v ?? "").toString().replace(/\r?\n/g," ").trim(); return /[",]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; };
@@ -54,4 +57,32 @@ function buildRows(products, variants, brands, cats = {}) {
   return { rows, problems };
 }
 const toCsv = rows => [HEAD.join(","), ...rows.map(r => HEAD.map(h => esc(r[h])).join(","))].join("\n") + "\n";
-module.exports = { buildRows, toCsv };
+
+// Lee Firestore y arma las filas del feed (la MISMA función la usan metaFeed y el botón Sync).
+async function loadFeedRows(db) {
+  const [ps, bs, cs] = await Promise.all([db.collection("products").get(), db.collection("brands").get(), db.collection("categories").get()]);
+  const cats = {}; cs.forEach(d => cats[d.id] = { name: d.get("name"), active: d.get("active"), parentId: d.get("parentId") || null });
+  const brands = {}; bs.forEach(d => brands[d.id] = d.get("name"));
+  const products = ps.docs.map(d => ({ id: d.id, ...d.data(), brandId: d.get("brandRef")?.id,
+    categoryIdList: (d.get("categoryRefs") || []).map(r => r.id).concat(d.get("categoryIds") || []) }));
+  const variants = {};
+  await Promise.all(products.map(async p => {
+    const s = await db.collection("products").doc(p.id).collection("variants").get();
+    variants[p.id] = s.docs.map(d => ({ id: d.id, ...d.data() }));
+  }));
+  return buildRows(products, variants, brands, cats);
+}
+
+// Fila del feed → item del items_batch de Meta (mismos campos, mismos IDs).
+function rowToBatchItem(r) {
+  const item = {};
+  for (const h of HEAD) {
+    let v = (r[h] ?? "").toString().trim();
+    if (!v) continue;
+    if (h === "additional_image_link") { item[h] = v.split(/,(?=https:\/\/)/).map(u => u.trim()).filter(Boolean) /* las URLs pueden contener comas */; continue; }
+    item[h] = v;
+  }
+  return item;
+}
+
+module.exports = { buildRows, toCsv, loadFeedRows, rowToBatchItem };

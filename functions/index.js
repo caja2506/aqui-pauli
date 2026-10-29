@@ -12,7 +12,6 @@ const payments = require("./payments");
 const paypal = require("./paypal");
 const crm = require("./crm");
 const schedulers = require("./schedulers");
-const catalogSync = require("./whatsapp/catalogSync");
 const catalogBatch = require("./whatsapp/catalogBatchSync");
 
 // Re-exportar todo
@@ -22,6 +21,5 @@ module.exports = {
   ...paypal,
   ...crm,
   ...schedulers,
-  ...catalogSync,
   ...catalogBatch,
 };
