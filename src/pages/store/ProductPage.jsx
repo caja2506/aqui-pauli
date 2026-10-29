@@ -70,7 +70,7 @@ export default function ProductPage() {
   const canBuy = selectedVariant && (['disponible', 'bajo_pedido'].includes(normalizeCommercialStatus(selectedVariant.commercialStatus)));
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:pb-8">
       <Link to="/catalogo" className="inline-flex items-center gap-1 text-sm font-bold text-rose-600 hover:text-rose-700 mb-6">
         <ArrowLeft className="w-4 h-4" /> Catálogo
       </Link>

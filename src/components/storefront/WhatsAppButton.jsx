@@ -1,3 +1,5 @@
+import { matchPath, useLocation } from 'react-router-dom';
+import { useCart } from '../../contexts/CartContext';
 
 // Glifo oficial de WhatsApp (Simple Icons, CC0)
 const WA_PATH =
@@ -7,6 +9,11 @@ const WA_NUMBER = '50671613342';
 const WA_MESSAGE = '¡Hola! 👋 Me gustaría saber más sobre sus productos.';
 
 export default function WhatsAppButton() {
+  const { pathname } = useLocation();
+  const { isCartOpen } = useCart();
+  // En móvil, los controles de compra tienen prioridad sobre el acceso flotante.
+  const hideOnMobile = isCartOpen || ['/producto/:productId', '/carrito', '/checkout']
+    .some((route) => matchPath({ path: route, end: true }, pathname));
   const waLink = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(WA_MESSAGE)}`;
 
   return (
@@ -15,7 +22,7 @@ export default function WhatsAppButton() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Chatea con nosotros por WhatsApp"
-      className="fixed bottom-6 right-6 z-50 group"
+      className={`fixed bottom-6 right-6 z-50 group ${hideOnMobile ? 'hidden lg:block' : 'block'}`}
     >
       <span className="absolute -top-12 right-0 bg-slate-900 text-white text-xs font-medium px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-lg pointer-events-none">
         ¡Chateá con nosotros! 💬

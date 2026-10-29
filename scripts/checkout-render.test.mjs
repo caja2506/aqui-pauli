@@ -20,12 +20,15 @@ const CHECKOUT = 'src/pages/store/CheckoutPage.jsx';
 const CART = 'src/components/storefront/CartDrawer.jsx';
 const CONFIRMATION = 'src/pages/store/OrderConfirmation.jsx';
 const PAYPAL_PANEL = 'src/components/payments/PaypalPanel.jsx';
+const PRODUCT = 'src/pages/store/ProductPage.jsx';
+const WHATSAPP = 'src/components/storefront/WhatsAppButton.jsx';
 const realFiles = [
-  CHECKOUT, CART, CONFIRMATION, PAYPAL_PANEL,
+  CHECKOUT, CART, CONFIRMATION, PAYPAL_PANEL, PRODUCT, WHATSAPP,
   'src/utils/backorder.js', 'src/utils/constants.js', 'src/utils/formatters.js',
   'src/services/payments/registry.js', 'src/data/costaRicaTerritorial.js',
   'src/components/ui/CopyButton.jsx', 'src/components/ui/LoadingSpinner.jsx',
   'src/services/payments/paypalQuote.js',
+  'src/components/ui/StatusBadge.jsx', 'src/utils/shippingText.js',
 ];
 
 // Compile unmodified files, including their actual imports. Removing the backorder
@@ -83,6 +86,7 @@ function renderPage(relative, options = {}) {
     [abs('src/contexts/CartContext.js'), { useCart: () => ({
       items, subtotal, itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
       isCartOpen: options.cartOpen === true, setIsCartOpen: forbidden('cart mutation'),
+      addItem: forbidden('add to cart'),
       clearCart: forbidden('cart clear'), removeItem: forbidden('item removal'), updateQuantity: forbidden('quantity change'),
     }) }],
     [abs('src/firebase.js'), { db: {} }],
@@ -132,6 +136,14 @@ function renderPage(relative, options = {}) {
       return React.useState(initial === null && options.savedOrder ? options.savedOrder : initial);
     },
   };
+  const variant = { id: '100ml', name: '100 ml', price: 47000,
+    commercialStatus: 'disponible', supplyType: 'stock_propio', active: true, ...options.variant };
+  const productStates = [
+    { id: 'versace-eros', name: 'Versace Eros EDT 100 ml', basePrice: 47000, images: [], ...options.product },
+    [variant], variant, 1, false, false, 0,
+  ];
+  let productStateSlot = 0;
+  const productReact = { ...React, useState() { return React.useState(productStates[productStateSlot++]); } };
   let paypalStateSlot = 0;
   const paypalReact = {
     ...React,
@@ -162,9 +174,11 @@ function renderPage(relative, options = {}) {
     cache.set(filename, module);
     const localRequire = (name) => {
       if (name === 'react') return filename === abs(CHECKOUT) ? checkoutReact
-        : filename === abs(CONFIRMATION) ? confirmationReact : filename === abs(PAYPAL_PANEL) ? paypalReact : React;
+        : filename === abs(CONFIRMATION) ? confirmationReact : filename === abs(PAYPAL_PANEL) ? paypalReact
+          : filename === abs(PRODUCT) ? productReact : React;
       if (['react/jsx-runtime', 'react-router-dom', 'lucide-react'].includes(name)) return require(name);
-      if (name === 'firebase/firestore') return { doc: forbidden('Firestore doc'), getDoc: forbidden('Firestore get') };
+      if (name === 'firebase/firestore') return Object.fromEntries(
+        ['doc', 'getDoc', 'collection', 'getDocs', 'onSnapshot'].map((name) => [name, forbidden(`Firestore ${name}`)]));
       assert.ok(name.startsWith('.'), `Unexpected external dependency: ${name}`);
       const target = path.resolve(path.dirname(filename), name);
       const candidates = path.extname(target) ? [target] : [`${target}.js`, `${target}.jsx`];
@@ -179,12 +193,17 @@ function renderPage(relative, options = {}) {
 
   const Component = load(abs(relative)).default;
   const confirmation = relative === CONFIRMATION;
-  const pathname = confirmation ? '/orden-confirmada/order-render' : '/checkout';
-  const routePath = confirmation ? '/orden-confirmada/:orderId' : '/checkout';
+  const product = relative === PRODUCT;
+  const defaultPath = confirmation ? '/orden-confirmada/order-render' : product ? '/producto/versace-eros' : '/checkout';
+  const location = new URL(options.url || defaultPath, 'https://render.example.invalid');
+  const routePath = confirmation ? '/orden-confirmada/:orderId' : product ? '/producto/:productId' : '*';
+  const element = React.createElement(React.Fragment, null,
+    React.createElement(Component, options.componentProps),
+    options.withWhatsapp ? React.createElement(load(abs(WHATSAPP)).default) : null);
   const html = renderToStaticMarkup(React.createElement(MemoryRouter, {
-    initialEntries: [{ pathname, state: options.locationState || null }],
+    initialEntries: [{ pathname: location.pathname, search: location.search, hash: location.hash, state: options.locationState || null }],
   }, React.createElement(Routes, null, React.createElement(Route, {
-    path: routePath, element: React.createElement(Component, options.componentProps),
+    path: routePath, element,
   }))));
   return { html, paypalTotals, paypalEffects, paypalRefs, paypalStateUpdates };
 }
@@ -548,4 +567,107 @@ test('confirmación de stock no aplica el apartado del 50%', () => {
   contains(html, `Monto a pagar ${formatCRC(30000)}`);
   assert.doesNotMatch(html, /data-testid="deposit-detail"/);
   assert.doesNotMatch(html, /50%/);
+});
+
+// SSR verifies the actual responsive DOM contract, route matching and drawer
+// state. It does not measure browser pixels or pretend to emulate a mobile viewport.
+function classesIn(tag) {
+  assert.ok(tag, 'Expected rendered element');
+  return new Set((tag.match(/\bclass="([^"]*)"/)?.[1] || '').split(/\s+/));
+}
+
+function floatingWhatsappClasses(html) {
+  const tag = html.match(/<a\b[^>]*aria-label="Chatea con nosotros por WhatsApp"[^>]*>/)?.[0];
+  assert.ok(tag, 'The real floating WhatsApp component must render its accessible link');
+  assert.match(tag, /href="https:\/\/wa\.me\/50671613342\?text=/);
+  return classesIn(tag);
+}
+
+function assertMobileHidden(html) {
+  const classes = floatingWhatsappClasses(html);
+  assert.ok(classes.has('hidden'), 'The floating link must not cover mobile purchase controls');
+  assert.ok(classes.has('lg:block'), 'Desktop retains the floating link; mobile landscape stays protected');
+}
+
+for (const url of ['/producto/versace-eros', '/producto/versace-eros/?variante=100ml#comprar',
+  '/checkout', '/checkout/?metodo=paypal', '/carrito', '/carrito/']) {
+  test(`WhatsApp se oculta solo en móvil en la ruta de compra ${url}`, () => {
+    assertMobileHidden(renderPage(WHATSAPP, { url }).html);
+  });
+}
+
+test('WhatsApp sigue visible en inicio, catálogo y rutas que no son una compra', () => {
+  for (const url of ['/', '/catalogo?marca=versace', '/terminos', '/orden-confirmada/AP-1', '/checkout-ayuda']) {
+    const classes = floatingWhatsappClasses(renderPage(WHATSAPP, { url }).html);
+    assert.ok(classes.has('block'), `WhatsApp remains visible on ${url}`);
+    assert.ok(!classes.has('hidden'), `A non-purchase route must not hide WhatsApp: ${url}`);
+  }
+});
+
+test('abrir el carrito desde inicio o catálogo oculta WhatsApp móvil y deja el checkout accesible', () => {
+  for (const url of ['/', '/catalogo']) {
+    const open = renderPage(CART, { url, cartOpen: true, items: [line('stock_propio', 47000)], withWhatsapp: true });
+    assertMobileHidden(open.html);
+    contains(open.html, 'Proceder al Checkout');
+    assert.match(open.html, /href="\/checkout"/);
+    const closed = renderPage(CART, { url, cartOpen: false, withWhatsapp: true });
+    assert.ok(!floatingWhatsappClasses(closed.html).has('hidden'), 'Closing the drawer restores normal visibility');
+    assert.ok(!text(closed.html).includes('Mi Carrito'));
+  }
+});
+
+test('la ficha conserva Agregar al Carrito y espacio inferior seguro sin WhatsApp móvil encima', () => {
+  for (const supplyType of ['stock_propio', 'bajo_pedido']) {
+    const { html } = renderPage(PRODUCT, { withWhatsapp: true,
+      variant: { supplyType, commercialStatus: supplyType === 'bajo_pedido' ? 'bajo_pedido' : 'disponible' } });
+    assertMobileHidden(html);
+    contains(html, 'Versace Eros EDT 100 ml');
+    const addButton = [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)]
+      .map(([button]) => button).find((button) => text(button).includes('Agregar al Carrito'));
+    assert.ok(addButton, 'The purchase button must still render');
+    assert.doesNotMatch(addButton.split('>')[0], /\bdisabled/);
+    const page = classesIn(html.match(/<div\b[^>]*class="[^"]*max-w-7xl[^"\n]*"[^>]*>/)?.[0]);
+    assert.ok(page.has('pb-[calc(6rem+env(safe-area-inset-bottom,0px))]'));
+    assert.ok(page.has('lg:pb-8'), 'Desktop keeps the existing bottom spacing');
+    if (supplyType === 'bajo_pedido') contains(html, 'Se aparta con el 50% de este producto');
+  }
+});
+
+test('checkout deja espacio inferior y conserva código postal, SINPE y panel PayPal sin el flotante móvil', () => {
+  for (const paymentMethod of ['sinpe', 'paypal']) {
+    const { html } = renderPage(CHECKOUT, { items: [line('bajo_pedido', 32000)], paymentMethod,
+      paypalAvailable: true, paypalQuote: serverQuote({ total: 32000, balance: 16000, deposit: 16000, backorder: 32000 }),
+      withWhatsapp: true });
+    assertMobileHidden(html);
+    contains(html, 'Código Postal (auto-llena dirección)');
+    assert.match(html, /<input\b[^>]*placeholder="Ej: 10301"[^>]*>/);
+    const page = classesIn(html.match(/<div\b[^>]*class="[^"]*max-w-4xl[^"\n]*"[^>]*>/)?.[0]);
+    assert.ok(page.has('pb-[calc(6rem+env(safe-area-inset-bottom,0px))]'));
+    assert.ok(page.has('lg:pb-8'));
+    if (paymentMethod === 'paypal') {
+      assert.match(html, /data-testid="paypal-panel"/);
+      assert.match(html, /data-testid="paypal-quote"/);
+      assert.ok(html.includes('min-h-[50px]'), 'The PayPal SDK button container still renders');
+      contains(html, `Pagás ahora ${formatCRC(16000)} (apartado 50%)`);
+    } else {
+      contains(html, `Apartá con ${formatCRC(16000)} (50%)`);
+      contains(html, '8310-0015');
+      contains(html, 'Carlos Jiménez Arias');
+    }
+  }
+});
+
+test('carrito conserva lista desplazable y pie de compra con espacio para el área segura', () => {
+  const { html } = renderPage(CART, { url: '/', cartOpen: true,
+    items: Array.from({ length: 8 }, (_, index) => line('stock_propio', 47000, `stock-${index}`)), withWhatsapp: true });
+  assertMobileHidden(html);
+  const divs = [...html.matchAll(/<div\b[^>]*>/g)].map(([tag]) => classesIn(tag));
+  assert.ok(divs.some((classes) => classes.has('h-dvh') && classes.has('max-h-full')),
+    'The drawer follows the dynamic viewport and stays within its overlay');
+  assert.ok(divs.some((classes) => classes.has('flex-1') && classes.has('min-h-0') && classes.has('overflow-y-auto')),
+    'The item list can shrink and scroll instead of pushing checkout below the viewport');
+  assert.ok(divs.some((classes) => classes.has('shrink-0')
+    && classes.has('pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]') && classes.has('lg:pb-5')),
+  'The checkout footer retains its height and safe-area bottom padding');
+  contains(html, 'Proceder al Checkout');
 });
