@@ -37,6 +37,9 @@ export default function ProductPage() {
       // Si solo hay 1 variante, auto-seleccionar; si hay más, el usuario debe elegir
       if (vars.length === 1) setSelectedVariant(vars[0]);
       setLoading(false);
+    }).catch((err) => {
+      console.warn('No se pudieron cargar las variantes:', err);
+      setLoading(false);
     });
 
     return () => unsub();
@@ -112,6 +115,21 @@ export default function ProductPage() {
             <div className="text-3xl font-black text-rose-600 tracking-tight">{formatCRC(currentPrice)}</div>
             <p className="text-xs text-rose-400 mt-1">IVA incluido</p>
           </div>
+
+          {/* Sin variantes activas: no hay nada que agregar al carrito */}
+          {variants.length === 0 && (
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+              <p className="text-sm font-bold text-amber-700">Este producto no tiene tallas/opciones disponibles por el momento.</p>
+              <a
+                href={`https://wa.me/50671613342?text=${encodeURIComponent(`¡Hola! Me interesa ${product.name}. ¿Tienen disponibilidad?`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-bold text-rose-600 hover:text-rose-700 mt-2 inline-block"
+              >
+                Consultanos por WhatsApp →
+              </a>
+            </div>
+          )}
 
           {/* Variants */}
           {variants.length > 0 && (
