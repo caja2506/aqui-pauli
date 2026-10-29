@@ -3,6 +3,7 @@
 // porque Telegram/SMTP no ofrecen una transacción atómica con Firestore.
 const { snapshotFingerprint } = require("./tilopayOrder");
 const { parseMinorCRC } = require("./paymentMoney");
+const { normalizeInventoryStock } = require("./inventoryStock");
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 const hasTilopay = (order) => order?.paymentMethod === "tilopay" || own(order, "tilopay");
 const isPaidState = (order) => ["pagado", "verificado"].includes(order?.paymentStatus)
@@ -65,13 +66,7 @@ function sameQuantities(left, right) {
 }
 
 function checkedStock(data) {
-  const stock = data.stock ?? 0;
-  const reservedStock = data.reservedStock ?? 0;
-  if (!Number.isSafeInteger(stock) || !Number.isSafeInteger(reservedStock)
-      || stock < 0 || reservedStock < 0 || reservedStock > stock) {
-    throw new Error("Inventario inconsistente; requiere revisión");
-  }
-  return { stock, reservedStock };
+  return normalizeInventoryStock(data, { context: "fulfillment" });
 }
 
 function paidTilopaySnapshot(order) {
@@ -256,41 +251,87 @@ async function releaseCancelledReservation({ db, orderId }) {
   });
 }
 
-async function claimPaidEffect({ db, orderId, channel }) {
-  if (!["telegram", "email"].includes(channel)) throw new Error("Canal inválido");
+// El aviso de revisión informa una captura ya acreditada; no autoriza entrega.
+// No exige un snapshot íntegro: su inconsistencia puede ser precisamente el motivo
+// de revisión. Los productos dudosos no se presentan como listos para preparar.
+function paidReviewNotice(order) {
+  if (order.status !== "revision_manual" || !["pagado", "verificado"].includes(order.paymentStatus)
+      || isTerminalOrder(order)) return null;
+  let total;
+  let attempt;
+  if (hasTilopay(order)) {
+    const key = order.tilopay?.paidAttemptKey;
+    attempt = key && order.tilopay?.attemptsById?.[key];
+    if (order.tilopay?.mode === "test" || !attempt || attempt.schemaVersion !== 2
+        || attempt.mode !== "live" || attempt.status !== "approved" || attempt.financialEvidence !== "captured"
+        || !Number.isSafeInteger(attempt.validatedAmountMinor) || attempt.validatedAmountMinor <= 0
+        || !String(attempt.idTilopay || "").trim()
+        || String(attempt.idTilopay) !== String(order.paymentTransactionId || "")) return null;
+    total = attempt.validatedAmountMinor / 100;
+  } else {
+    try { total = moneyMinor(order.paymentAmount || order.total) / 100; } catch { return null; }
+    if (total <= 0) return null;
+  }
+  const reason = order.fulfillment?.reason || attempt?.reason
+    || "El pago está acreditado y el pedido requiere revisión administrativa.";
+  return { order: { ...order, total }, lines: [], requiresReview: true,
+    reviewReason: String(reason).slice(0, 300) };
+}
+
+function effectState(effects, channel, kind) {
+  return kind === "review" ? effects?.review?.[channel] : effects?.[channel];
+}
+
+function withEffect(effects, channel, kind, effect) {
+  return kind === "review"
+    ? { ...(effects || {}), review: { ...(effects?.review || {}), [channel]: effect } }
+    : { ...(effects || {}), [channel]: effect };
+}
+
+async function claimPaidEffect({ db, orderId, channel, kind = "paid" }) {
+  if (!["telegram", "email"].includes(channel) || !["paid", "review"].includes(kind)) throw new Error("Aviso inválido");
   const ref = db.collection("orders").doc(orderId);
   return db.runTransaction(async (transaction) => {
     const snap = await transaction.get(ref);
     if (!snap.exists) return null;
     const order = snap.data();
-    if (order.fulfillment?.state !== "applied" || !isPaidState(order) || isTerminalOrder(order)
-        || !["pagado", "por_preparar", "enviado", "entregado"].includes(order.status)) return null;
-    if (order.paidEffects?.[channel]) return null; // sending/needs_review se resuelven manualmente; nunca reenvío a ciegas.
+    // Cada tipo de aviso se reclama de forma independiente. Un aviso normal previo
+    // no oculta la revisión, y resolver una revisión no suprime el aviso de preparación.
+    if (effectState(order.paidEffects, channel, kind)) return null;
     let paid;
-    if (hasTilopay(order)) {
-      try { paid = paidTilopaySnapshot(order); } catch { return null; }
+    if (kind === "review") {
+      paid = paidReviewNotice(order);
+      if (!paid) return null;
+    } else {
+      if (order.fulfillment?.state !== "applied" || !isPaidState(order) || isTerminalOrder(order)
+          || !["pagado", "por_preparar", "enviado", "entregado"].includes(order.status)) return null;
+      if (hasTilopay(order)) {
+        try { paid = paidTilopaySnapshot(order); } catch { return null; }
+      } else {
+        const items = await transaction.get(ref.collection("items"));
+        paid = { order, lines: normalizeLines(items.docs.map((doc) => doc.data())) };
+      }
     }
-    else {
-      const items = await transaction.get(ref.collection("items"));
-      paid = { order, lines: normalizeLines(items.docs.map((doc) => doc.data())) };
-    }
-    transaction.update(ref, { paidEffects: { ...(order.paidEffects || {}),
-      [channel]: { state: "sending", startedAt: new Date().toISOString() } } });
-    return { order: paid.order, items: paid.lines };
+    // sending/needs_review se resuelven manualmente; nunca reenviar a ciegas.
+    transaction.update(ref, { paidEffects: withEffect(order.paidEffects, channel, kind,
+      { state: "sending", startedAt: new Date().toISOString() }) });
+    return { order: paid.order, items: paid.lines,
+      ...(paid.requiresReview ? { requiresReview: true, reviewReason: paid.reviewReason } : {}) };
   });
 }
 
-async function finishPaidEffect({ db, orderId, channel, state, reason }) {
+async function finishPaidEffect({ db, orderId, channel, state, reason, kind = "paid" }) {
+  if (!["telegram", "email"].includes(channel) || !["paid", "review"].includes(kind)) throw new Error("Aviso inválido");
   const ref = db.collection("orders").doc(orderId);
   await db.runTransaction(async (transaction) => {
     const snap = await transaction.get(ref);
     if (!snap.exists) return;
     const data = snap.data();
-    const effect = data.paidEffects?.[channel];
+    const effect = effectState(data.paidEffects, channel, kind);
     if (effect?.state !== "sending") return;
-    transaction.update(ref, { paidEffects: { ...data.paidEffects, [channel]: {
+    transaction.update(ref, { paidEffects: withEffect(data.paidEffects, channel, kind, {
       ...effect, state, finishedAt: new Date().toISOString(), ...(reason ? { reason: String(reason).slice(0, 300) } : {}),
-    } } });
+    }) });
   });
 }
 

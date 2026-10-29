@@ -9,9 +9,12 @@ const fulfillment = require("./lib/orderFulfillment");
 
 const telegramBotToken = defineSecret("TELEGRAM_BOT_TOKEN");
 const telegramChatId = defineSecret("TELEGRAM_CHAT_ID");
-const gmailSmtpUser = defineSecret("GMAIL_SMTP_USER");
-const gmailSmtpAppPassword = defineSecret("GMAIL_SMTP_APP_PASSWORD");
+// Vincular Gmail por nombre evita resolver secretos aún ausentes al descubrir
+// otros endpoints. Solo este trigger los necesita cuando se despliega/ejecuta.
+const gmailSmtpUser = "GMAIL_SMTP_USER";
+const gmailSmtpAppPassword = "GMAIL_SMTP_APP_PASSWORD";
 const BACKORDER_DEPOSIT_PERCENT = 0.20;
+const MAX_ORDER_EVENT_AGE_MS = 60 * 60 * 1000;
 const PAYMENT_METHODS = new Set(["sinpe", "sinpe_movil", "transferencia", "efectivo", "paypal", "tilopay"]);
 const clean = (value, max = 250) => typeof value === "string" ? value.trim().slice(0, max) : "";
 
@@ -117,31 +120,38 @@ exports.createOrderWithReservation = onCall(
   }
 );
 
-async function sendPaidEffects(orderId) {
+async function sendPaidEffects(orderId, kind = "paid") {
   for (const channel of ["telegram", "email"]) {
-    const claimed = await fulfillment.claimPaidEffect({ db, orderId, channel });
+    const claimed = await fulfillment.claimPaidEffect({ db, orderId, channel, kind });
     if (!claimed) continue;
     try {
       if (channel === "telegram") {
         const order = claimed.order;
-        const message = `🛒 *Nuevo pedido pagado*\n\n📦 Orden: ${order.orderNumber}\n` +
-          `👤 Cliente: ${order.customerName}\n💰 Total: ₡${order.total?.toLocaleString()}\n💳 Método: ${order.paymentMethod}`;
+        const text = (value) => String(value ?? "—").replace(/([_*`\[\]\\])/g, "\\$1");
+        const message = claimed.requiresReview
+          ? `⚠️ *Pagado pero requiere revisión*\n\n📦 Orden: ${text(order.orderNumber || orderId)}\n` +
+            `👤 Cliente: ${text(order.customerName)}\n💰 Pago acreditado: ₡${text(order.total?.toLocaleString("es-CR"))}\n` +
+            `💳 Método: ${text(order.paymentMethod)}\nTransacción: ${text(order.paymentTransactionId)}\n` +
+            `Motivo: ${text(claimed.reviewReason)}\n\nRevisá el pedido en el admin antes de prepararlo o enviarlo.`
+          : `🛒 *Nuevo pedido pagado*\n\n📦 Orden: ${order.orderNumber}\n` +
+            `👤 Cliente: ${order.customerName}\n💰 Total: ₡${order.total?.toLocaleString()}\n💳 Método: ${order.paymentMethod}`;
         const recipients = await notifyAdminsTelegram(message, { telegramBotToken, telegramChatId });
         const unconfigured = !Array.isArray(recipients) || recipients.length === 0;
         const incomplete = !unconfigured && recipients.some((recipient) => recipient.ok !== true);
-        await fulfillment.finishPaidEffect({ db, orderId, channel,
+        await fulfillment.finishPaidEffect({ db, orderId, channel, kind,
           state: unconfigured ? "disabled" : incomplete ? "needs_review" : "sent",
           reason: unconfigured ? "Telegram sin credenciales o destinatarios" : incomplete ? "Al menos un destinatario no confirmó el envío" : undefined });
       } else {
         const result = await sendPaidOrderEmail({ db, orderId, order: claimed.order, items: claimed.items,
-          user: gmailSmtpUser.value(), pass: gmailSmtpAppPassword.value() });
-        await fulfillment.finishPaidEffect({ db, orderId, channel,
+          user: process.env.GMAIL_SMTP_USER, pass: process.env.GMAIL_SMTP_APP_PASSWORD,
+          requiresReview: claimed.requiresReview === true, reviewReason: claimed.reviewReason });
+        await fulfillment.finishPaidEffect({ db, orderId, channel, kind,
           state: result.result === "error" ? "needs_review" : result.result,
           reason: result.reason });
       }
     } catch (error) {
       console.error(`[paidEffect] ${orderId}/${channel}:`, error.message);
-      await fulfillment.finishPaidEffect({ db, orderId, channel, state: "needs_review", reason: error.message });
+      await fulfillment.finishPaidEffect({ db, orderId, channel, kind, state: "needs_review", reason: error.message });
     }
   }
 }
@@ -150,6 +160,15 @@ exports.onOrderStatusChange = onDocumentUpdated(
   { document: "orders/{orderId}", retry: true,
     secrets: [telegramBotToken, telegramChatId, gmailSmtpUser, gmailSmtpAppPassword] },
   async (event) => {
+    // CloudEvent.time conserva la fecha original durante los reintentos. Nunca usar
+    // updatedAt del pedido: una escritura nueva no rejuvenece un evento antiguo.
+    const occurredAt = Date.parse(event.time);
+    if (!Number.isFinite(occurredAt) || Date.now() - occurredAt > MAX_ORDER_EVENT_AGE_MS) {
+      console.warn("[onOrderStatusChange] Evento descartado por antigüedad o fecha inválida", {
+        eventId: event.id || "", orderId: event.params?.orderId || "", eventTime: event.time || "",
+      });
+      return;
+    }
     const before = event.data.before.data();
     const after = event.data.after.data();
     const orderId = event.params.orderId;
@@ -159,7 +178,10 @@ exports.onOrderStatusChange = onDocumentUpdated(
     if (after.status === "pagado") {
       await fulfillment.applyPaidOrder({ db, orderId, crmDefaults: CRM_DEFAULT_FIELDS });
       await sendPaidEffects(orderId);
+      await sendPaidEffects(orderId, "review");
     }
+    // El cambio a revisión también puede llegar antes/después del evento de pago.
+    if (after.status === "revision_manual") await sendPaidEffects(orderId, "review");
     // Permite reanudar un aviso aún no reclamado si el worker terminó tras aplicar inventario.
     if (before.status === "pagado" && after.status === "por_preparar") await sendPaidEffects(orderId);
     if (after.status === "cancelado") await fulfillment.releaseCancelledReservation({ db, orderId });

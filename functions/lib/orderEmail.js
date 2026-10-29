@@ -1,9 +1,9 @@
 // ==============================================
-// Email "Nuevo pedido pagado" para Carlos y Pame.
+// Avisos "Nuevo pedido pagado" y "Pagado pero requiere revisión" a administradores.
 // Remitente: Gmail SMTP (nodemailer) con una "contraseña de aplicación".
 //   Secrets: GMAIL_SMTP_USER (cuenta Gmail remitente), GMAIL_SMTP_APP_PASSWORD
 // Destinatarios: Firestore config/notifications → paidOrderEmail.{enabled,recipients[]}
-// Idempotente: un correo por pedido (documento orderNotifications/{orderId}).
+// Idempotencia independiente: paidEmail / paidReviewEmail en orderNotifications/{orderId}.
 // Nunca se envía a clientes.
 // ==============================================
 const nodemailer = require("nodemailer");
@@ -13,6 +13,7 @@ const ADMIN_ORDERS_URL = "https://aquipauli.com/admin/pedidos";
 
 const METHOD_LABELS = {
   paypal: "PayPal / Tarjeta",
+  tilopay: "Tilopay / Tarjeta",
   sinpe: "SINPE Móvil",
   sinpe_movil: "SINPE Móvil",
   transferencia: "Transferencia",
@@ -23,7 +24,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const crc = (n) => `₡${Number(n || 0).toLocaleString("es-CR")}`;
 
 /** Arma asunto + texto + HTML. `items` = [{productName, variantName, quantity, lineTotal}] */
-function buildPaidOrderEmail(order, items, { test = false } = {}) {
+function buildPaidOrderEmail(order, items, { test = false, requiresReview = false, reviewReason = "" } = {}) {
   const num = order.orderNumber || "(sin número)";
   const method = METHOD_LABELS[order.paymentMethod] || order.paymentMethod || "—";
   const lines = (items || []).map((i) => {
@@ -31,16 +32,24 @@ function buildPaidOrderEmail(order, items, { test = false } = {}) {
     return { text: `• ${i.quantity || 1} × ${name} (${crc(i.lineTotal ?? (i.price || 0) * (i.quantity || 1))})`, name, i };
   });
   const prefix = test ? "[PRUEBA] " : "";
-  const subject = `${prefix}Pedido pagado ${num} — ${crc(order.total)}`;
+  const title = requiresReview ? "Pagado pero requiere revisión" : "Nuevo pedido pagado";
+  const subject = requiresReview
+    ? `${prefix}Pagado pero requiere revisión: ${num} — ${crc(order.total)}`
+    : `${prefix}Pedido pagado ${num} — ${crc(order.total)}`;
+  const reason = requiresReview ? String(reviewReason || "El pago está acreditado y el pedido requiere revisión administrativa.").slice(0, 300) : "";
+  const reviewText = requiresReview
+    ? `Motivo: ${reason}\nTransacción: ${order.paymentTransactionId || "—"}\nRevisá el pedido en el admin antes de prepararlo o enviarlo.\n\n` : "";
   const testNote = test ? "ESTE ES UN CORREO DE PRUEBA (pedido de prueba). No requiere acción.\n\n" : "";
-  const text = `${testNote}Nuevo pedido pagado\n\n` +
+  const text = `${testNote}${title}\n\n${reviewText}` +
     `Pedido: ${num}\nCliente: ${order.customerName || "—"}\n` +
     `Productos:\n${lines.map((l) => l.text).join("\n") || "—"}\n\n` +
     `Total: ${crc(order.total)}\nMétodo de pago: ${method}\n\n` +
     `Ver en el admin: ${ADMIN_ORDERS_URL} (buscá el pedido ${num})\n\n— Aquí Pauli (aviso automático)`;
   const html = `<div style="font-family:Arial,sans-serif;max-width:520px">` +
     (test ? `<p style="background:#fff3cd;padding:8px;border-radius:6px"><b>PRUEBA</b> — pedido de prueba, no requiere acción.</p>` : "") +
-    `<h2 style="margin:0 0 8px">🛒 Nuevo pedido pagado</h2>` +
+    `<h2 style="margin:0 0 8px">${requiresReview ? "⚠️" : "🛒"} ${title}</h2>` +
+    (requiresReview ? `<p style="background:#fff3cd;padding:8px;border-radius:6px"><b>Requiere revisión:</b> ${esc(reason)}<br>` +
+      `<b>Transacción:</b> ${esc(order.paymentTransactionId || "—")}<br>Revisá el pedido en el admin antes de prepararlo o enviarlo.</p>` : "") +
     `<p><b>Pedido:</b> ${esc(num)}<br><b>Cliente:</b> ${esc(order.customerName || "—")}<br>` +
     `<b>Total:</b> ${esc(crc(order.total))}<br><b>Método de pago:</b> ${esc(method)}</p>` +
     `<p><b>Productos:</b></p><ul>${lines.map((l) => `<li>${esc(l.text.slice(2))}</li>`).join("") || "<li>—</li>"}</ul>` +
@@ -51,11 +60,12 @@ function buildPaidOrderEmail(order, items, { test = false } = {}) {
 }
 
 /**
- * Envía el correo una sola vez por pedido.
- * @param {object} p {db, orderId, order, items, user, pass, test}
+ * Envía un aviso normal o de revisión con reclamaciones independientes.
+ * @param {object} p {db, orderId, order, items, user, pass, test, requiresReview, reviewReason}
  * @returns {Promise<{result:"sent"|"skipped"|"disabled"|"error", reason?:string}>}
  */
-async function sendPaidOrderEmail({ db, orderId, order, items, user, pass, test = false, transport }) {
+async function sendPaidOrderEmail({ db, orderId, order, items, user, pass, test = false, transport,
+  requiresReview = false, reviewReason = "" }) {
   const cfgSnap = await db.collection("config").doc("notifications").get();
   const cfg = (cfgSnap.exists && cfgSnap.data().paidOrderEmail) || {};
   if (cfg.enabled === false) return { result: "disabled" };
@@ -65,27 +75,30 @@ async function sendPaidOrderEmail({ db, orderId, order, items, user, pass, test 
     return { result: "error", reason: "no_credentials" };
   }
 
-  // Reservar (idempotencia): solo un envío por pedido y tipo (real/prueba)
+  // Un aviso normal no suprime la alerta de revisión, ni viceversa.
+  const notificationField = requiresReview ? "paidReviewEmail" : "paidEmail";
   const ref = db.collection("orderNotifications").doc(`${orderId}${test ? "_test" : ""}`);
   const claimed = await db.runTransaction(async (tx) => {
     const s = await tx.get(ref);
-    const d = s.exists ? s.data().paidEmail : null;
+    const d = s.exists ? s.data()[notificationField] : null;
+    // Una alerta de revisión ambigua no se reenvía automáticamente, tampoco tras un TTL.
+    if (requiresReview && d) return false;
     if (d?.status === "sent") return false;
     if (d?.status === "sending" && Date.now() - Date.parse(d.startedAt) < 5 * 60 * 1000) return false;
-    tx.set(ref, { paidEmail: { status: "sending", startedAt: new Date().toISOString() } }, { merge: true });
+    tx.set(ref, { [notificationField]: { status: "sending", startedAt: new Date().toISOString() } }, { merge: true });
     return true;
   });
   if (!claimed) return { result: "skipped", reason: "already_sent_or_sending" };
 
   try {
-    const mail = buildPaidOrderEmail(order, items, { test });
+    const mail = buildPaidOrderEmail(order, items, { test, requiresReview, reviewReason });
     const tr = transport || nodemailer.createTransport({ host: "smtp.gmail.com", port: 465, secure: true, auth: { user, pass } });
     const info = await tr.sendMail({ from: `Aquí Pauli <${user || "no-reply@aquipauli.com"}>`, to: recipients.join(", "), ...mail });
-    await ref.set({ paidEmail: { status: "sent", sentAt: new Date().toISOString(), recipients, messageId: info.messageId || null, test } }, { merge: true });
+    await ref.set({ [notificationField]: { status: "sent", sentAt: new Date().toISOString(), recipients, messageId: info.messageId || null, test } }, { merge: true });
     return { result: "sent" };
   } catch (e) {
     console.error("[orderEmail] error:", e.message);
-    await ref.set({ paidEmail: { status: "error", error: String(e.message).slice(0, 300), at: new Date().toISOString() } }, { merge: true });
+    await ref.set({ [notificationField]: { status: "error", error: String(e.message).slice(0, 300), at: new Date().toISOString() } }, { merge: true });
     return { result: "error", reason: e.message };
   }
 }

@@ -15,22 +15,27 @@ const wrap = (...args) => args.at(-1);
 
 function loadHandlers(seed, options = {}) {
   const memory = createMemoryFirestore(seed);
-  const effects = { telegram: 0, email: 0, crmCreated: 0, automations: [], paypal: [] };
+  const effects = { telegram: 0, email: 0, telegramMessages: [], emailMessages: [], crmCreated: 0, automations: [], paypal: [] };
   const cache = new Map();
   const dependencies = {
     "firebase-functions/v2/https": { onCall: wrap, HttpsError },
-    "firebase-functions/v2/firestore": { onDocumentUpdated: wrap },
+    "firebase-functions/v2/firestore": { onDocumentUpdated: (config, handler) => {
+      effects.triggerOptions = config; return handler;
+    } },
     "firebase-functions/v2/scheduler": { onSchedule: wrap },
     "firebase-functions/params": {
-      defineSecret: () => ({ value: () => "fake-test-secret" }),
+      defineSecret: (name) => {
+        if (options.unavailableSecrets?.includes(name)) throw new Error(`Secret unavailable during endpoint discovery: ${name}`);
+        return { value: () => "fake-test-secret" };
+      },
       defineString: (name, defaults) => ({ value: () => name === "PAYPAL_APP_CLIENT_ID" ? "fake-id" : defaults?.default }),
     },
   };
   const specialFiles = {
     [path.join(ROOT, "utils.js")]: {
       db: memory.db, FieldValue: memory.FieldValue, generateOrderNumber: () => "AP-TEST",
-      notifyAdminsTelegram: async () => {
-        effects.telegram++;
+      notifyAdminsTelegram: async (message) => {
+        effects.telegram++; effects.telegramMessages.push(message);
         if (options.telegramError) throw new Error("ambiguous-send");
         return options.telegramResult || [{ chatId: "test", ok: true }];
       },
@@ -39,7 +44,8 @@ function loadHandlers(seed, options = {}) {
     [path.join(ROOT, "crm.js")]: { CRM_DEFAULT_FIELDS: { totalOrders: 0, totalSpent: 0 },
       updateCrmOnOrderCreated: async () => { effects.crmCreated++; } },
     [path.join(ROOT, "lib/orderEmail.js")]: { sendPaidOrderEmail: async (data) => {
-      effects.email++; effects.emailData = data; return { result: "sent" };
+      effects.email++; effects.emailData = data; effects.emailMessages.push(data);
+      return options.emailResult || { result: "sent" };
     } },
     [path.join(ROOT, "lib/fx.js")]: { getFxRate: async () => ({ rate: 500, bufferPct: 0 }), crcToUsd: (amount) => (amount / 500).toFixed(2) },
     [path.join(ROOT, "lib/paypalApi.js")]: {
@@ -64,8 +70,8 @@ function loadHandlers(seed, options = {}) {
       return name.startsWith(".") ? load(path.resolve(path.dirname(filename), name)) : require(name);
     };
     // Isolated CommonJS dependency injection: no Firebase, SMTP, Telegram or PayPal requests.
-    new Function("require", "module", "exports", "__filename", "__dirname", fs.readFileSync(filename, "utf8"))(
-      localRequire, module, module.exports, filename, path.dirname(filename));
+    new Function("require", "module", "exports", "__filename", "__dirname", "process", fs.readFileSync(filename, "utf8"))(
+      localRequire, module, module.exports, filename, path.dirname(filename), options.env ? { env: options.env } : process);
     return module.exports;
   }
   return { ...memory, effects, orders: load(path.join(ROOT, "orders.js")),
@@ -100,8 +106,8 @@ function paidSeed({ reserved = true } = {}) {
   return seed;
 }
 const request = (data = {}, uid = "u1") => ({ auth: { uid }, data: { orderId: OID, ...data } });
-function event(beforeStatus, afterStatus) {
-  return { params: { orderId: OID }, data: { before: { data: () => ({ status: beforeStatus }) },
+function event(beforeStatus, afterStatus, time = new Date().toISOString()) {
+  return { time, params: { orderId: OID }, data: { before: { data: () => ({ status: beforeStatus }) },
     after: { data: () => ({ status: afterStatus }) } } };
 }
 
@@ -174,11 +180,11 @@ test("paid trigger: no server reservation means no decrement of another order's 
   assert.equal(h.get(VARIANT).reservedStock, 3);
 });
 
-test("paid trigger: legacy, tampered fingerprint and test payment have no fulfillment effects", async () => {
-  for (const mutate of [
-    (order) => { delete order.tilopay.attemptsById.a1.snapshot; },
-    (order) => { order.tilopay.attemptsById.a1.snapshot.lines[0].quantity = 99; },
-    (order) => { order.paymentStatus = "test_paid"; order.tilopay.attemptsById.a1.mode = "test"; },
+test("paid trigger: invalid snapshots notify review without fulfillment; test payment has no effects", async () => {
+  for (const [mutate, reviewNotice] of [
+    [(order) => { delete order.tilopay.attemptsById.a1.snapshot; }, true],
+    [(order) => { order.tilopay.attemptsById.a1.snapshot.lines[0].quantity = 99; }, true],
+    [(order) => { order.paymentStatus = "test_paid"; order.tilopay.attemptsById.a1.mode = "test"; }, false],
   ]) {
     const seed = paidSeed(); mutate(seed[ORDER]);
     const h = loadHandlers(seed);
@@ -186,7 +192,8 @@ test("paid trigger: legacy, tampered fingerprint and test payment have no fulfil
     assert.equal(h.get(VARIANT).stock, 10);
     assert.equal(h.get(VARIANT).reservedStock, 2);
     assert.equal(h.get("crm_contacts/u1"), undefined);
-    assert.equal(h.effects.telegram + h.effects.email, 0);
+    assert.equal(h.effects.telegram + h.effects.email, reviewNotice ? 2 : 0);
+    if (reviewNotice) assert.equal(h.effects.emailData.requiresReview, true);
     assert.notEqual(h.get(ORDER).status, "por_preparar");
   }
 });
@@ -200,18 +207,18 @@ test("paid trigger: stale event cannot reopen a currently canceled order", async
   assert.equal(h.effects.telegram + h.effects.email, 0);
 });
 
-test("paid trigger: later refund/reconciliation and authorized-only evidence block delivery", async () => {
-  for (const mutate of [
-    (order) => { order.tilopay.reconciliationNeedsReview = true; },
-    (order) => { order.tilopay.duplicatePaymentNeedsReview = true; },
-    (order) => { order.tilopay.attemptsById.a1.financialEvidence = "authorized"; },
+test("paid trigger: later reconciliation notifies review; authorization alone never claims payment", async () => {
+  for (const [mutate, reviewNotice] of [
+    [(order) => { order.tilopay.reconciliationNeedsReview = true; }, true],
+    [(order) => { order.tilopay.duplicatePaymentNeedsReview = true; }, true],
+    [(order) => { order.tilopay.attemptsById.a1.financialEvidence = "authorized"; }, false],
   ]) {
     const seed = paidSeed(); mutate(seed[ORDER]);
     const h = loadHandlers(seed);
     await h.orders.onOrderStatusChange(event("pendiente_pago", "pagado"));
     assert.equal(h.get(VARIANT).stock, 10);
     assert.equal(h.get(ORDER).status, "revision_manual");
-    assert.equal(h.effects.telegram + h.effects.email, 0);
+    assert.equal(h.effects.telegram + h.effects.email, reviewNotice ? 2 : 0);
   }
 });
 
@@ -388,4 +395,153 @@ test("legacy expiry concurrent events release grouped quantities once and reject
   await bad.schedulers.cleanExpiredReservations();
   assert.equal(bad.get(ORDER).status, "pendiente_pago");
   assert.equal(bad.get(VARIANT).reservedStock, 1);
+});
+
+
+test("paid review: duplicated/reordered events alert once per channel without inventory or CRM", async () => {
+  const seed = paidSeed();
+  seed[VARIANT] = { ...seed[VARIANT], stock: 0, reservedStock: 0 };
+  const h = loadHandlers(seed);
+  await Promise.all([
+    h.orders.onOrderStatusChange(event("pendiente_pago", "pagado")),
+    h.orders.onOrderStatusChange(event("pendiente_pago", "pagado")),
+  ]);
+  await Promise.all([
+    h.orders.onOrderStatusChange(event("pagado", "revision_manual")),
+    h.orders.onOrderStatusChange(event("pendiente_pago", "pagado")),
+  ]);
+  assert.equal(h.get(ORDER).status, "revision_manual");
+  assert.equal(h.get(VARIANT).stock, 0);
+  assert.equal(h.get("crm_contacts/u1"), undefined);
+  assert.equal(h.effects.telegram, 1);
+  assert.equal(h.effects.email, 1);
+  assert.match(h.effects.telegramMessages[0], /Pagado pero requiere revisión/);
+  assert.match(h.effects.telegramMessages[0], /TX1/);
+  assert.match(h.effects.emailData.reviewReason, /Inventario insuficiente/);
+  assert.equal(h.effects.emailData.requiresReview, true);
+  assert.deepEqual(h.effects.emailData.items, []);
+  assert.equal(h.get(ORDER).paidEffects.review.telegram.state, "sent");
+  assert.equal(h.get(ORDER).paidEffects.review.email.state, "sent");
+  assert.equal(h.get(ORDER).paidEffects.telegram, undefined);
+  assert.equal(h.get(ORDER).paidEffects.email, undefined);
+});
+
+test("paid review and normal notices are independent in either order", async () => {
+  for (const reviewFirst of [false, true]) {
+    const seed = paidSeed();
+    if (reviewFirst) Object.assign(seed[ORDER], { status: "revision_manual",
+      fulfillment: { version: 1, state: "needs_review", reason: "Revisión administrativa" } });
+    const h = loadHandlers(seed);
+    if (reviewFirst) {
+      await h.orders.onOrderStatusChange(event("pagado", "revision_manual"));
+      await h.db.doc(ORDER).update({ status: "pagado" });
+      await h.orders.onOrderStatusChange(event("revision_manual", "pagado"));
+    } else {
+      await h.orders.onOrderStatusChange(event("pendiente_pago", "pagado"));
+      await h.db.doc(ORDER).update({ status: "revision_manual", "fulfillment.reason": "Revisión administrativa" });
+      await h.orders.onOrderStatusChange(event("por_preparar", "revision_manual"));
+    }
+    await h.orders.onOrderStatusChange(event("pagado", "revision_manual"));
+    assert.equal(h.effects.telegram, 2);
+    assert.equal(h.effects.email, 2);
+    assert.equal(h.effects.emailMessages.filter((mail) => mail.requiresReview).length, 1);
+    assert.equal(h.effects.emailMessages.filter((mail) => !mail.requiresReview).length, 1);
+    assert.equal(h.get(ORDER).paidEffects.telegram.state, "sent");
+    assert.equal(h.get(ORDER).paidEffects.review.telegram.state, "sent");
+    assert.equal(h.get(ORDER).paidEffects.email.state, "sent");
+    assert.equal(h.get(ORDER).paidEffects.review.email.state, "sent");
+    assert.equal(h.get(VARIANT).stock, 8);
+    assert.equal(h.get("crm_contacts/u1").totalOrders, 1);
+  }
+});
+
+test("paid review: unpaid, test, authorization and unlinked transactions never send alerts", async () => {
+  for (const mutate of [
+    (order) => { order.paymentStatus = "verificando"; },
+    (order) => { order.paymentStatus = "test_paid"; },
+    (order) => { order.tilopay.mode = "test"; },
+    (order) => { order.tilopay.attemptsById.a1.mode = "test"; },
+    (order) => { order.tilopay.attemptsById.a1.financialEvidence = "authorized"; },
+    (order) => { order.tilopay.attemptsById.a1.status = "pending_capture"; },
+    (order) => { delete order.tilopay.paidAttemptKey; },
+    (order) => { order.paymentTransactionId = "OTHER"; },
+    (order) => { order.status = "cancelado"; },
+  ]) {
+    const seed = paidSeed(); seed[ORDER].status = "revision_manual"; mutate(seed[ORDER]);
+    const h = loadHandlers(seed);
+    await h.orders.onOrderStatusChange(event("pagado", "revision_manual"));
+    assert.equal(h.effects.telegram + h.effects.email, 0);
+    assert.equal(h.get(ORDER).paidEffects, undefined);
+    assert.equal(h.get(VARIANT).stock, 10);
+    assert.equal(h.get("crm_contacts/u1"), undefined);
+  }
+});
+
+test("paid review: an accredited manual payment is also reported without preparing the order", async () => {
+  const seed = paidSeed(); delete seed[ORDER].tilopay;
+  Object.assign(seed[ORDER], { paymentMethod: "sinpe", status: "revision_manual",
+    fulfillment: { state: "needs_review", reason: "Falta resolver la entrega" } });
+  const h = loadHandlers(seed);
+  await h.orders.onOrderStatusChange(event("pagado", "revision_manual"));
+  assert.equal(h.effects.telegram, 1);
+  assert.equal(h.effects.email, 1);
+  assert.equal(h.effects.emailData.requiresReview, true);
+  assert.equal(h.get(VARIANT).stock, 10);
+});
+
+test("paid review: ambiguous delivery is recorded once and never retried blindly", async () => {
+  const seed = paidSeed(); seed[ORDER].status = "revision_manual";
+  const h = loadHandlers(seed, { telegramError: true, emailResult: { result: "error", reason: "SMTP ambiguous" } });
+  await Promise.all([
+    h.orders.onOrderStatusChange(event("pagado", "revision_manual")),
+    h.orders.onOrderStatusChange(event("pagado", "revision_manual")),
+  ]);
+  await h.orders.onOrderStatusChange(event("pagado", "revision_manual"));
+  assert.equal(h.effects.telegram, 1);
+  assert.equal(h.effects.email, 1);
+  assert.equal(h.get(ORDER).paidEffects.review.telegram.state, "needs_review");
+  assert.equal(h.get(ORDER).paidEffects.review.email.state, "needs_review");
+  assert.equal(h.get(ORDER).paidEffects.telegram, undefined);
+});
+
+test("order events older than one hour cause no stock, notification, release or automation effects", async () => {
+  const expired = new Date(Date.now() - 61 * 60 * 1000).toISOString();
+  for (const status of ["pagado", "revision_manual", "cancelado", "enviado", "entregado"]) {
+    const seed = paidSeed(); Object.assign(seed[ORDER], { status, trackingNumber: "TRACK", updatedAt: new Date().toISOString() });
+    const h = loadHandlers(seed);
+    await h.orders.onOrderStatusChange(event("pendiente_pago", status, expired));
+    assert.deepEqual(h.get(ORDER), seed[ORDER]);
+    assert.deepEqual(h.get(VARIANT), seed[VARIANT]);
+    assert.equal(h.effects.telegram + h.effects.email + h.effects.automations.length, 0);
+    assert.equal(h.get("crm_contacts/u1"), undefined);
+    assert.equal(h.stats.commits, 0);
+  }
+});
+
+test("order event cutoff uses the original event time, accepts recent events and rejects invalid dates", async () => {
+  const seed = paidSeed(); seed[ORDER].createdAt = "2020-01-01T00:00:00.000Z";
+  const h = loadHandlers(seed);
+  await h.orders.onOrderStatusChange(event("pendiente_pago", "pagado", new Date(Date.now() - 59 * 60 * 1000).toISOString()));
+  assert.equal(h.get(VARIANT).stock, 8);
+  assert.equal(h.effects.telegram, 1);
+  for (const time of [undefined, "invalid-date"]) {
+    const invalid = loadHandlers(paidSeed());
+    await invalid.orders.onOrderStatusChange({ ...event("pendiente_pago", "pagado"), time });
+    assert.equal(invalid.get(VARIANT).stock, 10);
+    assert.equal(invalid.effects.telegram + invalid.effects.email, 0);
+  }
+});
+
+
+test("endpoint discovery does not resolve missing Gmail secrets; the trigger binds and reads them at runtime", async () => {
+  const h = loadHandlers(paidSeed(), {
+    unavailableSecrets: ["GMAIL_SMTP_USER", "GMAIL_SMTP_APP_PASSWORD"],
+    env: { GMAIL_SMTP_USER: "sender@example.invalid", GMAIL_SMTP_APP_PASSWORD: "fake-runtime-password" },
+  });
+  assert.equal(h.effects.triggerOptions.retry, true);
+  assert.ok(h.effects.triggerOptions.secrets.includes("GMAIL_SMTP_USER"));
+  assert.ok(h.effects.triggerOptions.secrets.includes("GMAIL_SMTP_APP_PASSWORD"));
+  await h.orders.onOrderStatusChange(event("pendiente_pago", "pagado"));
+  assert.equal(h.effects.emailData.user, "sender@example.invalid");
+  assert.equal(h.effects.emailData.pass, "fake-runtime-password");
 });
