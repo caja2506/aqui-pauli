@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { GIVEAWAY, giveawayStatus, watchGiveawayConfig, watchOwnGiveawayEntry } from '../services/giveawayService';
+import { GIVEAWAY, giveawayStatus, loadGiveawayProducts, watchGiveawayConfig, watchOwnGiveawayEntry } from '../services/giveawayService';
 
 export function useGiveaway() {
   const [config, setConfig] = useState({ enabled: false, loading: true, error: false });
@@ -51,6 +51,28 @@ export function useGiveawayEntry(uid) {
     error: Boolean(uid) && state.uid === uid && state.error,
     retry: () => {
       setState({ uid, entry: null, loading: true, error: false });
+      setAttempt((value) => value + 1);
+    },
+  };
+}
+
+export function useGiveawayProducts() {
+  const [state, setState] = useState({ products: [], loading: true, error: false });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    loadGiveawayProducts().then(
+      (products) => { if (alive) setState({ products, loading: false, error: false }); },
+      () => { if (alive) setState({ products: [], loading: false, error: true }); },
+    );
+    return () => { alive = false; };
+  }, [attempt]);
+
+  return {
+    ...state,
+    retry: () => {
+      setState({ products: [], loading: true, error: false });
       setAttempt((value) => value + 1);
     },
   };

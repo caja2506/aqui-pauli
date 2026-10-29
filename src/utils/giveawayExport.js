@@ -22,9 +22,10 @@ export function giveawayEntryDate(value) {
 
 export function buildGiveawayCsv(entries) {
   const rows = [
-    ['Número', 'Nombre completo', 'Teléfono', 'Correo', 'Premio', 'Fecha (Costa Rica)', 'Promociones autorizadas'],
+    ['Número', 'Nombre completo', 'Teléfono', 'Correo', 'Colonia escogida', 'Precio de venta (CRC)', 'ID del producto', 'Fecha (Costa Rica)', 'Promociones autorizadas'],
     ...[...entries].sort((a, b) => a.number - b.number).map((entry) => [
-      entry.number, entry.fullName, entry.phone, entry.email, entry.prizeLabel,
+      entry.number, entry.fullName, entry.phone, entry.email, entry.productName || entry.prizeLabel || 'Premio registrado',
+      Number.isFinite(entry.productPrice) && entry.productPrice > 0 ? entry.productPrice : '', entry.productId || '',
       giveawayEntryDate(entry.createdAt), entry.promotionsConsent === true ? 'Sí' : 'No',
     ]),
   ];

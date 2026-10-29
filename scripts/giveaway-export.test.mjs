@@ -40,3 +40,22 @@ test('fechas Timestamp e ISO se muestran en Costa Rica; valores ausentes no inve
   assert.equal(giveawayEntryDate({ seconds: Date.parse(iso) / 1000 }), expected);
   for (const value of [null, undefined, 'no es fecha']) assert.equal(giveawayEntryDate(value), '—');
 });
+
+test('CSV conserva colonia, ID y precio del snapshot y respeta inscripciones anteriores', () => {
+  const csv = buildGiveawayCsv([
+    { number: 1, fullName: 'Ana', productId: 'perfume-1', productName: 'Versace Eros EDT 100 ml',
+      productPrice: 47000, prizeLabel: 'Etiqueta anterior', promotionsConsent: false },
+    { number: 2, fullName: 'Luis', prizeId: 'acqua-di-gio-100', prizeLabel: 'Acqua di Giò EDT 100 ml' },
+  ]);
+  assert.match(csv, /"Colonia escogida","Precio de venta \(CRC\)","ID del producto"/);
+  assert.match(csv, /"Versace Eros EDT 100 ml","47000","perfume-1"/);
+  assert.doesNotMatch(csv, /Etiqueta anterior/);
+  assert.match(csv, /"Acqua di Giò EDT 100 ml","",""/);
+});
+
+test('CSV neutraliza fórmulas también en nombre e ID de la colonia', () => {
+  const csv = buildGiveawayCsv([{ number: 1, productName: '=HYPERLINK("https://example.test")',
+    productId: '@forged', productPrice: '47000', prizeLabel: 'fallback' }]);
+  assert.match(csv, /"'=HYPERLINK\(""https:\/\/example.test""\)"/);
+  assert.match(csv, /"","'@forged"/);
+});

@@ -8,6 +8,7 @@ import { useCollection } from '../../hooks/useCollection';
 import { useGiveaway } from '../../hooks/useGiveaway';
 import { GIVEAWAY } from '../../services/giveawayService';
 import { buildGiveawayCsv, giveawayEntryDate } from '../../utils/giveawayExport';
+import { formatCRC } from '../../utils/formatters';
 
 function GiveawayAdminContent() {
   const { data, loading, error, retry } = useCollection('giveawayEntries', {
@@ -101,7 +102,7 @@ function GiveawayAdminContent() {
             <table className="w-full text-left text-sm">
               <caption className="sr-only">Participantes del sorteo de octubre de 2026. Fechas en hora de Costa Rica.</caption>
               <thead className="bg-slate-50 text-slate-600"><tr>
-                {['Número', 'Nombre completo', 'Teléfono', 'Correo', 'Premio', 'Fecha (Costa Rica)', 'Promociones'].map((label) => (
+                {['Número', 'Nombre completo', 'Teléfono', 'Correo', 'Colonia escogida', 'Precio al inscribirse', 'Fecha (Costa Rica)', 'Promociones'].map((label) => (
                   <th key={label} scope="col" className="px-4 py-3 font-bold whitespace-nowrap">{label}</th>
                 ))}
               </tr></thead>
@@ -112,7 +113,8 @@ function GiveawayAdminContent() {
                     <td className="px-4 py-3 min-w-40">{entry.fullName}</td>
                     <td className="px-4 py-3 whitespace-nowrap">+506 {entry.phone}</td>
                     <td className="px-4 py-3 break-all">{entry.email}</td>
-                    <td className="px-4 py-3 min-w-48">{entry.prizeLabel}</td>
+                    <td className="px-4 py-3 min-w-48">{entry.productName || entry.prizeLabel || 'Premio registrado'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{Number.isFinite(entry.productPrice) && entry.productPrice > 0 ? formatCRC(entry.productPrice) : '—'}</td>
                     <td className="px-4 py-3 whitespace-nowrap">{giveawayEntryDate(entry.createdAt)}</td>
                     <td className="px-4 py-3">{entry.promotionsConsent === true ? 'Sí' : 'No'}</td>
                   </tr>
