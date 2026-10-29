@@ -28,6 +28,8 @@ export async function createOrder(orderData) {
     customerName: orderData.customerName,
     customerEmail: orderData.customerEmail,
     customerPhone: orderData.customerPhone,
+    customerCedula: orderData.customerCedula || '',
+    isGuest: !!orderData.isGuest,
     // --- DIRECCIÓN COMPLETA ---
     shippingAddress: {
       provincia: orderData.shippingAddress?.provincia || '',
@@ -106,6 +108,8 @@ export async function createOrder(orderData) {
       },
       preferredPaymentMethod: orderData.paymentMethod || '',
       paymentPhone: orderData.paymentPhone || '',
+      isGuest: !!orderData.isGuest,
+      source: orderData.isGuest ? 'guest_checkout' : 'checkout',
       funnelStage: 'comprador',
       lastOrderId: orderId,
       lastOrderDate: now,

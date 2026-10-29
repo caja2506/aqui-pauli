@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, CreditCard, ShoppingBag } from 'lucide-react';
+import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { formatCRC } from '../../utils/formatters';
@@ -13,7 +14,8 @@ import { db } from '../../firebase';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
 export default function CheckoutPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading, ensureGuestSession } = useAuth();
+  const [guestError, setGuestError] = useState(null);
   const { items, subtotal, clearCart } = useCart();
   const navigate = useNavigate();
 
@@ -48,9 +50,18 @@ export default function CheckoutPage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Compra como invitado: si no hay sesión, abrimos una sesión anónima (uid propio para el pedido)
+  useEffect(() => {
+    if (authLoading || user || items.length === 0) return;
+    ensureGuestSession().catch((err) => {
+      console.error('Guest session error:', err);
+      setGuestError('No pudimos iniciar tu compra como invitado. Revisá tu conexión e intentá de nuevo.');
+    });
+  }, [authLoading, user, items.length]);
+
   // Cargar datos del CRM para pre-llenar
   useEffect(() => {
-    if (!user?.uid) { setLoadingCrm(false); return; }
+    if (!user?.uid || user.isAnonymous) { setLoadingCrm(false); return; }
     const loadCrmData = async () => {
       try {
         const crmDoc = await getDoc(doc(db, 'crm_contacts', user.uid));
@@ -80,18 +91,22 @@ export default function CheckoutPage() {
     loadCrmData();
   }, [user?.uid]);
 
-  // Redirect if not logged in
+  // Sin sesión todavía: se está creando la sesión de invitado (o falló)
   if (!user) {
-    return (
-      <div className="max-w-lg mx-auto px-4 py-20 text-center">
-        <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-        <h2 className="text-xl font-black text-slate-900 mb-2">Inicia sesión para comprar</h2>
-        <p className="text-sm text-slate-400 mb-6">Necesitas una cuenta para completar tu compra</p>
-        <Link to="/login" state={{ from: '/checkout' }} className="inline-flex items-center gap-2 px-6 py-3 bg-rose-600 text-white font-bold rounded-xl shadow-lg active:scale-95 transition-all text-sm">
-          Iniciar Sesión
-        </Link>
-      </div>
-    );
+    if (items.length === 0 && !authLoading) {
+      // carrito vacío: se muestra el estado vacío más abajo
+    } else if (guestError) {
+      return (
+        <div className="max-w-lg mx-auto px-4 py-20 text-center" role="alert">
+          <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+          <h2 className="text-xl font-black text-slate-900 mb-2">No pudimos iniciar el checkout</h2>
+          <p className="text-sm text-slate-400 mb-6">{guestError}</p>
+          <button onClick={() => { setGuestError(null); ensureGuestSession().catch(() => setGuestError('Seguimos sin conexión. Intentá de nuevo en unos minutos.')); }} className="px-6 py-3 bg-rose-600 text-white font-bold rounded-xl text-sm">Reintentar</button>
+        </div>
+      );
+    } else {
+      return <LoadingSpinner />;
+    }
   }
 
   if (items.length === 0) {
@@ -163,6 +178,9 @@ export default function CheckoutPage() {
     const newErrors = {};
     if (!form.name.trim()) newErrors.name = 'Nombre requerido';
     if (!form.phone.trim()) newErrors.phone = 'Teléfono requerido';
+    else if (form.phone.replace(/\D/g, '').length < 8) newErrors.phone = 'Teléfono inválido (mínimo 8 dígitos)';
+    if (!form.email.trim()) newErrors.email = 'Correo requerido';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) newErrors.email = 'Correo inválido';
     if (!form.provincia) newErrors.provincia = 'Selecciona provincia';
     if (!form.canton) newErrors.canton = 'Cantón requerido';
     if (!form.distrito) newErrors.distrito = 'Distrito requerido';
@@ -177,7 +195,8 @@ export default function CheckoutPage() {
 
   const buildOrderData = (paymentMethod) => ({
     uid: user.uid,
-    customerEmail: form.email,
+    customerEmail: form.email.trim(),
+    isGuest: !!user.isAnonymous,
     customerName: form.name,
     customerPhone: form.phone,
     customerCedula: form.cedula,
@@ -265,6 +284,7 @@ export default function CheckoutPage() {
           {/* Contact */}
           <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm space-y-4">
             <h2 className="font-black text-lg text-slate-900">Datos de Contacto</h2>
+            {user?.isAnonymous && <SaveAccountPrompt compact />}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Nombre completo</label>
@@ -283,7 +303,8 @@ export default function CheckoutPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label>
-                <input value={form.email} type="email" onChange={e => handleChange('email', e.target.value)} className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
+                <input value={form.email} type="email" autoComplete="email" placeholder="correo@ejemplo.com" onChange={e => handleChange('email', e.target.value)} className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 ${errors.email ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
+                {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
               </div>
             </div>
           </div>

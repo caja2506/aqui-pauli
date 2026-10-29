@@ -1,11 +1,14 @@
 import { useParams, useLocation, Link } from 'react-router-dom';
 import { CheckCircle, ArrowRight } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 
 // Número de WhatsApp Business de Aquí Pauli (formato internacional sin +)
 const WHATSAPP_NUMBER = '50671613342';
 
 export default function OrderConfirmation() {
   const { orderId } = useParams();
+  const { user } = useAuth();
   const location = useLocation();
   const orderNumber = location.state?.orderNumber || orderId;
   const total = location.state?.total || '';
@@ -37,13 +40,17 @@ export default function OrderConfirmation() {
         </p>
       )}
 
+      {user?.isAnonymous && <div className="mb-6 text-left"><SaveAccountPrompt /></div>}
+
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-left mb-6">
         <h3 className="text-sm font-bold text-amber-800 mb-2">Próximos pasos:</h3>
         <ul className="text-xs text-amber-700 space-y-1.5">
           {!online && <li>• Realiza el pago con el método seleccionado</li>}
           {needsProof && <li>• <strong>Envía tu comprobante por WhatsApp</strong> con el botón verde</li>}
           <li>• Recibirás actualizaciones por WhatsApp</li>
-          <li>• Podrás rastrear tu pedido desde tu cuenta</li>
+          {user?.isAnonymous
+            ? <li>• Para rastrear tu pedido desde cualquier dispositivo, guardá tu cuenta con Google</li>
+            : <li>• Podrás rastrear tu pedido desde tu cuenta</li>}
         </ul>
       </div>
 

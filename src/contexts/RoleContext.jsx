@@ -29,6 +29,13 @@ export function RoleProvider({ children }) {
       return;
     }
 
+    // Invitados (sesión anónima): no se crea documento de rol; son 'cliente' implícito
+    if (user.isAnonymous) {
+      setRole('cliente');
+      setRoleLoading(false);
+      return;
+    }
+
     setRoleLoading(true);
     const userRoleRef = doc(db, 'users_roles', user.uid);
 
@@ -52,7 +59,7 @@ export function RoleProvider({ children }) {
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, user?.isAnonymous]);
 
   const isAdmin = role === 'admin';
   const isCliente = role === 'cliente';

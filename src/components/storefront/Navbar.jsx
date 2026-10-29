@@ -72,7 +72,7 @@ export default function Navbar() {
               )}
             </button>
 
-            {user ? (
+            {user && !user.isAnonymous ? (
               <div className="flex items-center gap-2">
                 {isAdmin && (
                   <Link
