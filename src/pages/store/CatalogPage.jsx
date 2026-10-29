@@ -4,6 +4,7 @@ import { useCollection } from '../../hooks/useCollection';
 import ProductCard from '../../components/storefront/ProductCard';
 import EmptyState from '../../components/ui/EmptyState';
 import LoadError from '../../components/ui/LoadError';
+import GiveawayBanner from '../../components/storefront/GiveawayBanner';
 
 // Normaliza: minúsculas y sin tildes/diacríticos
 const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -51,6 +52,8 @@ export default function CatalogPage() {
   };
 
   return (
+    <>
+    <GiveawayBanner />
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       {/* Header */}
       <div className="mb-8">
@@ -156,5 +159,6 @@ export default function CatalogPage() {
         />
       )}
     </div>
+    </>
   );
 }

@@ -6,6 +6,8 @@ on:
     paths:
       - 'functions/**'
       - 'firestore.rules'
+      - 'scripts/firebase-deploy-targets.mjs'
+      - 'scripts/firebase-deploy-targets.test.mjs'
       - '.github/workflows/firebase-functions-deploy.yml'
 
 permissions:
@@ -25,6 +27,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -39,8 +42,37 @@ jobs:
       - name: Test Functions before loading deployment credentials
         run: npm --prefix functions test
 
+      - name: Test and select the affected Functions
+        id: deploy_scope
+        env:
+          DEPLOY_BEFORE: ${{ github.event.before }}
+          DEPLOY_HEAD: ${{ github.sha }}
+        run: |
+          node scripts/firebase-deploy-targets.test.mjs
+          node scripts/firebase-deploy-targets.mjs >> "$GITHUB_OUTPUT"
+
       - name: Install the pinned Firebase CLI
         run: npm install --global firebase-tools@15.34.2
+
+      - name: Set up Java for the local Firestore Emulator
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install isolated Rules test dependencies
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/giveaway-rules-tools"
+          --no-package-lock --ignore-scripts --no-audit --no-fund
+          @firebase/rules-unit-testing@6.0.0 firebase@13.1.0
+
+      - name: Verify giveaway privacy with a local emulator before loading credentials
+        env:
+          NODE_PATH: ${{ runner.temp }}/giveaway-rules-tools/node_modules
+        run: >-
+          firebase emulators:exec --only firestore
+          --project demo-aqui-pauli-giveaway --config firebase.tilopay-emulator.json
+          "node functions/test/firestore-giveaway.emulator.test.js"
 
       - name: Prepare Firebase application default credentials
         env:
@@ -84,7 +116,7 @@ jobs:
           firebase deploy
           --project aqui-pauli
           --non-interactive
-          --only "firestore:rules,functions:default:tilopayGetConfig,functions:default:tilopayCreatePayment,functions:default:tilopayConfirm,functions:default:createOrderWithReservation,functions:default:deleteOrder,functions:default:submitPaymentProof,functions:default:approvePaymentManually,functions:default:paypalCreateOrder,functions:default:paypalCaptureOrder,functions:default:paypalGetQuote,functions:default:cleanExpiredReservations"
+          --only "${{ steps.deploy_scope.outputs.targets }}"
 
       - name: Remove deployment credentials
         if: always()

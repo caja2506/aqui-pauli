@@ -209,6 +209,22 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // --- Sorteo: inscripción por enterGiveaway, con uid y número del servidor ---
+    // El participante consulta únicamente su documento; la lista es privada.
+    // Ningún navegador puede fabricar números, sobrescribir consentimientos
+    // o borrar y volver a inscribirse. La creación es una transacción del servidor.
+    match /giveawayEntries/{uid} {
+      allow get: if (isOwner(uid)
+          && request.auth.token.firebase.sign_in_provider != 'anonymous')
+        || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /giveawayCounters/{campaignId} {
+      allow read, write: if false;
+    }
+
     // --- Configuración (lectura pública, escritura admin) ---
     match /config/{configId} {
       allow read: if true;

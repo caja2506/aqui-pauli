@@ -32,6 +32,8 @@ jobs:
       - run: npm ci
       - name: Render checkout and cart before publishing
         run: npm run test:checkout
+      - name: Test giveaway forms, privacy choices and CSV export
+        run: npm run test:giveaway
       - run: npm run build
 
       - name: Record the version to publish
