@@ -28,8 +28,8 @@ export default function SaveAccountPrompt({ compact = false }) {
     <div className={`bg-rose-50 border border-rose-100 rounded-2xl ${compact ? 'p-3' : 'p-5'} flex items-center gap-3`} data-testid="save-account">
       <UserCheck className="w-5 h-5 text-rose-500 shrink-0" />
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-bold text-slate-700">Estás comprando como invitado</p>
-        {!compact && <p className="text-[11px] text-slate-500">Guardá tu cuenta para ver tus pedidos desde cualquier dispositivo. No perdés tu pedido.</p>}
+        <p className="text-xs font-bold text-slate-700">{compact ? 'Estás comprando como invitado' : 'Opcional'}</p>
+        {!compact && <p className="text-[11px] text-slate-500">Si querés, guardá tu cuenta con Google para ver tus pedidos luego. No perdés este pedido.</p>}
         {error && <p className="text-[11px] text-red-500 mt-1">{error}</p>}
       </div>
       <button

@@ -32,9 +32,11 @@ export default function OrderConfirmation() {
       <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
         <CheckCircle className="w-10 h-10 text-green-600" />
       </div>
-      <h1 className="text-2xl font-black text-slate-900 mb-2">¡Pedido Confirmado!</h1>
+      <h1 className="text-2xl font-black text-slate-900 mb-2">
+        ¡Tu pedido <span className="whitespace-nowrap">{orderNumber}</span> quedó registrado!
+      </h1>
       <p className="text-sm text-slate-500 mb-6">
-        Tu pedido <span className="font-bold text-slate-700">{orderNumber}</span> ha sido registrado exitosamente.
+        Guardá este número para cualquier consulta sobre tu compra.
       </p>
       {online && (
         <p className={`text-sm font-bold mb-6 ${paid ? 'text-green-700' : 'text-amber-700'}`}>
@@ -50,7 +52,6 @@ export default function OrderConfirmation() {
           {!online && <li>• Realiza el pago con el método seleccionado</li>}
           {needsProof && <li>• <strong>Envía tu comprobante por WhatsApp</strong> con el botón verde</li>}
           <li>• Recibirás actualizaciones por WhatsApp</li>
-          {isGuest && <li>• Para ver tu pedido desde cualquier dispositivo, guardá tu cuenta con Google (opcional)</li>}
           {hasAccount && <li>• Podrás ver tu pedido en «Mis Pedidos»</li>}
         </ul>
       </div>
