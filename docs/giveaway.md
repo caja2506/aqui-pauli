@@ -1,11 +1,12 @@
-# Sorteo de perfumes · octubre de 2026
+# Sorteo de perfumes · octubre y noviembre de 2026
 
 ## Accesos y fechas
 
 - Participación: `/sorteo`; bases de inscripción: `/sorteo/bases`.
 - Administración: `/admin/sorteo`, protegida por el rol real de Firestore `users_roles/{uid}.role == 'admin'`.
 - Inicio: 29 de octubre de 2026, 00:00, Costa Rica (`2026-10-29T06:00:00.000Z`).
-- Cierre: 5 de noviembre de 2026, 20:00, Costa Rica (`2026-11-06T02:00:00.000Z`). El límite de cierre es exclusivo.
+- Cierre de inscripciones: sábado 28 de noviembre de 2026, 20:00, Costa Rica (`2026-11-29T02:00:00.000Z`). El límite de cierre es exclusivo.
+- Fecha del sorteo: domingo 29 de noviembre de 2026, Costa Rica. No se ha fijado una hora para el sorteo.
 - La definición compartida por navegador y servidor está en `functions/lib/giveawayConfig.json`.
 
 El banner aparece en inicio y catálogo durante el período. El formulario exige una cuenta registrada; una sesión anónima de compra no es suficiente. El login existente conserva el retorno a `/sorteo`.
@@ -57,7 +58,7 @@ La lista muestra número, nombre, teléfono, correo, colonia escogida, precio al
 
 Las solicitudes de acceso, rectificación, revocación o eliminación se reciben por DM a `@aqui.paulina`, como indica el consentimiento. La atención de esas solicitudes corresponde al responsable; esta entrega no agrega un botón de borrado masivo ni un flujo de mensajes. Si se atiende una eliminación en las herramientas administrativas del proyecto, se conserva el contador sin renumerar a las demás personas y se revisan también las copias CSV exportadas.
 
-Las bases publicadas documentan la inscripción y los hechos solicitados. No se programó una extracción de ganadores ni se fijaron cantidad de ganadores, fecha de extracción o condiciones de entrega que no se habían indicado en la solicitud.
+Las bases publicadas documentan la inscripción y la fecha del sorteo, el domingo 29 de noviembre de 2026. No se programó una extracción automática de ganadores ni se fijaron hora del sorteo, cantidad de ganadores o condiciones de entrega que no se habían indicado en la solicitud.
 
 ## Pruebas y despliegue
 

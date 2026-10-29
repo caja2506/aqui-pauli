@@ -208,14 +208,22 @@ test('banner oculto durante carga, error, pausa, antes de inicio y después del 
 test('fechas compartidas abren a medianoche CR y cierran exactamente a las 20:00 CR', () => {
   const { giveawayStatus } = runtime().load(SERVICE);
   const start = Date.parse('2026-10-29T00:00:00-06:00');
-  const end = Date.parse('2026-11-05T20:00:00-06:00');
+  const end = Date.parse('2026-11-28T20:00:00-06:00');
   assert.equal(Date.parse(config.startsAt), start);
   assert.equal(Date.parse(config.endsAt), end);
   assert.equal(giveawayStatus(true, start - 1), 'upcoming');
   assert.equal(giveawayStatus(true, start), 'active');
+  // La fecha anterior de cierre debe conservar banner e inscripción abiertos.
+  const formerEnd = Date.parse('2026-11-05T20:00:00-06:00');
+  for (const now of [formerEnd, formerEnd + 1, end - 1]) {
+    const status = giveawayStatus(true, now);
+    assert.equal(status, 'active');
+    assert.match(runtime({ giveaway: { status } }).render(BANNER), /data-testid="giveaway-banner"/);
+  }
   assert.equal(giveawayStatus(true, end - 1), 'active');
   assert.equal(giveawayStatus(true, end), 'closed');
   assert.equal(giveawayStatus(true, end + 1), 'closed');
+  assert.equal(runtime({ giveaway: { status: giveawayStatus(true, end) } }).render(BANNER), '');
   assert.equal(giveawayStatus(false, start + 1), 'disabled');
 });
 
@@ -240,6 +248,8 @@ test('el login existente abre registro para el sorteo y conserva login por defec
 
 test('formulario muestra selector buscable, nombres y precios, correo de cuenta y consentimiento separado', () => {
   const html = runtime().render();
+  contains(html, 'sábado 28 de noviembre de 2026 a las 8:00 p. m.');
+  contains(html, 'El sorteo será el domingo 29 de noviembre de 2026.');
   assert.match(html, /data-testid="giveaway-form"/);
   const nameInput = html.match(/<input[^>]*name="fullName"[^>]*>/)?.[0];
   assert.match(nameInput, /required=""/);
@@ -301,7 +311,13 @@ test('la página bloquea inscripción al cerrar, pausar o fallar lecturas', () =
     { giveaway: { status: 'closed' } }, { giveaway: { status: 'disabled' } },
     { giveaway: { status: 'upcoming' } }, { giveaway: { error: true } },
     { registration: { error: true } }, { registration: { loading: true } }, { auth: { loading: true } },
-  ]) assert.doesNotMatch(runtime(options).render(), /data-testid="giveaway-form"/);
+  ]) {
+    const html = runtime(options).render();
+    assert.doesNotMatch(html, /data-testid="giveaway-form"/);
+    if (options.giveaway?.status === 'closed') {
+      contains(html, 'Las inscripciones al sorteo cerraron el sábado 28 de noviembre de 2026 a las 8:00 p. m., hora de Costa Rica.');
+    }
+  }
 });
 
 test('doble clic usa una sola llamada y devuelve el número sin inventarlo en cliente', async () => {
@@ -424,7 +440,7 @@ test('hook programa el cierre y vuelve a consultar la hora al recuperar foco', (
 
 test('bases muestran período CR, catálogo elegible, instrucción Instagram y derechos', () => {
   const html = runtime().render(BASES);
-  for (const value of ['29 de octubre de 2026', '5 de noviembre de 2026', '8:00 p. m.', 'Costa Rica (UTC−6)',
+  for (const value of ['29 de octubre de 2026', 'sábado 28 de noviembre de 2026', 'domingo 29 de noviembre de 2026', '8:00 p. m.', 'Costa Rica (UTC−6)',
     'Carlos Jiménez Arias', 'San José de Grecia', 'Firebase', 'Ley 8968', '@aqui.paulina', 'rectificación', 'promociones']) contains(html, value);
   contains(html, 'inferior a ₡50 000');
   contains(html, 'con stock, bajo pedido o sin stock');
@@ -462,6 +478,8 @@ test('admin muestra datos de la campaña, hora CR y autorizaciones de promocione
     participant({ id: 'old', campaignId: 'other-campaign', number: 666, fullName: 'No debe aparecer' })];
   const app = runtime({ collection: { data } });
   const html = app.render(ADMIN);
+  contains(html, 'sábado 28 de noviembre de 2026 a las 8:00 p. m. de Costa Rica.');
+  contains(html, 'El sorteo será el domingo 29 de noviembre de 2026.');
   assert.deepEqual(app.queries, [{ collection: 'giveawayEntries', options: { orderByField: 'number', orderDirection: 'asc' } }]);
   for (const value of ['Participantes (2)', '#12', '#13', 'Ana Prueba', 'Beatriz Prueba', '+506 88887777', 'ana@example.invalid',
     receipt.productName, '₡47 000', '29/10/2026', '20:00:00', 'Fecha (Costa Rica)', 'Promociones']) contains(html, value);
