@@ -50,55 +50,137 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
+    function ownsOrder(data) {
+      return request.auth != null
+        && (data.get('uid', '') == request.auth.uid || data.get('customerUid', '') == request.auth.uid);
+    }
+
+    function isTilopayOrder(data) {
+      return data.get('paymentMethod', '') == 'tilopay' || data.keys().hasAny(['tilopay']);
+    }
+
+    // Campos reales enviados por orderService.createOrder. No admite snapshots,
+    // reservas, evidencias ni futuros campos financieros aportados por el cliente.
+    function validPendingOrder(data) {
+      return request.auth != null
+        && data.keys().hasOnly([
+          'orderNumber', 'uid', 'customerUid', 'customerName', 'customerEmail', 'customerPhone',
+          'customerCedula', 'isGuest', 'shippingAddress', 'subtotal', 'shippingCost', 'shippingType', 'total',
+          'paymentMethod', 'paymentPhone', 'paymentStatus', 'paymentProofUrl', 'hasBackorder', 'backorderDeposit',
+          'status', 'notes', 'trackingNumber', 'trackingUrl', 'itemsSummary', 'itemCount', 'createdAt', 'updatedAt'
+        ])
+        && data.uid == request.auth.uid
+        && (!data.keys().hasAny(['customerUid']) || data.customerUid == request.auth.uid)
+        && data.paymentStatus == 'pendiente' && data.status == 'pendiente_pago'
+        && data.get('paymentProofUrl', '') == ''
+        && data.get('trackingNumber', '') == '' && data.get('trackingUrl', '') == ''
+        && data.orderNumber is string && data.orderNumber.size() > 0 && data.orderNumber.size() <= 100
+        && data.paymentMethod is string && data.paymentMethod.size() > 0 && data.paymentMethod.size() <= 40
+        && data.itemsSummary is list && data.itemsSummary.size() > 0 && data.itemsSummary.size() <= 50
+        && data.itemCount is int && data.itemCount > 0 && data.itemCount <= 4950
+        && data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 90071992547409
+        && data.shippingCost is number && data.shippingCost >= 0 && data.shippingCost <= 90071992547409
+        && data.total is number && data.total > 0 && data.total <= 90071992547409;
+    }
+
+    function validClientItem(data) {
+      return data.keys().hasOnly([
+          'productId', 'variantId', 'productName', 'variantName', 'imageUrl', 'price', 'quantity', 'supplyType', 'lineTotal'
+        ])
+        && data.productId is string && data.productId.matches('[A-Za-z0-9_-]{1,128}')
+        && data.variantId is string && data.variantId.matches('[A-Za-z0-9_-]{1,128}')
+        && data.quantity is int && data.quantity > 0 && data.quantity <= 99
+        && data.price is number && data.price >= 0 && data.price <= 90071992547409
+        && data.lineTotal is number && data.lineTotal >= 0 && data.lineTotal <= 90071992547409;
+    }
+
+    function unlockedItems(data) {
+      return !data.keys().hasAny(['tilopay', 'inventoryReservation', 'fulfillment'])
+        && data.get('paymentStatus', '') in ['pendiente', 'rechazado', 'verificando'];
+    }
+
+    // El servidor aplica inventario/CRM y pasa pagado a por_preparar. El navegador
+    // solo puede avanzar una entrega cuya evidencia sigue vigente y sin revisión.
+    function validTilopayFulfillmentUpdate(before, after) {
+      let tilopay = before.get('tilopay', {});
+      let paidKey = tilopay.get('paidAttemptKey', '');
+      let attempt = tilopay.get('attemptsById', {}).get(paidKey, {});
+      let fulfillment = before.get('fulfillment', {});
+      return before.status == after.status
+        || (before.get('paymentStatus', '') == 'pagado'
+          && before.get('reconciliationResult', '') == 'tilopay_consult'
+          && before.get('paymentTransactionId', '') != ''
+          && tilopay.get('status', '') == 'approved'
+          && tilopay.get('reconciliationNeedsReview', false) == false
+          && tilopay.get('duplicatePaymentNeedsReview', false) == false
+          && tilopay.get('legacyNeedsReview', false) == false
+          && paidKey != ''
+          && attempt.get('schemaVersion', 0) == 2
+          && attempt.get('mode', '') == 'live' && attempt.get('status', '') == 'approved'
+          && attempt.get('financialEvidence', '') == 'captured'
+          && attempt.get('reconciliationNeedsReview', false) == false
+          && attempt.get('idTilopay', '') == before.paymentTransactionId
+          && fulfillment.get('version', 0) == 1 && fulfillment.get('state', '') == 'applied'
+          && fulfillment.get('paidAttemptKey', '') == paidKey
+          && fulfillment.get('paymentTransactionId', '') == before.paymentTransactionId
+          && ((before.status == 'por_preparar' && after.status == 'enviado')
+            || (before.status == 'enviado' && after.status == 'entregado')))
+        || (!before.keys().hasAny(['tilopay', 'inventoryReservation'])
+          && before.status == 'pendiente_pago' && before.paymentStatus == 'pendiente' && after.status == 'cancelado');
+    }
+
     // --- Pedidos ---
-    // El estado de pago, montos e ids de pasarela SOLO los escribe el servidor
-    // (Cloud Functions / Admin SDK, que ignora estas reglas) o un admin.
-    // El dueño puede: crear su pedido (pendiente), leerlo y adjuntar el comprobante.
-    // Tampoco puede escribir campos de dueño/pasarela (tilopay, paypal, customerUid ajeno) ni cambiar totales
-    // o estados después de crear. tilopayTx/* (registro de transacciones) no tiene regla: solo el servidor.
     match /orders/{orderId} {
       allow read: if request.auth != null
-        && (isAdmin() || resource.data.uid == request.auth.uid || resource.data.customerUid == request.auth.uid);
+        && (isAdmin() || ownsOrder(resource.data));
 
-      allow create: if isAdmin()
-        || (request.auth != null
-            && request.resource.data.uid == request.auth.uid
-            && request.resource.data.paymentStatus == 'pendiente'
-            && request.resource.data.status == 'pendiente_pago'
-            && !request.resource.data.keys().hasAny([
-              'paypal', 'tilopay', 'paymentAmount', 'paymentTransactionId', 'paymentDate',
-              'reconciliationResult', 'reconciliationDetails', 'priceCorrectedByServer'
-            ])
-            // customerUid (campo de dueño) solo puede ser el propio usuario
-            && (!request.resource.data.keys().hasAny(['customerUid'])
-                || request.resource.data.customerUid == request.auth.uid));
+      // Ni los admins de navegador crean pedidos pagados ni metadatos de pasarela.
+      allow create: if validPendingOrder(request.resource.data);
 
-      allow update: if isAdmin()
-        || (request.auth != null
-            && resource.data.uid == request.auth.uid
+      allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'uid', 'customerUid', 'tilopay', 'inventoryReservation', 'fulfillment', 'paidEffects', 'legacyReservationReleasedAt'
+        ])
+        && ((isAdmin()
+            && ((!isTilopayOrder(resource.data) && !isTilopayOrder(request.resource.data))
+              || (request.resource.data.diff(resource.data).affectedKeys()
+                    .hasOnly(['status', 'notes', 'trackingNumber', 'trackingUrl', 'updatedAt'])
+                  && validTilopayFulfillmentUpdate(resource.data, request.resource.data))))
+          || (ownsOrder(resource.data)
             && resource.data.paymentStatus in ['pendiente', 'rechazado', 'verificando']
-            // Los pedidos con tarjeta (Tilopay) los gestiona solo el servidor
-            && resource.data.get('paymentMethod', '') != 'tilopay'
+            && !isTilopayOrder(resource.data) && !isTilopayOrder(request.resource.data)
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['paymentProofUrl', 'paymentPhone', 'paymentStatus', 'updatedAt'])
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentStatus'])
-                || request.resource.data.paymentStatus == 'verificando'));
+                || request.resource.data.paymentStatus == 'verificando')));
 
-      allow delete: if isAdmin();
+      // Los cobros y reservas requieren cancelación servidor, conservando su rastro.
+      allow delete: if isAdmin() && !isTilopayOrder(resource.data)
+        && !resource.data.keys().hasAny(['inventoryReservation', 'fulfillment']);
 
       match /items/{itemId} {
         allow read: if request.auth != null
-          && (isAdmin() || get(/databases/$(database)/documents/orders/$(orderId)).data.uid == request.auth.uid);
-        // Items solo se crean junto con el pedido propio, mientras no esté pagado
-        allow create: if isAdmin()
-          || (request.auth != null
-              && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.uid == request.auth.uid
-              && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.paymentStatus == 'pendiente'
-              // no se agregan items a un pedido con un pago Tilopay ya iniciado
-              && !('tilopay' in getAfter(/databases/$(database)/documents/orders/$(orderId)).data));
-        allow update, delete: if isAdmin();
+          && (isAdmin() || ownsOrder(get(/databases/$(database)/documents/orders/$(orderId)).data));
+        // El checkout crea padre e items en el MISMO batch. No puede agregar
+        // líneas a posteriori, ni siquiera antes de que empiece el cobro.
+        allow create: if unlockedItems(getAfter(/databases/$(database)/documents/orders/$(orderId)).data)
+          && validClientItem(request.resource.data)
+          && (isAdmin()
+            || (request.auth != null
+              && !exists(/databases/$(database)/documents/orders/$(orderId))
+              && ownsOrder(getAfter(/databases/$(database)/documents/orders/$(orderId)).data)
+              && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.paymentStatus == 'pendiente'));
+        allow update: if isAdmin()
+          && unlockedItems(getAfter(/databases/$(database)/documents/orders/$(orderId)).data)
+          && validClientItem(request.resource.data);
+        allow delete: if isAdmin()
+          && unlockedItems(getAfter(/databases/$(database)/documents/orders/$(orderId)).data);
       }
     }
+
+    // Registros de autoridad del servidor. No hay wildcard que los conceda.
+    match /tilopayTx/{id} { allow read, write: if false; }
+    match /tilopayReferences/{id} { allow read, write: if false; }
+    match /tilopayCheckoutLocks/{id} { allow read, write: if false; }
 
     // --- CRM (admin lee todo, usuario puede crear/actualizar su propio contacto) ---
     match /crm_contacts/{contactId} {

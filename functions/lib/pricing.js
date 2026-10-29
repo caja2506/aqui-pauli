@@ -1,10 +1,8 @@
-// ==============================================
-// Cálculo de totales de un pedido en el SERVIDOR (CRC), a partir de los
-// precios en Firestore. Nunca se confía en precios/envío enviados por el cliente.
-// Reutilizable por cualquier pasarela (PayPal, Tilopay…).
-// ==============================================
+// Prices and fulfillment fields come from the catalog, never from checkout input.
+// All monetary arithmetic uses integer CRC centavos; shipping remains INCLUDED.
+const { parseMinorCRC, minorToCRC } = require("./paymentMoney");
+const { normalizeInventoryStock } = require("./inventoryStock");
 
-// Mantener sincronizado con src/utils/constants.js y src/services/shippingService.js
 const GAM_CANTONES = [
   "San José", "Escazú", "Desamparados", "Goicoechea", "Alajuelita",
   "Vásquez de Coronado", "Tibás", "Moravia", "Montes de Oca", "Curridabat", "Santa Ana",
@@ -14,62 +12,107 @@ const GAM_CANTONES = [
   "San Isidro", "Belén", "Flores", "San Pablo",
 ];
 const EXPRESS_CANTONES = ["Grecia"];
-const DEFAULT_SHIPPING_PRICES = { normalGAM: 3500, normalOutside: 5500, expressGrecia: 2000 };
-
-const norm = (s) => String(s || "").trim().toLowerCase();
-const inList = (list, canton) => !!canton && list.some((c) => norm(c) === norm(canton));
-
-// El envío va INCLUIDO en el precio (decisión de Carlos): nunca se cobra envío aparte.
-// Normal / Express quedan solo como elección de tiempo de entrega.
 const SHIPPING_INCLUDED = true;
 
-function shippingCostCRC(prices, canton, shippingType = "normal") {
-  if (SHIPPING_INCLUDED) return 0;
-  const p = { ...DEFAULT_SHIPPING_PRICES, ...(prices || {}) };
-  if (shippingType === "express" && inList(EXPRESS_CANTONES, canton)) return Number(p.expressGrecia);
-  if (inList(GAM_CANTONES, canton)) return Number(p.normalGAM);
-  return Number(p.normalOutside);
+// Existing business policy: neither normal nor express adds a shipping charge.
+function shippingCostCRC(_prices, _canton, _shippingType = "normal") { return 0; }
+
+function validId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
+function safeInteger(value, label) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} inválido`);
+  }
+  return value;
+}
+
+function catalogText(value, max = 300) {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
 /**
- * @param db Firestore admin
- * @param {{productId,variantId,quantity}[]} items
- * @param {{canton:string, shippingType?:string}} ship
- * @returns {{lines, subtotal, shippingCost, total}} en CRC enteros
+ * @param {object} db Firestore Admin instance
+ * @param {{productId:string,variantId:string,quantity:number}[]} items
+ * @param {{canton?:string,shippingType?:string}} ship
+ * @param {{transaction?:object}} options Pass the current Firestore transaction.
+ * @returns {Promise<{lines:object[],subtotal:number,shippingCost:number,total:number,
+ *   subtotalMinor:number,shippingCostMinor:number,totalMinor:number}>}
+ *
+ * This function validates/prices a cart but does NOT reserve or consume stock.
+ * The caller must check stock - reservedStock and reserve it atomically. Checking
+ * availability here would incorrectly exclude an existing order's own reservation.
+ * When transaction is present, every catalog read belongs to that transaction.
  */
-async function computeTotalsCRC(db, items, ship) {
+async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
   if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
-    throw new Error("Items inválidos");
+    throw new Error("Items inválidos: se requieren entre 1 y 50 líneas");
   }
-  const lines = [];
-  for (const it of items) {
-    const qty = Number(it.quantity);
-    if (!it.productId || !it.variantId || !Number.isInteger(qty) || qty < 1 || qty > 99) {
-      throw new Error("Item inválido");
+  if (transaction && typeof transaction.get !== "function") throw new Error("Transacción inválida");
+  const read = (ref) => transaction ? transaction.get(ref) : ref.get();
+  const seen = new Set();
+  // Validate every line before doing any reads. Never coerce quantity or ids.
+  for (const item of items) {
+    if (!item || typeof item !== "object" || !validId(item.productId) || !validId(item.variantId)
+      || typeof item.quantity !== "number" || !Number.isInteger(item.quantity)
+      || item.quantity < 1 || item.quantity > 99) {
+      throw new Error("Item inválido: id o cantidad no válidos");
     }
-    const pRef = db.collection("products").doc(String(it.productId));
-    const [pSnap, vSnap] = await Promise.all([pRef.get(), pRef.collection("variants").doc(String(it.variantId)).get()]);
-    if (!pSnap.exists || !vSnap.exists) throw new Error("Producto no encontrado");
-    const p = pSnap.data();
-    const v = vSnap.data();
-    if (p.active === false || p.deleted || v.active === false) throw new Error(`Producto no disponible: ${p.name || it.productId}`);
-    const price = Math.round(Number(v.price || p.basePrice));
-    if (!(price > 0)) throw new Error(`Producto sin precio: ${p.name || it.productId}`);
+    const identity = JSON.stringify([item.productId, item.variantId]);
+    if (seen.has(identity)) throw new Error("Variante duplicada: agrupá las cantidades en una sola línea");
+    seen.add(identity);
+  }
+
+  const lines = [];
+  let subtotalMinor = 0;
+  for (const item of items) {
+    const productRef = db.collection("products").doc(item.productId);
+    const variantRef = productRef.collection("variants").doc(item.variantId);
+    const [productSnap, variantSnap] = await Promise.all([read(productRef), read(variantRef)]);
+    if (!productSnap.exists || !variantSnap.exists) throw new Error("Producto o variante no encontrado");
+    const product = productSnap.data();
+    const variant = variantSnap.data();
+    if (!product || !variant || product.active === false || product.deleted
+      || variant.active === false || variant.deleted) {
+      throw new Error(`Producto no disponible: ${catalogText(product?.name) || item.productId}`);
+    }
+
+    const supplyType = variant.supplyType ?? product.supplyType ?? "stock_propio";
+    if (!["stock_propio", "bajo_pedido"].includes(supplyType)) throw new Error("Abastecimiento del catálogo inválido");
+    // A stale reservation counter must not break a quote. Physical stock still
+    // validates strictly; callers normalize again inside their stock transaction.
+    normalizeInventoryStock(variant, { context: "pricing" });
+
+    // A configured zero/negative/malformed variant price is an error. Only an
+    // absent value inherits basePrice; falsy values must not hide a catalog error.
+    const rawPrice = variant.price === undefined || variant.price === null || variant.price === ""
+      ? product.basePrice : variant.price;
+    let unitPriceMinor;
+    try { unitPriceMinor = parseMinorCRC(rawPrice); }
+    catch { throw new Error(`Producto sin precio válido: ${catalogText(product.name) || item.productId}`); }
+    const lineTotalMinor = safeInteger(unitPriceMinor * item.quantity, "Total de línea");
+    subtotalMinor = safeInteger(subtotalMinor + lineTotalMinor, "Subtotal");
+    const productName = catalogText(product.name);
+    const variantName = catalogText(variant.name);
+    const firstProductImage = Array.isArray(product.images) ? product.images.find((value) => typeof value === "string") : "";
+    const imageUrl = catalogText(variant.imageUrl || firstProductImage || product.imageUrl, 2048);
     lines.push({
-      productId: String(it.productId), variantId: String(it.variantId), quantity: qty,
-      unitPrice: price, lineTotal: price * qty, name: p.name || "",
+      productId: item.productId, variantId: item.variantId, quantity: item.quantity,
+      name: productName, productName, variantName, imageUrl, supplyType,
+      unitPrice: minorToCRC(unitPriceMinor), lineTotal: minorToCRC(lineTotalMinor),
+      unitPriceMinor, lineTotalMinor,
     });
   }
-  let prices = null;
-  try {
-    const s = await db.collection("config").doc("shipping").get();
-    if (s.exists) prices = s.data();
-  } catch (e) {
-    console.warn("[pricing] config/shipping:", e.message);
-  }
-  const subtotal = lines.reduce((a, l) => a + l.lineTotal, 0);
-  const shippingCost = Math.round(shippingCostCRC(prices, ship?.canton, ship?.shippingType));
-  return { lines, subtotal, shippingCost, total: subtotal + shippingCost };
+
+  // There is no config/shipping read: with shipping included it cannot change
+  // the amount. This also avoids a silent config-read fallback in a transaction.
+  const shippingCostMinor = parseMinorCRC(shippingCostCRC(null, ship?.canton, ship?.shippingType), { allowZero: true });
+  const totalMinor = safeInteger(subtotalMinor + shippingCostMinor, "Total");
+  return {
+    lines, subtotal: minorToCRC(subtotalMinor), shippingCost: minorToCRC(shippingCostMinor), total: minorToCRC(totalMinor),
+    subtotalMinor, shippingCostMinor, totalMinor,
+  };
 }
 
 module.exports = { SHIPPING_INCLUDED, computeTotalsCRC, shippingCostCRC, GAM_CANTONES, EXPRESS_CANTONES };
