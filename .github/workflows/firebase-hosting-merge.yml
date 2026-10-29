@@ -30,6 +30,8 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - name: Render checkout and cart before publishing
+        run: npm run test:checkout
       - run: npm run build
 
       - name: Record the version to publish

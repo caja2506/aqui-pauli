@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:checkout": "node --test scripts/checkout-render.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
