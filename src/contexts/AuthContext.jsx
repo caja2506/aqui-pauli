@@ -9,11 +9,40 @@ import {
   signInAnonymously,
   linkWithPopup,
   signInWithCredential,
-  GoogleAuthProvider
+  signInWithRedirect,
+  linkWithRedirect,
+  getRedirectResult,
+  GoogleAuthProvider,
+  FacebookAuthProvider
 } from 'firebase/auth';
-import { auth, googleProvider } from '../firebase';
+import { auth, googleProvider, facebookProvider } from '../firebase';
 
 const AuthContext = createContext(null);
+
+// Móvil o navegadores in-app (Facebook/Instagram/Messenger): los popups fallan, usamos redirect
+export function shouldUseRedirect() {
+  if (typeof navigator === 'undefined') return false;
+  return /FBAN|FBAV|FB_IAB|Instagram|Messenger|Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+}
+
+// Mensaje claro para errores de inicio de sesión social
+export function socialAuthErrorMessage(err, providerLabel = 'esa red') {
+  switch (err?.code) {
+    case 'auth/account-exists-with-different-credential':
+      return `Ya existe una cuenta con ese correo creada con otro método (por ejemplo Google o correo y contraseña). Entrá con ese método y no se pierde nada; si querés, después la vinculamos con ${providerLabel}.`;
+    case 'auth/popup-blocked':
+      return 'Tu navegador bloqueó la ventana emergente. Permitila e intentá de nuevo.';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return null; // el usuario canceló: sin mensaje
+    case 'auth/operation-not-allowed':
+      return `El ingreso con ${providerLabel} todavía no está disponible.`;
+    case 'auth/network-request-failed':
+      return 'Sin conexión. Revisá tu internet e intentá de nuevo.';
+    default:
+      return `No pudimos completar el ingreso con ${providerLabel}. Intentá de nuevo.`;
+  }
+}
 
 export function useAuth() {
   const context = useContext(AuthContext);
@@ -26,6 +55,22 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   // El objeto User se muta en sitio al vincular una cuenta: forzamos re-render de los consumidores
   const [, forceRender] = useReducer((n) => n + 1, 0);
+
+  const [redirectError, setRedirectError] = useState(null);
+
+  // Completa el flujo de signInWithRedirect / linkWithRedirect al volver de Facebook
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => { if (result?.user) forceRender(); })
+      .catch(async (err) => {
+        if (err.code === 'auth/credential-already-in-use') {
+          const credential = FacebookAuthProvider.credentialFromError(err) || GoogleAuthProvider.credentialFromError(err);
+          if (credential) { try { await signInWithCredential(auth, credential); return; } catch (e) { err = e; } }
+        }
+        console.error('Redirect sign-in error:', err);
+        setRedirectError(socialAuthErrorMessage(err, 'Facebook'));
+      });
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -62,6 +107,33 @@ export function AuthProvider({ children }) {
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
       console.error('Error signing in with Google:', error);
+      throw error;
+    }
+  };
+
+  // Facebook: mismo patrón que Google. Si hay sesión de invitado se VINCULA (conserva el uid y los pedidos).
+  const signInWithFacebook = async () => {
+    const current = auth.currentUser;
+    const useRedirect = shouldUseRedirect();
+    try {
+      if (current && current.isAnonymous) {
+        if (useRedirect) { await linkWithRedirect(current, facebookProvider); return; }
+        try {
+          await linkWithPopup(current, facebookProvider);
+          forceRender();
+          return;
+        } catch (err) {
+          if (err.code === 'auth/credential-already-in-use') {
+            const credential = FacebookAuthProvider.credentialFromError(err);
+            if (credential) { await signInWithCredential(auth, credential); return; }
+          }
+          throw err;
+        }
+      }
+      if (useRedirect) { await signInWithRedirect(auth, facebookProvider); return; }
+      await signInWithPopup(auth, facebookProvider);
+    } catch (error) {
+      console.error('Error signing in with Facebook:', error);
       throw error;
     }
   };
@@ -103,6 +175,8 @@ export function AuthProvider({ children }) {
     isAnonymous: !!user?.isAnonymous,
     ensureGuestSession,
     signInWithGoogle,
+    signInWithFacebook,
+    redirectError,
     signInWithEmail,
     createAccount,
     signOut,

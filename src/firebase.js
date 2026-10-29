@@ -2,7 +2,7 @@
 import { initializeApp } from 'firebase/app';
 import { initializeFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, FacebookAuthProvider } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -21,4 +21,8 @@ export const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: 
 export const functions = getFunctions(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+// Facebook Login (solo visible si config/auth.facebookEnabled === true)
+export const facebookProvider = new FacebookAuthProvider();
+facebookProvider.addScope('email');
+facebookProvider.addScope('public_profile');
 export const storage = getStorage(app);

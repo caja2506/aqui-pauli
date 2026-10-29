@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShoppingBag, Loader2 } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, socialAuthErrorMessage } from '../../contexts/AuthContext';
+import { useAuthFlags } from '../../hooks/useAuthFlags';
+import FacebookIcon from './FacebookIcon';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 export default function LoginPage() {
-  const { signInWithGoogle, signInWithEmail, createAccount } = useAuth();
+  const { user, signInWithGoogle, signInWithFacebook, redirectError, signInWithEmail, createAccount } = useAuth();
+  const { facebookEnabled } = useAuthFlags();
   const navigate = useNavigate();
   const location = useLocation();
   const [isLoading, setIsLoading] = useState(false);
@@ -18,6 +21,24 @@ export default function LoginPage() {
 
   const handleSuccess = () => {
     navigate(redirectTo, { replace: true });
+  };
+
+  // Al volver de un redirect (Facebook en móvil / in-app) ya hay sesión: seguimos al destino
+  useEffect(() => {
+    if (user && !user.isAnonymous) navigate(redirectTo, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const handleFacebookLogin = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      await signInWithFacebook();
+      handleSuccess();
+    } catch (err) {
+      setError(socialAuthErrorMessage(err, 'Facebook'));
+      setIsLoading(false);
+    }
   };
 
   const handleGoogleLogin = async () => {
@@ -93,9 +114,9 @@ export default function LoginPage() {
           </div>
 
           {/* Error */}
-          {error && (
+          {(error || redirectError) && (
             <div className="mb-6 bg-red-950/50 border border-red-500/30 rounded-xl p-3 text-sm text-red-300 text-center">
-              {error}
+              {error || redirectError}
             </div>
           )}
 
@@ -162,6 +183,19 @@ export default function LoginPage() {
             )}
             Continuar con Google
           </button>
+
+          {/* Facebook Button (oculto hasta config/auth.facebookEnabled === true) */}
+          {facebookEnabled && (
+            <button
+              onClick={handleFacebookLogin}
+              disabled={isLoading}
+              data-testid="login-facebook"
+              className="mt-3 w-full flex items-center justify-center gap-3 bg-[#1877F2] hover:bg-[#166FE5] text-white font-bold py-3.5 px-6 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="bg-white rounded-full p-0.5"><FacebookIcon className="w-5 h-5" /></span>
+              Continuar con Facebook
+            </button>
+          )}
         </div>
 
         <p className="text-[10px] text-slate-600 text-center mt-6">
