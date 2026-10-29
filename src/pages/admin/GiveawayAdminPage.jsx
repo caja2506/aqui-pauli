@@ -56,7 +56,8 @@ function GiveawayAdminContent() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2"><Gift className="text-rose-600" /> Sorteo</h1>
-          <p className="mt-2 text-sm text-slate-600">Del 29 de octubre al 5 de noviembre de 2026, 8:00 p. m. de Costa Rica.</p>
+          <p className="mt-2 text-sm text-slate-600">Inscripciones desde el 29 de octubre hasta el sábado 28 de noviembre de 2026 a las 8:00 p. m. de Costa Rica.</p>
+          <p className="mt-1 text-sm text-slate-600">El sorteo será el domingo 29 de noviembre de 2026.</p>
           <Link to="/sorteo/bases" className="inline-block mt-2 text-sm font-bold text-rose-700 underline">Ver bases de participación</Link>
         </div>
         <button type="button" onClick={exportCsv} disabled={loading || !!error || entries.length === 0}
@@ -100,7 +101,7 @@ function GiveawayAdminContent() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <caption className="sr-only">Participantes del sorteo de octubre de 2026. Fechas en hora de Costa Rica.</caption>
+              <caption className="sr-only">Participantes del sorteo de octubre y noviembre de 2026. Fechas en hora de Costa Rica.</caption>
               <thead className="bg-slate-50 text-slate-600"><tr>
                 {['Número', 'Nombre completo', 'Teléfono', 'Correo', 'Colonia escogida', 'Precio al inscribirse', 'Fecha (Costa Rica)', 'Promociones'].map((label) => (
                   <th key={label} scope="col" className="px-4 py-3 font-bold whitespace-nowrap">{label}</th>

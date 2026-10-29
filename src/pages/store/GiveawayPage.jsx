@@ -168,7 +168,7 @@ export default function GiveawayPage() {
   } else if (giveaway.error) {
     content = <p role="alert" className="rounded-xl bg-rose-50 p-5 text-sm text-slate-700">No pudimos consultar la disponibilidad del sorteo. Revisá tu conexión y recargá la página.</p>;
   } else if (giveaway.status !== 'active') {
-    content = <p role="status" className="rounded-xl bg-rose-50 p-5 text-sm text-slate-700">{giveaway.status === 'closed' ? 'Las inscripciones al sorteo cerraron el 5 de noviembre de 2026 a las 8:00 p. m., hora de Costa Rica.' : giveaway.status === 'upcoming' ? 'Las inscripciones abren el 29 de octubre de 2026, hora de Costa Rica.' : 'Las inscripciones al sorteo están desactivadas por el momento.'}</p>;
+    content = <p role="status" className="rounded-xl bg-rose-50 p-5 text-sm text-slate-700">{giveaway.status === 'closed' ? 'Las inscripciones al sorteo cerraron el sábado 28 de noviembre de 2026 a las 8:00 p. m., hora de Costa Rica.' : giveaway.status === 'upcoming' ? 'Las inscripciones abren el 29 de octubre de 2026, hora de Costa Rica.' : 'Las inscripciones al sorteo están desactivadas por el momento.'}</p>;
   } else if (!uid) {
     content = <section className="space-y-5 text-center" data-testid="giveaway-auth-required"><h2 className="text-xl font-black text-slate-900">Creá tu cuenta para participar</h2><p className="text-sm leading-relaxed text-slate-600">Usamos tu cuenta de la tienda para guardar una única participación y que podás volver a consultar tu número.</p><Link to="/login" state={{ from: '/sorteo', mode: 'register' }} className="block rounded-2xl bg-rose-600 px-6 py-4 font-black text-white hover:bg-rose-700">Registrarme para participar</Link><Link to="/login" state={{ from: '/sorteo' }} className={`inline-block text-sm ${linkClass}`}>Ya tengo cuenta: iniciar sesión</Link></section>;
   } else {
@@ -181,7 +181,8 @@ export default function GiveawayPage() {
         <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-100 text-rose-600"><Gift className="h-8 w-8" aria-hidden="true" /></div>
         <h1 className="text-3xl font-black tracking-tight text-slate-900">Sorteo de Aquí Pauli</h1>
         <p className="mt-4 text-base leading-relaxed text-slate-600">Ganá la colonia que querás de nuestro catálogo, con precio de venta menor a ₡50 000.</p>
-        <p className="mt-3 text-sm font-bold text-rose-700">Del 29 de octubre al 5 de noviembre de 2026, a las 8:00 p. m.</p>
+        <p className="mt-3 text-sm font-bold text-rose-700">Inscripciones desde el 29 de octubre hasta el sábado 28 de noviembre de 2026 a las 8:00 p. m.</p>
+        <p className="mt-2 text-sm font-bold text-rose-700">El sorteo será el domingo 29 de noviembre de 2026.</p>
         <p className="mt-1 text-xs text-slate-500">Hora de Costa Rica · Participación gratuita</p>
       </header>
       <div className="rounded-3xl border border-rose-100 bg-white p-5 shadow-sm sm:p-8">{content}</div>

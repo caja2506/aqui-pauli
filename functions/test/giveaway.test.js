@@ -82,7 +82,7 @@ const rejectsCode = (promise, code) => assert.rejects(promise, (error) => error.
 
 test("sorteo usa el horario fijo de Costa Rica y la función callable autorizada", () => {
   assert.equal(config.startsAt, "2026-10-29T06:00:00.000Z");
-  assert.equal(config.endsAt, "2026-11-06T02:00:00.000Z");
+  assert.equal(config.endsAt, "2026-11-29T02:00:00.000Z");
   assert.equal(config.timeZone, "America/Costa_Rica");
   const h = loadHandler();
   assert.equal(h.options.region, "us-central1");
@@ -206,7 +206,9 @@ test("apertura inclusiva, cierre exclusivo y antes/después rechazados por reloj
     await rejectsCode(h.enter(request()), "failed-precondition");
     assert.deepEqual(h.store, h.initialStore);
   }
-  for (const now of [START, END - 1]) {
+  // El cierre anterior del 5 de noviembre ya no debe bloquear la inscripción.
+  const formerEnd = Date.parse("2026-11-05T20:00:00-06:00");
+  for (const now of [START, formerEnd, formerEnd + 1, END - 1]) {
     const h = loadHandler({}, now);
     assert.equal((await h.enter(request())).number, 1);
   }

@@ -12,8 +12,9 @@ export default function GiveawayRulesPage() {
         <p>Consultas por mensaje directo a <a href="https://www.instagram.com/aqui.paulina/" target="_blank" rel="noopener noreferrer" className={linkClass}>@aqui.paulina</a>.</p>
       </Section>
       <Section title="2. Plazo de inscripción">
-        <p>Desde el jueves 29 de octubre de 2026 a las 12:00 a. m. hasta el jueves 5 de noviembre de 2026 a las 8:00 p. m., hora de Costa Rica (UTC−6).</p>
+        <p>Desde el jueves 29 de octubre de 2026 a las 12:00 a. m. hasta el sábado 28 de noviembre de 2026 a las 8:00 p. m., hora de Costa Rica (UTC−6).</p>
         <p>Al llegar la hora de cierre no se aceptan nuevas inscripciones. Quienes ya se inscribieron pueden consultar su número ingresando con la misma cuenta.</p>
+        <p>El sorteo se realizará el domingo 29 de noviembre de 2026, hora de Costa Rica.</p>
       </Section>
       <Section title="3. Requisitos y participación">
         <p>La participación es gratuita y no requiere una compra. Debés ser mayor de 18 años, tener dirección en Costa Rica y registrarte o ingresar con tu cuenta de la tienda.</p>
