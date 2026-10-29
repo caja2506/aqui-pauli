@@ -372,3 +372,52 @@ test("reanudar no devuelve URL si se acredita entre consulta y lectura transacci
   assert.equal(result.url, undefined);
   assert.equal(h.calls.pay.length, 1);
 });
+
+
+test("config test mínima permite pagar de prueba sin merchantId/prefijo y sin efectos reales", async () => {
+  const h = harness({ mode: "test", extra: {
+    "config/payments": { tilopay: { enabled: true, mode: "test" } },
+  } });
+  assert.deepEqual(await h.service.getConfig(), { enabled: true, mode: "test" });
+  assert.equal((await h.service.create(request())).url, URL);
+  h.bank.set(h.att().orderNumber, [h.payment(ORDER, {
+    orderNumber: `PFC777-${h.att().orderNumber}`, merchantId: undefined,
+  })]);
+  assert.equal((await h.service.confirm(request())).result, "test_paid");
+  assert.equal(h.calls.consult[0].merchantId, undefined);
+  assert.equal(h.order().paymentStatus, "test_paid");
+  assert.equal(h.order().status, "pendiente_pago");
+  assert.equal(h.order().inventoryReservation, undefined);
+  assert.equal(h.get("products/p1/variants/v1").reservedStock, 0);
+  assert.equal((await h.service.confirm(request())).result, "test_paid");
+  assert.equal(Object.keys(h.store).filter((key) => key.startsWith("tilopayTx/")).length, 1);
+});
+
+test("test sin comercio sigue exigiendo rol; live requiere comercio Y prefijo", async () => {
+  const denied = harness({ mode: "test", extra: {
+    "config/payments": { tilopay: { enabled: true, mode: "test" } },
+    "users_roles/user1": { role: "cliente" },
+  } });
+  await assert.rejects(denied.service.create(request()), { code: "permission-denied" });
+  for (const config of [
+    { enabled: true, mode: "live" },
+    { enabled: true, mode: "live", merchantId: MERCHANT },
+    { enabled: true, mode: "live", orderPrefix: PREFIX },
+    { enabled: true, merchantId: MERCHANT, orderPrefix: PREFIX },
+  ]) {
+    const h = harness({ extra: { "config/payments": { tilopay: config } } });
+    assert.equal((await h.service.getConfig()).enabled, false);
+    await assert.rejects(h.service.create(request()), { code: "failed-precondition" });
+    assert.equal(h.calls.pay.length, 0);
+  }
+});
+
+test("reserva live normaliza reservedStock negativo histórico y conserva stock real", async () => {
+  const h = harness({ extra: { "products/p1/variants/v1": {
+    name: "100ml", price: 45000, stock: 100, reservedStock: -1, supplyType: "stock_propio",
+  } } });
+  assert.equal((await h.service.create(request())).url, URL);
+  assert.equal(h.calls.pay.length, 1);
+  assert.equal(h.get("products/p1/variants/v1").reservedStock, 2);
+  assert.equal(h.get("products/p1/variants/v1").stock, 100);
+});

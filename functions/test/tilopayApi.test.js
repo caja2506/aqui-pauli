@@ -167,3 +167,24 @@ test("API token cache honors expiry and is scoped to credentials", async () => {
     json: async () => ({ access_token: "T", expires_in: "bad" }) }) }));
   tp.clearTokenCache();
 });
+
+
+test("test admite comercio ausente/distinto y prefijo alfanumérico; live sigue estricto", () => {
+  const testOptions = { mode: "test", merchantId: "", orderPrefix: "" };
+  for (const merchantId of [undefined, "", "OTHER-MERCHANT", {}]) {
+    for (const orderNumber of [REF, `PFC777-${REF}`, `TESTABC123-${REF}`]) {
+      const result = interpret([row({ merchantId, orderNumber, environment: "Test" })], testOptions);
+      assert.equal(result.state, "approved");
+      assert.equal(result.env, "test");
+    }
+  }
+  assert.equal(interpret([row({ merchantId: "OTHER", environment: "Test" })], { mode: "test" }).state, "approved");
+  for (const orderNumber of [`PFC777-X${REF}`, `PFC777-${REF}-suffix`, `PFC777-OTHER-${REF}`, `-${REF}`]) {
+    assert.equal(interpret([row({ orderNumber, environment: "Test" })], testOptions).state, "pending_reconciliation");
+  }
+  assert.equal(interpret([row()], testOptions).state, "mismatch"); // Production never becomes a test payment.
+  assert.equal(interpret([row()], { merchantId: "" }).state, "pending_reconciliation");
+  assert.equal(interpret([row()], { orderPrefix: "" }).state, "pending_reconciliation");
+  assert.equal(interpret([row({ merchantId: "OTHER" })]).state, "mismatch");
+  assert.equal(interpret([row({ orderNumber: `PFC777-${REF}` })]).state, "pending_reconciliation");
+});

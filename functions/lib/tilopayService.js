@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const defaultApi = require("./tilopayApi");
 const { computeTotalsCRC: defaultPricing } = require("./pricing");
 const { parseMinorCRC, minorToCRC } = require("./paymentMoney");
+const { normalizeInventoryStock } = require("./inventoryStock");
 const {
   PAYABLE_STATUSES, validDocumentId, orderOwnerUid, isPaidOrder, snapshotFingerprint,
   makeSnapshot, currentSnapshot, canonicalItem, attemptsOf, checkoutLockId,
@@ -47,8 +48,10 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       const validMode = c.mode === "test" || c.mode === "live";
       const merchantId = typeof c.merchantId === "string" ? c.merchantId.trim() : "";
       const orderPrefix = typeof c.orderPrefix === "string" ? c.orderPrefix.trim() : "";
-      const identityValid = /^[A-Za-z0-9_-]{1,100}$/.test(merchantId)
-        && (!orderPrefix || /^[A-Za-z0-9_]{1,40}$/.test(orderPrefix));
+      // Test remains usable before the integration exposes a merchant/prefix.
+      // Live requires both identities, and every attempt keeps its original mode.
+      const identityValid = c.mode === "test" || (/^[A-Za-z0-9_-]{1,100}$/.test(merchantId)
+        && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(orderPrefix));
       return { enabled: c.enabled === true && validMode && identityValid,
         mode: validMode ? c.mode : "test", merchantId, orderPrefix };
     } catch {
@@ -171,14 +174,14 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
           for (const line of stockLines) {
             const ref = db.collection("products").doc(line.productId).collection("variants").doc(line.variantId);
             const variantSnap = await t.get(ref);
-            const variant = variantSnap.data();
-            const stock = variant?.stock ?? 0;
-            const reserved = variant?.reservedStock ?? 0;
-            if (!variantSnap.exists || !Number.isSafeInteger(stock) || !Number.isSafeInteger(reserved)
-              || stock < 0 || reserved < 0 || stock - reserved < line.quantity) {
+            if (!variantSnap.exists) fail("failed-precondition", "Variante no encontrada para reservar inventario.");
+            let inventory;
+            try { inventory = normalizeInventoryStock(variantSnap.data(), { context: "tilopay_reserve" }); }
+            catch { fail("failed-precondition", "El stock del producto requiere revisión."); }
+            if (inventory.stock - inventory.reservedStock < line.quantity) {
               fail("failed-precondition", "Stock insuficiente para este pedido.");
             }
-            inventoryWrites.push({ ref, reservedStock: reserved + line.quantity });
+            inventoryWrites.push({ ref, reservedStock: inventory.reservedStock + line.quantity });
           }
           reservation = { version: 1, state: "reserved", lines: stockLines, createdAt: now() };
         }
@@ -271,7 +274,8 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       try {
         const merchantId = attempt.merchantId || (legacy ? cfg.merchantId : "");
         const response = await api.tpFetch("/api/v1/consult", { token,
-          body: { key: c.key, orderNumber: attempt.orderNumber, merchantId } });
+          body: { key: c.key, orderNumber: attempt.orderNumber,
+            ...(attempt.mode === "live" ? { merchantId } : {}) } });
         let r = !response.ok || response.jsonValid === false
           ? { state: "pending_reconciliation", reason: "Tilopay no devolvió una consulta válida." }
           : api.interpretConsult(response.data, { orderNumber: attempt.orderNumber,
@@ -303,7 +307,10 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
         const attempt = tpd.attemptsById[observation.key];
         if (!attempt) continue;
         const tx = observation.r.tx;
-        const ledgerId = snapshotFingerprint({ merchantId: attempt.merchantId,
+        const ledgerId = snapshotFingerprint({
+          // Test has no required merchant identity: scope its registry to the
+          // server's integration fingerprint, never to an unverified response.
+          merchantId: attempt.mode === "test" ? `test-key:${attempt.keyFingerprint}` : attempt.merchantId,
           mode: attempt.mode, id: String(tx.id_tilopay) });
         observation.ledgerId = ledgerId;
         if (!ledgerReads.has(ledgerId)) {
@@ -362,7 +369,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
         const refData = referenceReads.get(key);
         const claim = ledgerWrites.get(observation.ledgerId) || ledger.data;
         if (r.env !== attempt.mode || r.amountMinor !== attempt.amountMinor
-          || String(tx.merchantId) !== attempt.merchantId) {
+          || (attempt.mode === "live" && String(tx.merchantId) !== attempt.merchantId)) {
           if (!FINAL_ATTEMPT_STATES.has(a.status)) a.status = "mismatch";
           a.reason = "La evidencia no coincide con el contexto inmutable del intento.";
           a.reconciliationNeedsReview = true; tpd.reconciliationNeedsReview = true; needsReview = true; continue;
@@ -394,6 +401,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
         }
         a.idTilopay = String(tx.id_tilopay); a.returnedOrderNumber = tx.orderNumber;
         a.environment = tx.environment; a.capture = tx.capture;
+        a.observedMerchantId = typeof tx.merchantId === "string" ? tx.merchantId : "";
         a.validatedAmount = minorToCRC(r.amountMinor); a.validatedAmountMinor = r.amountMinor;
         a.financialEvidence = r.state === "approved" ? "captured" : "authorized";
         if (!claim || (claim.orderId === ctx.id && claim.attemptKey === key)) {

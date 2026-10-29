@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { isValidTilopayPaymentUrl as safePaymentUrl } from '../../services/payments/tilopayUrl';
 import { useCart } from '../../contexts/CartContext';
 import { tilopayConfirm, tilopayCreatePayment } from '../../services/payments/tilopayClient';
 
@@ -19,13 +20,7 @@ function removePending(uid, orderId) {
   if (!readPending(uid, orderId)) return;
   try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* Browser storage is optional. */ }
 }
-function safePaymentUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' && !url.username && !url.password && (!url.port || url.port === '443')
-      && ['secure.tilopay.com', 'app.tilopay.com'].includes(url.hostname);
-  } catch { return false; }
-}
+
 
 /** URL parameters never decide payment state: only authenticated server confirmation does. */
 export default function TilopayReturnPage() {

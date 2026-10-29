@@ -134,11 +134,16 @@ function identity(value) {
   return typeof value === "string" && value.length > 0 && value.length <= 128 && !/\s/.test(value) ? value : null;
 }
 
-function matchesOrderNumber(value, original, orderPrefix = "") {
+function matchesOrderNumber(value, original, orderPrefix = "", mode = "live") {
   if (typeof value !== "string" || typeof original !== "string" || !original) return false;
   if (value === original) return true;
-  return typeof orderPrefix === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(orderPrefix)
-    && value === `${orderPrefix}-${original}`;
+  if (typeof orderPrefix === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(orderPrefix)
+      && value === `${orderPrefix}-${original}`) return true;
+  // Test integrations may not expose their merchant prefix yet. This exception
+  // never applies to live attempts and still requires the full original reference.
+  if (mode !== "test" || !value.endsWith(`-${original}`)) return false;
+  const prefix = value.slice(0, -(original.length + 1));
+  return /^[A-Za-z0-9]{1,64}$/.test(prefix);
 }
 
 function hasErrorPayload(data) {
@@ -160,8 +165,12 @@ function isValidPaymentUrl(value) {
   if (typeof value !== "string") return false;
   try {
     const url = new URL(value);
+    const suffix = ".tilopay.com";
+    const host = url.hostname;
+    const labels = host.endsWith(suffix) ? host.slice(0, -suffix.length).split(".") : [];
     return url.protocol === "https:" && !url.username && !url.password && (!url.port || url.port === "443")
-      && ["secure.tilopay.com", "app.tilopay.com"].includes(url.hostname);
+      && host.length <= 253 && labels.length > 0
+      && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
   } catch { return false; }
 }
 
@@ -175,10 +184,11 @@ function interpretConsult(data, {
 } = {}) {
   const pending = (reason, tx, env) => ({ state: "pending_reconciliation", reason, ...(tx ? { tx } : {}), ...(env ? { env } : {}) });
   const expectedMerchant = identity(merchantId);
-  if (typeof orderNumber !== "string" || !orderNumber || !["live", "test"].includes(mode) || !expectedMerchant) {
+  if (typeof orderNumber !== "string" || !orderNumber || !["live", "test"].includes(mode)
+      || (mode === "live" && !expectedMerchant)) {
     return pending("Falta el contexto verificado del intento (referencia, modo o comercio).");
   }
-  if (orderPrefix !== "" && (typeof orderPrefix !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(orderPrefix))) {
+  if (mode === "live" && (typeof orderPrefix !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(orderPrefix))) {
     return pending("El prefijo esperado del comercio no es válido.");
   }
   let expectedMinor;
@@ -190,7 +200,7 @@ function interpretConsult(data, {
   if (!validConsultEnvelope(data)) return pending("Respuesta de consult ilegible, incompleta o con error.");
   if (looksNotFound(data)) return { state: "not_found" };
   if (data.response.some((row) => !isObject(row))) return pending("consult contiene filas malformadas.");
-  const mine = data.response.filter((row) => matchesOrderNumber(row.orderNumber, orderNumber, orderPrefix));
+  const mine = data.response.filter((row) => matchesOrderNumber(row.orderNumber, orderNumber, orderPrefix, mode));
   if (!mine.length) return pending("Las filas de consult no coinciden con la referencia y el prefijo esperados.");
   if (mine.some((row) => typeof row.type !== "string" || row.type.trim().toLowerCase() !== "payment")) {
     return pending("Hay modificaciones, reembolsos o tipos desconocidos; se requiere reconciliación.", mine[0]);
@@ -203,16 +213,16 @@ function interpretConsult(data, {
     const env = classifyEnvironment(row.environment);
     const code = (typeof row.code === "string" && row.code.trim())
       || (typeof row.code === "number" && Number.isSafeInteger(row.code) && row.code >= 0 ? String(row.code) : null);
-    if (!id || !rowMerchant || !env || !code || typeof row.currency !== "string" || !row.currency.trim()
+    if (!id || (mode === "live" && !rowMerchant) || !env || !code || typeof row.currency !== "string" || !row.currency.trim()
         || typeof row.amount !== "string") return pending("Faltan campos transaccionales válidos en consult.", row, env);
-    if (rowMerchant !== expectedMerchant) return { state: "mismatch", tx: row, env, reason: "El comercio de la transacción no coincide con el intento." };
+    if (mode === "live" && rowMerchant !== expectedMerchant) return { state: "mismatch", tx: row, env, reason: "El comercio de la transacción no coincide con el intento." };
     if (row.currency.trim().toUpperCase() !== "CRC") return { state: "mismatch", tx: row, env, reason: "La moneda no coincide con CRC." };
     let paidMinor;
     try { paidMinor = parseMinorCRC(row.amount); } catch { return pending("El monto de consult no es un decimal válido.", row, env); }
     if (paidMinor !== expectedMinor) return { state: "mismatch", tx: row, env, reason: "El monto no coincide con el intento original." };
     if (env !== mode) return { state: "mismatch", tx: row, env, reason: "El entorno de la transacción no coincide con el intento." };
     const capture = typeof row.capture === "string" ? row.capture.trim().toLowerCase() : "";
-    validated.push({ tx: { ...row, id_tilopay: id, merchantId: rowMerchant, amount: formatMinorCRC(paidMinor) }, id, env, code, capture, amountMinor: paidMinor });
+    validated.push({ tx: { ...row, id_tilopay: id, merchantId: rowMerchant || "", amount: formatMinorCRC(paidMinor) }, id, env, code, capture, amountMinor: paidMinor });
   }
   const approved = validated.filter((row) => row.code === "1");
   if (!approved.length) return { state: "declined", tx: validated[0].tx, env: validated[0].env };

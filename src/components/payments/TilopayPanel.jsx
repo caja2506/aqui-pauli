@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { isValidTilopayPaymentUrl as safePaymentUrl } from '../../services/payments/tilopayUrl';
 import { useCart } from '../../contexts/CartContext';
 import { formatCRC } from '../../utils/formatters';
 import { tilopayCreatePayment } from '../../services/payments/tilopayClient';
@@ -19,13 +20,7 @@ function readPending(uid) {
 function writePending(value) {
   try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch { /* Server checkout locks still protect the order. */ }
 }
-function safePaymentUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' && !url.username && !url.password && (!url.port || url.port === '443')
-      && ['secure.tilopay.com', 'app.tilopay.com'].includes(url.hostname);
-  } catch { return false; }
-}
+
 
 export default function TilopayPanel({ totalCRC, validateForm, createPendingOrder, canton }) {
   const { user } = useAuth();
