@@ -8,6 +8,18 @@ export const paypalGetQuote = call('paypalGetQuote');
 export const paypalCreateOrder = call('paypalCreateOrder');
 export const paypalCaptureOrder = call('paypalCaptureOrder');
 
+// PayPal starts with a canonical order and an atomic inventory reservation.
+// No price, supply type or financial state from the cart is sent as authority.
+export const createPaypalPendingOrder = (order) => call('createOrderWithReservation')({
+  paymentMethod: 'paypal',
+  customerName: order.customerName,
+  customerEmail: order.customerEmail,
+  customerPhone: order.customerPhone,
+  shippingAddress: order.shippingAddress,
+  shippingType: order.shippingType,
+  items: order.items.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),
+});
+
 let sdkPromise = null;
 
 /** Carga el JS SDK de PayPal (una sola vez) con moneda USD. */
