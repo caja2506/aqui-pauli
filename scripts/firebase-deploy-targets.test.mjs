@@ -16,11 +16,12 @@ test('correcciones del sorteo y sus reglas conservan el despliegue aislado', () 
   assert.equal(firebaseDeployTargets(['functions/giveaway.js', 'firestore.rules']), isolated);
   assert.equal(firebaseDeployTargets(['functions/giveaway.js', 'functions/lib/giveawayCatalog.mjs',
     'functions/lib/giveawayConfig.json', 'functions/test/giveaway.test.js']), isolated);
-  assert.equal(firebaseDeployTargets(['functions/lib/giveawayPhone.mjs']), isolated);
+  const phoneTargets = 'firestore:rules,functions:default:createOrderWithReservation,functions:default:deleteOrder,functions:default:manageCashOnDeliveryOrder,functions:default:enterGiveaway';
+  assert.equal(firebaseDeployTargets(['functions/lib/giveawayPhone.mjs']), phoneTargets);
   assert.equal(firebaseDeployTargets(['functions/lib/catalogPrice.mjs',
     'functions/lib/giveawayCatalog.mjs', 'src/utils/productPrice.js']), isolated);
   assert.equal(firebaseDeployTargets(['functions/giveaway.js', 'functions/lib/giveawayPhone.mjs',
-    'functions/test/giveaway.test.js', 'src/pages/store/GiveawayPage.jsx']), isolated);
+    'functions/test/giveaway.test.js', 'src/pages/store/GiveawayPage.jsx']), phoneTargets);
 });
 
 test('cambios de funciones compartidas, dependencias o endpoints existentes conservan el deploy original', () => {
@@ -34,12 +35,22 @@ test('cambios de funciones compartidas, dependencias o endpoints existentes cons
 });
 
 test('notas y pedidos publican sus callables y reglas sin desplegar pasarelas', () => {
-  const orders = 'firestore:rules,functions:default:createOrderWithReservation,functions:default:deleteOrder';
-  for (const path of ['functions/orders.js', 'functions/lib/customerNotes.mjs',
+  const orders = 'firestore:rules,functions:default:createOrderWithReservation,functions:default:deleteOrder,functions:default:manageCashOnDeliveryOrder';
+  for (const path of ['functions/orders.js', 'functions/lib/customerNotes.mjs', 'functions/lib/cashOnDelivery.js',
     'functions/test/order-payment-integration.test.js', 'functions/test/firestore-payments.emulator.test.js']) {
     assert.equal(firebaseDeployTargets([path, 'firestore.rules', 'src/services/orderService.js']), orders);
   }
   assert.equal(firebaseDeployTargets(['functions/orders.js', 'functions/giveaway.js']), `${orders},functions:default:enterGiveaway`);
+});
+
+test('contra entrega publica pedidos y sus guardias manuales, sin endpoints de pasarelas', () => {
+  const manual = 'functions:default:submitPaymentProof,functions:default:approvePaymentManually';
+  assert.equal(firebaseDeployTargets(['functions/payments.js']), `firestore:rules,${manual}`);
+  assert.equal(firebaseDeployTargets(['functions/orders.js', 'functions/payments.js',
+    'functions/lib/cashOnDelivery.js', 'functions/test/order-payment-integration.test.js',
+    'functions/test/firestore-payments.emulator.test.js', 'firestore.rules']),
+  `firestore:rules,functions:default:createOrderWithReservation,functions:default:deleteOrder,functions:default:manageCashOnDeliveryOrder,${manual}`);
+  assert.ok(firebaseDeployTargets([]).includes('functions:default:manageCashOnDeliveryOrder'));
 });
 
 test('otros cambios del entry point o historial incompleto no se confunden con el sorteo', () => {

@@ -113,6 +113,375 @@ function event(beforeStatus, afterStatus, time = new Date().toISOString()) {
     after: { data: () => ({ status: afterStatus }) } } };
 }
 
+const cashRequest = (extra = {}, uid = "u1") => request({
+  customerName: "Ana", paymentMethod: "contra_entrega",
+  customerEmail: "ana@example.invalid", customerPhone: "88887777",
+  shippingAddress: { provincia: "Alajuela", canton: "Grecia", distrito: "San José", señas: "Portón principal" },
+  items: [{ productId: "p1", variantId: "v1", quantity: 1 }], ...extra,
+}, uid);
+
+test("contra entrega: total, dueño y pago pendiente canónicos; reserva stock sin cobrar", async () => {
+  const h = loadHandlers(catalog());
+  const input = cashRequest({
+    uid: "other", customerUid: "other", subtotal: 1, shippingCost: -999, total: 1,
+    amountDueOnDelivery: 1, remainingTotal: 0, paymentAmount: 90000, paymentStatus: "pagado", status: "entregado",
+    customerCedula: "  1-2345-6789  ", isGuest: false, customerNotes: "  Tocar el timbre.  ",
+    items: [{ productId: "p1", variantId: "v1", quantity: 2, price: 1, stock: 999, supplyType: "bajo_pedido" }],
+  });
+  input.auth.token = { firebase: { sign_in_provider: "anonymous" } };
+  const result = await h.orders.createOrderWithReservation(input);
+  const order = h.get(`orders/${result.orderId}`);
+  assert.deepEqual(result, { orderId: result.orderId, orderNumber: "AP-TEST", subtotal: 90000,
+    shippingCost: 0, total: 90000, paymentMethod: "contra_entrega", paymentStatus: "pendiente", amountDueOnDelivery: 90000 });
+  assert.equal(order.uid, "u1");
+  assert.equal(order.customerUid, "u1");
+  assert.equal(order.customerCedula, "1-2345-6789");
+  assert.equal(order.isGuest, true);
+  assert.equal(order.customerNotes, "Tocar el timbre.");
+  assert.equal(order.status, "pendiente_pago");
+  assert.equal(order.paymentStatus, "pendiente");
+  assert.equal(order.paymentAmount, 0);
+  assert.equal(order.paymentTransactionId, "");
+  assert.equal(order.total, 90000);
+  assert.equal(order.remainingTotal, order.total);
+  assert.equal(order.hasBackorder, false);
+  assert.equal(order.depositTotal, 0);
+  assert.equal(order.itemsSummary[0].supplyType, "stock_propio");
+  assert.equal(order.itemsSummary[0].price, 45000);
+  assert.equal(h.get(VARIANT).stock, 10);
+  assert.equal(h.get(VARIANT).reservedStock, 2);
+  assert.equal(order.inventoryReservation.state, "reserved");
+  assert.equal(order.fulfillment, undefined);
+  assert.equal(h.effects.crmCreated, 0);
+  assert.equal(h.get("crm_contacts/u1"), undefined);
+  assert.equal(h.effects.paypal.length + h.effects.telegram + h.effects.email, 0);
+});
+
+test("contra entrega: requiere sesión y no acepta dueño ni modalidad invitado del navegador", async () => {
+  const h = loadHandlers(catalog());
+  await assert.rejects(h.orders.createOrderWithReservation({ data: cashRequest().data }), { code: "unauthenticated" });
+  assert.equal(h.stats.commits, 0);
+  const result = await h.orders.createOrderWithReservation(cashRequest({ uid: "victim", customerUid: "victim", isGuest: true }));
+  const order = h.get(`orders/${result.orderId}`);
+  assert.equal(order.uid, "u1");
+  assert.equal(order.customerUid, "u1");
+  assert.equal(order.isGuest, false);
+});
+
+test("contra entrega: teléfono normaliza +506, 506, espacios y guiones sin truncar números inválidos", async () => {
+  for (const customerPhone of ["88887777", "+506 8888-7777", "506 8888 7777", " 8888 - 7777 "]) {
+    const h = loadHandlers(catalog());
+    const result = await h.orders.createOrderWithReservation(cashRequest({ customerPhone }));
+    assert.equal(h.get(`orders/${result.orderId}`).customerPhone, "88887777");
+  }
+  for (const customerPhone of ["", "8888777711", "+5068888777711", "18887777", "38887777", "98887777", "8888x777", 88887777, null]) {
+    const h = loadHandlers(catalog()); const before = structuredClone(h.store);
+    await assert.rejects(h.orders.createOrderWithReservation(cashRequest({ customerPhone })),
+      { code: "invalid-argument", message: /8 dígitos/ });
+    assert.deepEqual(h.store, before);
+    assert.equal(h.effects.crmCreated, 0);
+  }
+});
+
+test("contra entrega: contacto y dirección incompletos no reservan inventario", async () => {
+  for (const extra of [
+    { customerName: "  " }, { customerEmail: "sin-correo" }, { customerEmail: "" },
+    ...["provincia", "canton", "distrito", "señas"].map(key => ({
+      shippingAddress: { ...cashRequest().data.shippingAddress, [key]: " " },
+    })),
+  ]) {
+    const h = loadHandlers(catalog()); const before = structuredClone(h.store);
+    await assert.rejects(h.orders.createOrderWithReservation(cashRequest(extra)), { code: "invalid-argument" });
+    assert.deepEqual(h.store, before);
+    assert.equal(h.stats.commits, 0);
+    assert.equal(h.effects.crmCreated, 0);
+  }
+});
+
+test("contra entrega: rechaza Bajo pedido y mixtos aunque el cliente falsifique supplyType y adelanto", async () => {
+  for (const mixed of [false, true]) for (const inherited of [false, true]) {
+    const seed = catalog();
+    seed["products/p2"] = { active: true, name: "Bolso", basePrice: 60000, supplyType: "bajo_pedido" };
+    seed["products/p2/variants/v2"] = { active: true, name: "Negro", price: 60000, stock: 10, reservedStock: 0,
+      ...(inherited ? {} : { supplyType: "bajo_pedido" }) };
+    const h = loadHandlers(seed);
+    const before = structuredClone(h.store);
+    await assert.rejects(h.orders.createOrderWithReservation(cashRequest({ hasBackorder: false, depositTotal: 0,
+      items: [...(mixed ? [{ productId: "p1", variantId: "v1", quantity: 1 }] : []),
+        { productId: "p2", variantId: "v2", quantity: 1, supplyType: "stock_propio", depositAmount: 0 }],
+    })), { code: "failed-precondition", message: /todos los productos están en stock.*50%/ });
+    assert.deepEqual(h.store, before);
+    assert.equal(h.stats.commits, 0);
+    assert.equal(h.effects.crmCreated + h.effects.telegram + h.effects.email, 0);
+  }
+});
+
+test("contra entrega: catálogo inactivo, eliminado, agotado o totalmente reservado no crea pedidos", async () => {
+  for (const mutate of [
+    seed => { seed["products/p1"].active = false; },
+    seed => { seed["products/p1"].deleted = true; },
+    seed => { seed[VARIANT].active = false; },
+    seed => { seed[VARIANT].deleted = true; },
+    seed => { seed[VARIANT].stock = 0; },
+    seed => { seed[VARIANT].reservedStock = seed[VARIANT].stock; },
+  ]) {
+    const seed = catalog(); mutate(seed);
+    const h = loadHandlers(seed); const before = structuredClone(h.store);
+    await assert.rejects(h.orders.createOrderWithReservation(cashRequest()), { code: "failed-precondition" });
+    assert.deepEqual(h.store, before);
+    assert.equal(h.stats.commits, 0);
+    assert.equal(h.effects.crmCreated, 0);
+  }
+});
+
+test("contra entrega: pedidos simultáneos respetan stock ya reservado sin sobreventa", async () => {
+  const seed = catalog(); Object.assign(seed[VARIANT], { stock: 2, reservedStock: 1 });
+  const h = loadHandlers(seed);
+  const results = await Promise.allSettled([
+    h.orders.createOrderWithReservation(cashRequest({}, "u1")),
+    h.orders.createOrderWithReservation(cashRequest({}, "u2")),
+  ]);
+  assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+  assert.equal(results.find(result => result.status === "rejected").reason.code, "failed-precondition");
+  assert.equal(h.get(VARIANT).reservedStock, 2);
+  assert.equal(h.get(VARIANT).stock, 2);
+  assert.ok(h.stats.retries > 0);
+});
+
+test("contra entrega: cambio de catálogo a Bajo pedido durante transacción invalida la reserva", async () => {
+  const h = loadHandlers(catalog());
+  let changed = false;
+  h.db.beforeCommit = async ({ db }) => {
+    if (!changed) { changed = true; await db.doc(VARIANT).update({ supplyType: "bajo_pedido" }); }
+  };
+  await assert.rejects(h.orders.createOrderWithReservation(cashRequest()), { code: "failed-precondition" });
+  assert.ok(h.stats.retries > 0);
+  assert.equal(h.get(VARIANT).reservedStock, 0);
+  assert.equal(Object.keys(h.store).filter(key => key.startsWith("orders/")).length, 0);
+  assert.equal(h.effects.crmCreated, 0);
+});
+
+test("contra entrega: cancelación repetida libera la reserva una sola vez sin descontar stock ni cobrar", async () => {
+  const h = loadHandlers(catalog());
+  const result = await h.orders.createOrderWithReservation(cashRequest());
+  const path = `orders/${result.orderId}`;
+  await h.db.doc(path).update({ status: "cancelado" });
+  const cancellation = { ...event("pendiente_pago", "cancelado"), params: { orderId: result.orderId } };
+  await Promise.all([h.orders.onOrderStatusChange(cancellation), h.orders.onOrderStatusChange(cancellation)]);
+  assert.equal(h.get(VARIANT).stock, 10);
+  assert.equal(h.get(VARIANT).reservedStock, 0);
+  assert.equal(h.get(path).inventoryReservation.state, "released");
+  assert.equal(h.get(path).paymentStatus, "pendiente");
+  assert.equal(h.effects.paypal.length + h.effects.telegram + h.effects.email, 0);
+});
+
+test("contra entrega: deleteOrder no borra su registro ni libera reservas aunque el actor sea admin", async () => {
+  const seed = catalog(); seed["users_roles/admin"] = { role: "admin" };
+  seed[VARIANT].reservedStock = 2;
+  const h = loadHandlers(seed);
+  const result = await h.orders.createOrderWithReservation(cashRequest());
+  assert.equal(h.get(VARIANT).reservedStock, 3);
+  await assert.rejects(h.orders.deleteOrder(request({ orderId: result.orderId })), { code: "permission-denied" });
+  assert.equal(h.get(VARIANT).reservedStock, 3);
+  for (const status of ["pendiente_pago", "entregado"]) {
+    await h.db.doc(`orders/${result.orderId}`).update({ status });
+    const before = structuredClone(h.store);
+    await assert.rejects(h.orders.deleteOrder(request({ orderId: result.orderId }, "admin")), { code: "failed-precondition" });
+    assert.deepEqual(h.store, before);
+  }
+});
+
+async function pendingCashOrder({ status = "pendiente_pago", seed = catalog() } = {}) {
+  seed["users_roles/admin"] = { role: "admin" };
+  const h = loadHandlers(seed);
+  const created = await h.orders.createOrderWithReservation(cashRequest({
+    items: [{ productId: "p1", variantId: "v1", quantity: 2 }],
+  }));
+  const path = `orders/${created.orderId}`;
+  if (status !== "pendiente_pago") await h.db.doc(path).update({ status });
+  const manage = (action, uid = "admin") => h.orders.manageCashOnDeliveryOrder(request({ orderId: created.orderId, action }, uid));
+  return { h, created, path, manage };
+}
+
+test("contra entrega: gestionar efectivo requiere admin real y acción válida", async () => {
+  const { h, created, manage } = await pendingCashOrder();
+  const before = structuredClone(h.store);
+  await assert.rejects(h.orders.manageCashOnDeliveryOrder({ data: { orderId: created.orderId, action: "confirm_payment" } }),
+    { code: "unauthenticated" });
+  for (const action of ["confirm_payment", "cancel"]) {
+    await assert.rejects(manage(action, "u1"), { code: "permission-denied" });
+    await assert.rejects(h.orders.manageCashOnDeliveryOrder({ auth: { uid: "u1", token: { admin: true, role: "admin" } },
+      data: { orderId: created.orderId, action } }), { code: "permission-denied" });
+  }
+  for (const data of [{ orderId: "bad/id", action: "cancel" }, { orderId: created.orderId, action: "paid" }]) {
+    await assert.rejects(h.orders.manageCashOnDeliveryOrder(request(data, "admin")), { code: "invalid-argument" });
+  }
+  await assert.rejects(h.orders.manageCashOnDeliveryOrder(request({ orderId: "missing", action: "cancel" }, "admin")),
+    { code: "not-found" });
+  assert.deepEqual(h.store, before);
+});
+
+test("contra entrega: confirmar efectivo consume reserva, acredita total y CRM una sola vez bajo concurrencia", async () => {
+  const seed = catalog(); seed[VARIANT].reservedStock = 3;
+  seed["crm_contacts/u1"] = { email: "actual@example.invalid", totalOrders: 1, totalSpent: 5000, sourceChannels: ["instagram"] };
+  const { h, created, path, manage } = await pendingCashOrder({ seed });
+  const responses = await Promise.all([manage("confirm_payment"), manage("confirm_payment")]);
+  assert.equal(responses.filter(value => value.alreadyApplied).length, 1);
+  assert.ok(h.stats.retries > 0);
+  const order = h.get(path);
+  assert.equal(order.status, "por_preparar");
+  assert.equal(order.paymentStatus, "pagado");
+  assert.equal(order.paymentAmount, 90000);
+  assert.equal(order.remainingTotal, 0);
+  assert.equal(order.cashOnDelivery.state, "collected");
+  assert.equal(order.cashOnDelivery.collectedBy, "admin");
+  assert.equal(order.inventoryReservation.state, "consumed");
+  assert.equal(order.fulfillment.state, "applied");
+  assert.equal(h.get(VARIANT).stock, 8);
+  assert.equal(h.get(VARIANT).reservedStock, 3);
+  const crm = h.get("crm_contacts/u1");
+  assert.equal(crm.totalOrders, 2);
+  assert.equal(crm.totalSpent, 95000);
+  assert.equal(crm.email, "actual@example.invalid");
+  assert.deepEqual(crm.sourceChannels, ["instagram", "web"]);
+  assert.equal(crm.funnelStage, "recurrente");
+  const interaction = h.get(`crm_contacts/u1/interactions/order_${created.orderId}_paid`);
+  assert.equal(interaction.amount, 90000);
+  assert.equal(interaction.metadata.paymentMethod, "contra_entrega");
+  const after = structuredClone(h.store);
+  assert.equal((await manage("confirm_payment")).alreadyApplied, true);
+  assert.deepEqual(h.store, after);
+  assert.equal(h.effects.paypal.length + h.effects.telegram + h.effects.email, 0);
+});
+
+test("contra entrega: cobro después de preparar, enviar o entregar preserva el estado de entrega", async () => {
+  for (const status of ["por_preparar", "preparando", "enviado", "entregado"]) {
+    const { h, path, manage } = await pendingCashOrder({ status });
+    const result = await manage("confirm_payment");
+    assert.equal(result.status, status);
+    assert.equal(h.get(path).status, status);
+    assert.equal(h.get(path).paymentStatus, "pagado");
+    assert.equal(h.get(VARIANT).stock, 8);
+    assert.equal(h.get("crm_contacts/u1").totalOrders, 1);
+    assert.equal(h.get("crm_contacts/u1").totalSpent, 90000);
+  }
+});
+
+test("contra entrega: cancelar desde callable libera solo su reserva y no registra dinero ni CRM", async () => {
+  const seed = catalog(); seed[VARIANT].reservedStock = 3;
+  const { h, created, path, manage } = await pendingCashOrder({ seed, status: "enviado" });
+  const result = await Promise.all([manage("cancel"), manage("cancel")]);
+  assert.equal(result.filter(value => value.alreadyApplied).length, 1);
+  assert.equal(h.get(VARIANT).stock, 10);
+  assert.equal(h.get(VARIANT).reservedStock, 3);
+  assert.equal(h.get(path).status, "cancelado");
+  assert.equal(h.get(path).paymentStatus, "pendiente");
+  assert.equal(h.get(path).paymentAmount, 0);
+  assert.equal(h.get(path).remainingTotal, 0);
+  assert.equal(h.get(path).cashOnDelivery.state, "cancelled");
+  assert.equal(h.get(path).inventoryReservation.state, "released");
+  assert.equal(h.get(path).fulfillment, undefined);
+  assert.equal(h.get("crm_contacts/u1"), undefined);
+  const after = structuredClone(h.store);
+  const cancellation = { ...event("enviado", "cancelado"), params: { orderId: created.orderId } };
+  await Promise.all([h.orders.onOrderStatusChange(cancellation), h.orders.onOrderStatusChange(cancellation)]);
+  assert.deepEqual(h.store, after);
+  await assert.rejects(manage("confirm_payment"), { code: "failed-precondition" });
+  assert.deepEqual(h.store, after);
+  assert.equal(h.effects.paypal.length + h.effects.telegram + h.effects.email, 0);
+});
+
+test("contra entrega: no se cancela un pedido cobrado ni uno ya entregado", async () => {
+  for (const collected of [false, true]) {
+    const { h, manage } = await pendingCashOrder({ status: collected ? "por_preparar" : "entregado" });
+    if (collected) await manage("confirm_payment");
+    const before = structuredClone(h.store);
+    await assert.rejects(manage("cancel"), { code: "failed-precondition" });
+    assert.deepEqual(h.store, before);
+  }
+});
+
+test("contra entrega: carrera entre cobro y cancelación aplica una sola acción coherente", async () => {
+  for (const actions of [["confirm_payment", "cancel"], ["cancel", "confirm_payment"]]) {
+    const { h, path, manage } = await pendingCashOrder();
+    const results = await Promise.allSettled(actions.map(action => manage(action)));
+    assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+    assert.equal(results.find(result => result.status === "rejected").reason.code, "failed-precondition");
+    const paid = h.get(path).cashOnDelivery.state === "collected";
+    assert.equal(h.get(VARIANT).reservedStock, 0);
+    assert.equal(h.get(VARIANT).stock, paid ? 8 : 10);
+    assert.equal(h.get(path).paymentAmount, paid ? 90000 : 0);
+    assert.equal(h.get("crm_contacts/u1")?.totalOrders || 0, paid ? 1 : 0);
+  }
+});
+
+test("contra entrega: inconsistencias de líneas, propietario, reserva o importes abortan el cobro sin efectos", async () => {
+  const cases = [
+    { paymentMethod: "sinpe" }, { cashOnDelivery: { version: 2, state: "pending" } }, { paypal: {} }, { tilopay: {} },
+    { total: 1 }, { total: "90000" }, { subtotal: -1 }, { remainingTotal: 1 }, { paymentAmount: 1 },
+    { paymentStatus: "pagado" }, { uid: "other" }, { status: "revision_manual" },
+    { inventoryReservation: { version: 1, state: "released", lines: [] } },
+    { inventoryReservation: { version: 1, state: "reserved", lines: [{ productId: "p1", variantId: "v1", quantity: 1 }] } },
+    { fulfillment: { state: "applied" } },
+  ];
+  for (const patch of cases) {
+    const { h, path, manage } = await pendingCashOrder();
+    await h.db.doc(path).update(patch);
+    const before = structuredClone(h.store);
+    await assert.rejects(manage("confirm_payment"), { code: "failed-precondition" });
+    assert.deepEqual(h.store, before);
+  }
+  for (const patch of [{ supplyType: "bajo_pedido" }, { supplyType: "" }, { price: 1 }, { lineTotal: 1 }, { quantity: 1 }]) {
+    const { h, path, manage } = await pendingCashOrder();
+    await h.db.doc(`${path}/items/item_0`).update(patch);
+    const before = structuredClone(h.store);
+    await assert.rejects(manage("confirm_payment"), { code: "failed-precondition" });
+    assert.deepEqual(h.store, before);
+  }
+});
+
+test("contra entrega: reserva faltante, variante borrada o CRM ya acreditado no causa efectos parciales", async () => {
+  for (const mutate of [
+    async h => h.db.doc(VARIANT).update({ reservedStock: 1 }),
+    async h => h.db.doc(VARIANT).update({ stock: 1 }),
+    async h => h.db.doc(VARIANT).delete(),
+    async (h, created) => h.db.doc(`crm_contacts/u1/interactions/order_${created.orderId}_paid`).set({ amount: 90000 }),
+  ]) {
+    const { h, created, manage } = await pendingCashOrder();
+    await mutate(h, created);
+    const before = structuredClone(h.store);
+    await assert.rejects(manage("confirm_payment"), { code: "failed-precondition" });
+    assert.deepEqual(h.store, before);
+  }
+});
+
+test("contra entrega: la reserva no expira por el cron legacy y no admite comprobante ni aprobación manual", async () => {
+  const { h, created, path } = await pendingCashOrder();
+  await h.db.doc(path).update({ createdAt: "2020-01-01T00:00:00.000Z" });
+  const before = structuredClone(h.store);
+  await h.schedulers.cleanExpiredReservations();
+  await assert.rejects(h.payments.submitPaymentProof(request({ orderId: created.orderId, amount: 90000,
+    proofUrl: "https://example.invalid/proof" })), { code: "failed-precondition" });
+  await assert.rejects(h.payments.approvePaymentManually(request({ orderId: created.orderId }, "admin")),
+    { code: "failed-precondition" });
+  assert.deepEqual(h.store, before);
+});
+
+test("contra entrega no cambia el contrato ni apartado de SINPE, PayPal y efectivo existente", async () => {
+  for (const paymentMethod of ["sinpe", "paypal", "efectivo"]) {
+    const seed = catalog(); seed[VARIANT].supplyType = "bajo_pedido";
+    const h = loadHandlers(seed);
+    const result = await h.orders.createOrderWithReservation(cashRequest({ paymentMethod }));
+    assert.deepEqual(Object.keys(result).sort(), ["orderId", "orderNumber"]);
+    const order = h.get(`orders/${result.orderId}`);
+    assert.equal(order.total, 45000);
+    assert.equal(order.depositTotal, 22500);
+    assert.equal(order.remainingTotal, 22500);
+    assert.equal(order.hasBackorder, true);
+    assert.equal(order.inventoryReservation, undefined);
+  }
+});
+
 test("createOrder: canonical prices/supplyType/owner; ignores client financial fields", async () => {
   const h = loadHandlers(catalog());
   const result = await h.orders.createOrderWithReservation(request({ customerName: "Ana", paymentMethod: "sinpe",

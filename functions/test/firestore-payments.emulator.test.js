@@ -47,6 +47,11 @@ describe("reglas de pagos (Firestore Emulator)", { skip: !process.env.FIRESTORE_
     },
     fulfillment: { version: 1, state: "applied", paidAttemptKey: "a1", paymentTransactionId: "123" },
   });
+  const cashFields = () => ({
+    paymentMethod: "contra_entrega", paymentAmount: 0, remainingTotal: 100,
+    cashOnDelivery: { version: 1, state: "pending", createdAt: "2026-10-30T00:00:00Z" },
+    inventoryReservation: { version: 1, state: "reserved", lines: [{ productId: "p1", variantId: "v1", quantity: 1 }] },
+  });
   const db = (uid) => env.authenticatedContext(uid).firestore();
   const seed = async (extra = {}) => env.withSecurityRulesDisabled(async (ctx) => {
     const d = ctx.firestore();
@@ -60,6 +65,109 @@ describe("reglas de pagos (Firestore Emulator)", { skip: !process.env.FIRESTORE_
     batch.set(sdk.doc(d, "orders/o1/items/item_0"), cartItem());
     await assertSucceeds(batch.commit());
     await assertFails(sdk.setDoc(sdk.doc(d, "orders/o1/items/item_1"), cartItem()));
+  });
+
+  test("contra entrega solo se crea por servidor, nunca por escritura directa del cliente o admin", async () => {
+    for (const uid of ["owner", "admin"]) {
+      const d = db(uid);
+      await assertFails(sdk.setDoc(sdk.doc(d, "orders/cod-direct"), order(uid, { paymentMethod: "contra_entrega" })));
+      const batch = sdk.writeBatch(d);
+      batch.set(sdk.doc(d, "orders/cod-batch"), order(uid, { paymentMethod: "contra_entrega", hasBackorder: false }));
+      batch.set(sdk.doc(d, "orders/cod-batch/items/item_0"), { ...cartItem(), supplyType: "bajo_pedido" });
+      await assertFails(batch.commit());
+    }
+    await assertFails(sdk.setDoc(sdk.doc(env.unauthenticatedContext().firestore(), "orders/cod-anonymous"),
+      order("owner", { paymentMethod: "contra_entrega" })));
+    await assertFails(sdk.setDoc(sdk.doc(db("owner"), "orders/cod-marker"),
+      order("owner", { paymentMethod: "sinpe", cashOnDelivery: { version: 1, state: "pending" } })));
+  });
+
+  test("contra entrega: dueño consulta su pedido pero no altera pagos, propietario, importe ni notas", async () => {
+    await seed(cashFields());
+    await assertSucceeds(sdk.getDoc(sdk.doc(db("owner"), "orders/o1")));
+    await assertSucceeds(sdk.getDoc(sdk.doc(db("owner"), "orders/o1/items/item_0")));
+    await assertFails(sdk.getDoc(sdk.doc(db("other"), "orders/o1")));
+    for (const patch of [
+      { uid: "other" }, { customerUid: "other" }, { total: 1 }, { remainingTotal: 0 },
+      { paymentStatus: "pagado" }, { status: "enviado" }, { paymentAmount: 100 },
+      { paymentStatus: "verificando", paymentProofUrl: "https://example.test/proof" },
+      { paymentPhone: "88887777" }, { paymentMethod: "sinpe" },
+      { itemsSummary: [] }, { customerNotes: "Cambio después de confirmar" }, { updatedAt: "later" },
+    ]) await assertFails(sdk.updateDoc(sdk.doc(db("owner"), "orders/o1"), patch));
+    await assertFails(sdk.deleteDoc(sdk.doc(db("owner"), "orders/o1")));
+    await assertFails(sdk.deleteDoc(sdk.doc(db("admin"), "orders/o1")));
+  });
+
+  test("contra entrega: sus items no admiten cambios del navegador incluso sin marcador de reserva", async () => {
+    await seed({ paymentMethod: "contra_entrega" });
+    for (const uid of ["owner", "admin"]) {
+      await assertFails(sdk.setDoc(sdk.doc(db(uid), "orders/o1/items/new"), cartItem()));
+      await assertFails(sdk.updateDoc(sdk.doc(db(uid), "orders/o1/items/item_0"), { quantity: 2 }));
+      await assertFails(sdk.deleteDoc(sdk.doc(db(uid), "orders/o1/items/item_0")));
+    }
+  });
+
+  test("contra entrega: admin puede gestionar logística sin marcar pagado ni reescribir la reserva", async () => {
+    await seed(cashFields());
+    const ref = sdk.doc(db("admin"), "orders/o1");
+    await assertSucceeds(sdk.updateDoc(ref, { status: "por_preparar", notes: "Cobrar efectivo al entregar" }));
+    await assertSucceeds(sdk.updateDoc(ref, { status: "enviado", trackingNumber: "COD123" }));
+    await assertSucceeds(sdk.updateDoc(ref, { customerName: "Ana María", customerPhone: "88887778", customerEmail: "nuevo@example.test",
+      shippingAddress: { provincia: "Alajuela", canton: "Grecia", distrito: "San José", señas: "Portón" }, updatedAt: "later" }));
+    const pending = await assertSucceeds(sdk.getDoc(ref));
+    if (pending.data().paymentStatus !== "pendiente" || pending.data().paymentAmount !== 0) {
+      throw new Error("Gestionar la entrega no debe acreditar un pago");
+    }
+    for (const patch of [
+      { inventoryReservation: sdk.deleteField() }, { uid: "admin" }, { customerUid: "admin" },
+      { cashOnDelivery: sdk.deleteField() }, { cashOnDelivery: { version: 1, state: "collected" } },
+      { status: "entregado", paymentStatus: "pagado", paymentAmount: 100, remainingTotal: 0 },
+      { paymentStatus: "pagado" }, { paymentAmount: 100 }, { remainingTotal: 0 },
+      { total: 1 }, { subtotal: 1 }, { shippingCost: 0.01 }, { paymentMethod: "sinpe" },
+      { itemsSummary: [] }, { fulfillment: { version: 1, state: "applied" } },
+      { status: "cancelado" }, { status: "pagado" }, { status: "revision_manual" },
+    ]) await assertFails(sdk.updateDoc(ref, patch));
+    await assertSucceeds(sdk.updateDoc(ref, { status: "entregado" }));
+    await assertFails(sdk.updateDoc(ref, { status: "preparando" }));
+    await assertFails(sdk.deleteDoc(ref));
+  });
+
+  test("contra entrega: estados de logística avanzan sin retroceder aunque el dinero siga pendiente", async () => {
+    const stages = ["pendiente_pago", "por_preparar", "preparando", "enviado", "entregado"];
+    for (const [beforeIndex, beforeStatus] of stages.entries()) {
+      for (const [afterIndex, afterStatus] of stages.entries()) {
+        await seed({ ...cashFields(), status: beforeStatus });
+        const operation = sdk.updateDoc(sdk.doc(db("admin"), "orders/o1"), { status: afterStatus });
+        await (afterIndex >= beforeIndex ? assertSucceeds(operation) : assertFails(operation));
+      }
+    }
+  });
+
+  test("contra entrega: después de cobrar se avanza entrega sin modificar evidencia ni cancelar", async () => {
+    await seed({ ...cashFields(), status: "por_preparar", paymentStatus: "pagado", paymentAmount: 100, remainingTotal: 0,
+      cashOnDelivery: { version: 1, state: "collected", collectedBy: "admin" },
+      inventoryReservation: { version: 1, state: "consumed", lines: [{ productId: "p1", variantId: "v1", quantity: 1 }] },
+      fulfillment: { version: 1, state: "applied" } });
+    const ref = sdk.doc(db("admin"), "orders/o1");
+    await assertSucceeds(sdk.updateDoc(ref, { status: "enviado", trackingNumber: "COD123" }));
+    await assertSucceeds(sdk.updateDoc(ref, { status: "entregado" }));
+    for (const patch of [{ status: "cancelado" }, { status: "enviado" }, { paymentStatus: "pendiente" },
+      { paymentAmount: 0 }, { remainingTotal: 100 }, { fulfillment: sdk.deleteField() }]) {
+      await assertFails(sdk.updateDoc(ref, patch));
+    }
+  });
+
+  test("contra entrega: pedidos sin marcador no evaden el callable mediante la rama de otros medios", async () => {
+    await seed({ paymentMethod: "contra_entrega" });
+    const ref = sdk.doc(db("admin"), "orders/o1");
+    await assertFails(sdk.updateDoc(ref, { status: "cancelado" }));
+    await assertFails(sdk.updateDoc(ref, { status: "enviado" }));
+    await assertFails(sdk.updateDoc(ref, { paymentMethod: "sinpe" }));
+  });
+
+  test("el cliente no convierte un pedido manual en contra entrega para evitar la validación canónica", async () => {
+    await seed({ paymentMethod: "sinpe", hasBackorder: true, backorderDeposit: 50 });
+    await assertFails(sdk.updateDoc(sdk.doc(db("owner"), "orders/o1"), { paymentMethod: "contra_entrega" }));
   });
 
   test("notas del cliente son opcionales y admiten texto hasta 1000 caracteres en un pedido propio", async () => {
