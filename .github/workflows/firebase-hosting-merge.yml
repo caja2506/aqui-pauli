@@ -36,6 +36,8 @@ jobs:
         run: npm run test:giveaway
       - name: Test password recovery and Facebook without real emails or sign-ins
         run: npm run test:auth
+      - name: Test variant prices and storefront page titles
+        run: npm run test:store-audit
       - run: npm run build
 
       - name: Record the version to publish
