@@ -9,8 +9,6 @@ import {
   signInAnonymously,
   linkWithPopup,
   signInWithCredential,
-  signInWithRedirect,
-  linkWithRedirect,
   getRedirectResult,
   GoogleAuthProvider,
   FacebookAuthProvider
@@ -19,19 +17,18 @@ import { auth, googleProvider, facebookProvider } from '../firebase';
 
 const AuthContext = createContext(null);
 
-// Móvil o navegadores in-app (Facebook/Instagram/Messenger): los popups fallan, usamos redirect
-export function shouldUseRedirect() {
-  if (typeof navigator === 'undefined') return false;
-  return /FBAN|FBAV|FB_IAB|Instagram|Messenger|Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-}
-
 // Mensaje claro para errores de inicio de sesión social
 export function socialAuthErrorMessage(err, providerLabel = 'esa red') {
   switch (err?.code) {
     case 'auth/account-exists-with-different-credential':
-      return `Ya existe una cuenta con ese correo creada con otro método (por ejemplo Google o correo y contraseña). Entrá con ese método y no se pierde nada; si querés, después la vinculamos con ${providerLabel}.`;
+      return 'Ese correo ya tiene una cuenta con otro método. Ingresá con el método que usaste al registrarte, como Google o correo y contraseña.';
     case 'auth/popup-blocked':
-      return 'Tu navegador bloqueó la ventana emergente. Permitila e intentá de nuevo.';
+      return 'Tu navegador bloqueó la ventana de ingreso. Permití las ventanas emergentes e intentá de nuevo. Si estás en Instagram o Facebook, abrí aquipauli.com en Chrome o Safari.';
+    case 'auth/operation-not-supported-in-this-environment':
+    case 'auth/web-storage-unsupported':
+      return 'Abrí aquipauli.com en Chrome o Safari para completar el ingreso.';
+    case 'auth/unauthorized-domain':
+      return `No pudimos habilitar el ingreso con ${providerLabel} desde esta dirección. Podés ingresar con Google o correo y contraseña.`;
     case 'auth/popup-closed-by-user':
     case 'auth/cancelled-popup-request':
       return null; // el usuario canceló: sin mensaje
@@ -67,7 +64,7 @@ export function AuthProvider({ children }) {
           const credential = FacebookAuthProvider.credentialFromError(err) || GoogleAuthProvider.credentialFromError(err);
           if (credential) { try { await signInWithCredential(auth, credential); return; } catch (e) { err = e; } }
         }
-        console.error('Redirect sign-in error:', err);
+        console.error('Redirect sign-in error:', err?.code || 'auth/unknown');
         setRedirectError(socialAuthErrorMessage(err, 'Facebook'));
       });
   }, []);
@@ -111,13 +108,13 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Facebook: mismo patrón que Google. Si hay sesión de invitado se VINCULA (conserva el uid y los pedidos).
+  // Popup también en móvil: el authDomain configurado pertenece a Firebase y
+  // un redirect entre dominios puede fallar al bloquear almacenamiento de terceros.
+  // Vincular un invitado conserva su uid; entrar a una cuenta existente no fusiona pedidos.
   const signInWithFacebook = async () => {
     const current = auth.currentUser;
-    const useRedirect = shouldUseRedirect();
     try {
       if (current && current.isAnonymous) {
-        if (useRedirect) { await linkWithRedirect(current, facebookProvider); return; }
         try {
           await linkWithPopup(current, facebookProvider);
           forceRender();
@@ -130,10 +127,9 @@ export function AuthProvider({ children }) {
           throw err;
         }
       }
-      if (useRedirect) { await signInWithRedirect(auth, facebookProvider); return; }
       await signInWithPopup(auth, facebookProvider);
     } catch (error) {
-      console.error('Error signing in with Facebook:', error);
+      console.error('Error signing in with Facebook:', error?.code || 'auth/unknown');
       throw error;
     }
   };

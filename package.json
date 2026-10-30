@@ -8,6 +8,7 @@
     "build": "vite build",
     "test:checkout": "node --test scripts/checkout-render.test.mjs",
     "test:giveaway": "node scripts/giveaway-render.test.mjs && node scripts/giveaway-export.test.mjs && node scripts/firebase-deploy-targets.test.mjs",
+    "test:auth": "node scripts/password-reset.test.mjs && node scripts/facebook-auth.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

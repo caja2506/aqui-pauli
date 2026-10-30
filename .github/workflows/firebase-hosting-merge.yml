@@ -34,6 +34,8 @@ jobs:
         run: npm run test:checkout
       - name: Test giveaway forms, privacy choices and CSV export
         run: npm run test:giveaway
+      - name: Test password recovery and Facebook without real emails or sign-ins
+        run: npm run test:auth
       - run: npm run build
 
       - name: Record the version to publish

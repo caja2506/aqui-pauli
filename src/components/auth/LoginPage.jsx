@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ShoppingBag, Loader2 } from 'lucide-react';
 import { useAuth, socialAuthErrorMessage } from '../../contexts/AuthContext';
 import { useAuthFlags } from '../../hooks/useAuthFlags';
 import FacebookIcon from './FacebookIcon';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { requestPasswordReset, passwordResetErrorMessage, PASSWORD_RESET_SUCCESS } from '../../services/passwordReset';
 
 export default function LoginPage() {
   const { user, signInWithGoogle, signInWithFacebook, redirectError, signInWithEmail, createAccount } = useAuth();
@@ -16,14 +17,25 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [resetSent, setResetSent] = useState(false);
+  const resetPending = useRef(false);
 
   const redirectTo = location.state?.from || '/';
+  const displayedError = error || (mode !== 'reset' ? redirectError : null);
+
+  const changeMode = (nextMode) => {
+    if (isLoading || resetPending.current) return;
+    setMode(nextMode);
+    setError(null);
+    setResetSent(false);
+    setPassword('');
+  };
 
   const handleSuccess = () => {
     navigate(redirectTo, { replace: true });
   };
 
-  // Al volver de un redirect (Facebook en móvil / in-app) ya hay sesión: seguimos al destino
+  // Una sesión autenticada (incluido un redirect anterior) continúa al destino.
   useEffect(() => {
     if (user && !user.isAnonymous) navigate(redirectTo, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -48,13 +60,30 @@ export default function LoginPage() {
       await signInWithGoogle();
       handleSuccess();
     } catch (err) {
-      setError(err.message || 'Error al iniciar sesión');
+      setError(socialAuthErrorMessage(err, 'Google'));
       setIsLoading(false);
     }
   };
 
   const handleEmailSubmit = async (e) => {
     e.preventDefault();
+    if (isLoading || resetPending.current) return;
+    if (mode === 'reset') {
+      resetPending.current = true;
+      setIsLoading(true);
+      setError(null);
+      setResetSent(false);
+      try {
+        await requestPasswordReset(email);
+        setResetSent(true);
+      } catch (err) {
+        setError(passwordResetErrorMessage(err));
+      } finally {
+        resetPending.current = false;
+        setIsLoading(false);
+      }
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
@@ -100,13 +129,17 @@ export default function LoginPage() {
           {/* Tabs */}
           <div className="flex items-center gap-3 mb-6">
             <button
-              onClick={() => { setMode('login'); setError(null); }}
+              type="button"
+              onClick={() => changeMode('login')}
+              disabled={isLoading}
               className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${mode === 'login' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'}`}
             >
               Iniciar Sesión
             </button>
             <button
-              onClick={() => { setMode('register'); setError(null); }}
+              type="button"
+              onClick={() => changeMode('register')}
+              disabled={isLoading}
               className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${mode === 'register' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'}`}
             >
               Crear Cuenta
@@ -114,20 +147,35 @@ export default function LoginPage() {
           </div>
 
           {/* Error */}
-          {(error || redirectError) && (
-            <div className="mb-6 bg-red-950/50 border border-red-500/30 rounded-xl p-3 text-sm text-red-300 text-center">
-              {error || redirectError}
+          {displayedError && (
+            <div role="alert" className="mb-6 bg-red-950/50 border border-red-500/30 rounded-xl p-3 text-sm text-red-300 text-center">
+              {displayedError}
+            </div>
+          )}
+
+          {mode === 'reset' && (
+            <div className="mb-5 text-center">
+              <h2 className="text-xl font-bold text-white">Restablecer contraseña</h2>
+              <p className="mt-2 text-sm text-slate-400">Ingresá el correo de tu cuenta para recibir un enlace y elegir una contraseña nueva.</p>
+            </div>
+          )}
+          {mode === 'reset' && resetSent && (
+            <div role="status" aria-live="polite" className="mb-5 rounded-xl border border-emerald-500/30 bg-emerald-950/50 p-4 text-sm text-emerald-200">
+              {PASSWORD_RESET_SUCCESS}
             </div>
           )}
 
           {/* Email/Password Form */}
-          <form onSubmit={handleEmailSubmit} className="space-y-4 mb-6">
+          <form onSubmit={handleEmailSubmit} className="space-y-4 mb-6" aria-busy={isLoading}>
             {mode === 'register' && (
               <input
                 type="text"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="Tu nombre"
+                aria-label="Tu nombre"
+                autoComplete="name"
+                disabled={isLoading}
                 className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 text-sm outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all"
                 required
               />
@@ -135,29 +183,51 @@ export default function LoginPage() {
             <input
               type="email"
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={e => { setEmail(e.target.value); setResetSent(false); setError(null); }}
               placeholder="correo@ejemplo.com"
+              aria-label="Correo electrónico"
+              autoComplete={mode === 'login' ? 'username' : 'email'}
+              autoCapitalize="none"
+              spellCheck={false}
+              disabled={isLoading}
               className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 text-sm outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all"
               required
             />
-            <input
+            {mode !== 'reset' && <input
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="Contraseña"
+              aria-label="Contraseña"
+              autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+              disabled={isLoading}
               className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 text-sm outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent transition-all"
               required
               minLength={6}
-            />
+            />}
             <button
               type="submit"
               disabled={isLoading}
               className="w-full py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
-              {isLoading ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : mode === 'register' ? 'Crear Cuenta' : 'Iniciar Sesión'}
+              {isLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />{mode === 'reset' ? 'Enviando enlace...' : 'Procesando...'}</span>
+                : mode === 'reset' ? 'Enviar enlace de recuperación' : mode === 'register' ? 'Crear Cuenta' : 'Iniciar Sesión'}
             </button>
+            {mode === 'login' && (
+              <button type="button" onClick={() => changeMode('reset')} disabled={isLoading}
+                className="w-full rounded-lg py-2 text-sm font-semibold text-rose-300 underline underline-offset-4 hover:text-rose-200 disabled:opacity-50">
+                ¿Olvidaste tu contraseña?
+              </button>
+            )}
+            {mode === 'reset' && (
+              <button type="button" onClick={() => changeMode('login')} disabled={isLoading}
+                className="w-full rounded-lg py-2 text-sm font-semibold text-rose-300 hover:text-rose-200 disabled:opacity-50">
+                Volver a iniciar sesión
+              </button>
+            )}
           </form>
 
+          {mode !== 'reset' && <>
           {/* Divider */}
           <div className="flex items-center gap-3 mb-6">
             <div className="flex-1 h-px bg-slate-700/50" />
@@ -184,9 +254,10 @@ export default function LoginPage() {
             Continuar con Google
           </button>
 
-          {/* Facebook Button (oculto hasta config/auth.facebookEnabled === true) */}
+          {/* Facebook habilitado; config/auth.facebookEnabled=false permite ocultarlo. */}
           {facebookEnabled && (
             <button
+              type="button"
               onClick={handleFacebookLogin}
               disabled={isLoading}
               data-testid="login-facebook"
@@ -196,6 +267,7 @@ export default function LoginPage() {
               Continuar con Facebook
             </button>
           )}
+          </>}
         </div>
 
         <p className="text-[10px] text-slate-600 text-center mt-6">
