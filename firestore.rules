@@ -67,12 +67,13 @@ service cloud.firestore {
           'orderNumber', 'uid', 'customerUid', 'customerName', 'customerEmail', 'customerPhone',
           'customerCedula', 'isGuest', 'shippingAddress', 'subtotal', 'shippingCost', 'shippingType', 'total',
           'paymentMethod', 'paymentPhone', 'paymentStatus', 'paymentProofUrl', 'hasBackorder', 'backorderDeposit',
-          'status', 'notes', 'trackingNumber', 'trackingUrl', 'itemsSummary', 'itemCount', 'createdAt', 'updatedAt'
+          'status', 'notes', 'customerNotes', 'trackingNumber', 'trackingUrl', 'itemsSummary', 'itemCount', 'createdAt', 'updatedAt'
         ])
         && data.uid == request.auth.uid
         && (!data.keys().hasAny(['customerUid']) || data.customerUid == request.auth.uid)
         && data.paymentStatus == 'pendiente' && data.status == 'pendiente_pago'
         && data.get('paymentProofUrl', '') == ''
+        && data.get('customerNotes', '') is string && data.get('customerNotes', '').size() <= 1000
         && data.get('trackingNumber', '') == '' && data.get('trackingUrl', '') == ''
         && data.orderNumber is string && data.orderNumber.size() > 0 && data.orderNumber.size() <= 100
         && data.paymentMethod is string && data.paymentMethod.size() > 0 && data.paymentMethod.size() <= 40

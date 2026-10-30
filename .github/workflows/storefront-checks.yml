@@ -48,3 +48,34 @@ jobs:
           cache-dependency-path: functions/package-lock.json
       - run: npm ci --prefix functions
       - run: npm --prefix functions test
+
+  firestore-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - name: Set up Java for the local Firestore Emulator
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm install --global firebase-tools@15.34.2
+      - name: Install isolated Rules test dependencies
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/giveaway-rules-tools"
+          --no-package-lock --ignore-scripts --no-audit --no-fund
+          @firebase/rules-unit-testing@6.0.0 firebase@13.1.0
+      - name: Test order metadata, payment boundaries and giveaway privacy locally
+        env:
+          NODE_PATH: ${{ runner.temp }}/giveaway-rules-tools/node_modules
+        run: >-
+          firebase emulators:exec --only firestore
+          --project demo-aqui-pauli-giveaway --config firebase.tilopay-emulator.json
+          "node functions/test/firestore-payments.emulator.test.js && node functions/test/firestore-giveaway.emulator.test.js"

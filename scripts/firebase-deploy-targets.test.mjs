@@ -24,13 +24,22 @@ test('correcciones del sorteo y sus reglas conservan el despliegue aislado', () 
 });
 
 test('cambios de funciones compartidas, dependencias o endpoints existentes conservan el deploy original', () => {
-  for (const path of ['functions/utils.js', 'functions/paypal.js', 'functions/orders.js',
-    'functions/package-lock.json', 'functions/test/order-payment-integration.test.js']) {
+  for (const path of ['functions/utils.js', 'functions/paypal.js',
+    'functions/package-lock.json', 'functions/lib/pricing.js']) {
     const result = firebaseDeployTargets(['functions/giveaway.js', path]);
     assert.ok(result.includes('functions:default:paypalCaptureOrder'), path);
     assert.ok(result.includes('functions:default:tilopayConfirm'), path);
     assert.ok(result.includes('functions:default:enterGiveaway'), path);
   }
+});
+
+test('notas y pedidos publican sus callables y reglas sin desplegar pasarelas', () => {
+  const orders = 'firestore:rules,functions:default:createOrderWithReservation,functions:default:deleteOrder';
+  for (const path of ['functions/orders.js', 'functions/lib/customerNotes.mjs',
+    'functions/test/order-payment-integration.test.js', 'functions/test/firestore-payments.emulator.test.js']) {
+    assert.equal(firebaseDeployTargets([path, 'firestore.rules', 'src/services/orderService.js']), orders);
+  }
+  assert.equal(firebaseDeployTargets(['functions/orders.js', 'functions/giveaway.js']), `${orders},functions:default:enterGiveaway`);
 });
 
 test('otros cambios del entry point o historial incompleto no se confunden con el sorteo', () => {
