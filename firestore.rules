@@ -59,10 +59,30 @@ service cloud.firestore {
       return data.get('paymentMethod', '') == 'tilopay' || data.keys().hasAny(['tilopay']);
     }
 
+    function isCashOnDeliveryOrder(data) {
+      return data.get('paymentMethod', '') == 'contra_entrega' || data.keys().hasAny(['cashOnDelivery']);
+    }
+
+    // El administrador puede gestionar entrega y notas, pero acreditar dinero o
+    // cancelar requiere la transacción que consume o libera la reserva.
+    function validCashOnDeliveryUpdate(before, after) {
+      let cash = before.get('cashOnDelivery', {});
+      let stages = { 'pendiente_pago': 0, 'por_preparar': 1, 'preparando': 2, 'enviado': 3, 'entregado': 4 };
+      return before.status == after.status
+        || (cash.get('version', 0) == 1
+          && ((cash.get('state', '') == 'pending' && before.paymentStatus == 'pendiente')
+            || (cash.get('state', '') == 'collected' && before.paymentStatus == 'pagado'))
+          && before.status in ['pendiente_pago', 'por_preparar', 'preparando', 'enviado', 'entregado']
+          && after.status in ['por_preparar', 'preparando', 'enviado', 'entregado']
+          && stages[after.status] > stages[before.status]);
+    }
+
     // Campos reales enviados por orderService.createOrder. No admite snapshots,
     // reservas, evidencias ni futuros campos financieros aportados por el cliente.
     function validPendingOrder(data) {
       return request.auth != null
+        // Solo el callable valida el catálogo y reserva stock para contra entrega.
+        && !isCashOnDeliveryOrder(data)
         && data.keys().hasOnly([
           'orderNumber', 'uid', 'customerUid', 'customerName', 'customerEmail', 'customerPhone',
           'customerCedula', 'isGuest', 'shippingAddress', 'subtotal', 'shippingCost', 'shippingType', 'total',
@@ -96,7 +116,8 @@ service cloud.firestore {
     }
 
     function unlockedItems(data) {
-      return !data.keys().hasAny(['tilopay', 'inventoryReservation', 'fulfillment'])
+      return !isCashOnDeliveryOrder(data)
+        && !data.keys().hasAny(['tilopay', 'inventoryReservation', 'fulfillment'])
         && data.get('paymentStatus', '') in ['pendiente', 'rechazado', 'verificando'];
     }
 
@@ -139,23 +160,30 @@ service cloud.firestore {
       allow create: if validPendingOrder(request.resource.data);
 
       allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'uid', 'customerUid', 'tilopay', 'inventoryReservation', 'fulfillment', 'paidEffects', 'legacyReservationReleasedAt'
+          'uid', 'customerUid', 'tilopay', 'cashOnDelivery', 'inventoryReservation', 'fulfillment', 'paidEffects', 'legacyReservationReleasedAt'
         ])
         && ((isAdmin()
-            && ((!isTilopayOrder(resource.data) && !isTilopayOrder(request.resource.data))
-              || (request.resource.data.diff(resource.data).affectedKeys()
+            && ((!isTilopayOrder(resource.data) && !isTilopayOrder(request.resource.data)
+                  && !isCashOnDeliveryOrder(resource.data) && !isCashOnDeliveryOrder(request.resource.data))
+              || (isCashOnDeliveryOrder(resource.data) && isCashOnDeliveryOrder(request.resource.data)
+                  && request.resource.data.diff(resource.data).affectedKeys()
+                    .hasOnly(['status', 'notes', 'trackingNumber', 'trackingUrl', 'customerName', 'customerPhone', 'customerEmail', 'shippingAddress', 'updatedAt'])
+                  && validCashOnDeliveryUpdate(resource.data, request.resource.data))
+              || (!isCashOnDeliveryOrder(resource.data) && !isCashOnDeliveryOrder(request.resource.data)
+                  && request.resource.data.diff(resource.data).affectedKeys()
                     .hasOnly(['status', 'notes', 'trackingNumber', 'trackingUrl', 'updatedAt'])
                   && validTilopayFulfillmentUpdate(resource.data, request.resource.data))))
           || (ownsOrder(resource.data)
             && resource.data.paymentStatus in ['pendiente', 'rechazado', 'verificando']
             && !isTilopayOrder(resource.data) && !isTilopayOrder(request.resource.data)
+            && !isCashOnDeliveryOrder(resource.data) && !isCashOnDeliveryOrder(request.resource.data)
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['paymentProofUrl', 'paymentPhone', 'paymentStatus', 'updatedAt'])
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentStatus'])
                 || request.resource.data.paymentStatus == 'verificando')));
 
       // Los cobros y reservas requieren cancelación servidor, conservando su rastro.
-      allow delete: if isAdmin() && !isTilopayOrder(resource.data)
+      allow delete: if isAdmin() && !isTilopayOrder(resource.data) && !isCashOnDeliveryOrder(resource.data)
         && !resource.data.keys().hasAny(['inventoryReservation', 'fulfillment']);
 
       match /items/{itemId} {

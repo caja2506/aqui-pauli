@@ -7,6 +7,8 @@ const { sendPaidOrderEmail } = require("./lib/orderEmail");
 const { computeTotalsCRC } = require("./lib/pricing");
 const fulfillment = require("./lib/orderFulfillment");
 const { normalizeCustomerNotes } = require("./lib/customerNotes.mjs");
+const { manageCashOnDeliveryOrder } = require("./lib/cashOnDelivery");
+const { GIVEAWAY_PHONE_ERROR, isValidGiveawayPhone, normalizeGiveawayPhone } = require("./lib/giveawayPhone.mjs");
 
 const telegramBotToken = defineSecret("TELEGRAM_BOT_TOKEN");
 const telegramChatId = defineSecret("TELEGRAM_CHAT_ID");
@@ -16,7 +18,7 @@ const gmailSmtpUser = "GMAIL_SMTP_USER";
 const gmailSmtpAppPassword = "GMAIL_SMTP_APP_PASSWORD";
 const { computeBackorder } = require("./lib/backorderDeposit");
 const MAX_ORDER_EVENT_AGE_MS = 60 * 60 * 1000;
-const PAYMENT_METHODS = new Set(["sinpe", "sinpe_movil", "transferencia", "efectivo", "paypal", "tilopay"]);
+const PAYMENT_METHODS = new Set(["sinpe", "sinpe_movil", "transferencia", "efectivo", "contra_entrega", "paypal", "tilopay"]);
 const clean = (value, max = 250) => typeof value === "string" ? value.trim().slice(0, max) : "";
 
 // El servidor no recibe precios, stock, supplyType ni estados financieros como autoridad.
@@ -30,6 +32,10 @@ exports.createOrderWithReservation = onCall(
     try { customerNotes = normalizeCustomerNotes(data.customerNotes); }
     catch (error) { throw new HttpsError("invalid-argument", error.message); }
     const paymentMethod = data.paymentMethod;
+    const cashOnDelivery = paymentMethod === "contra_entrega";
+    if (cashOnDelivery && !customerName) {
+      throw new HttpsError("invalid-argument", "Ingresá tu nombre completo para coordinar la entrega.");
+    }
     if (!customerName || !PAYMENT_METHODS.has(paymentMethod)) throw new HttpsError("invalid-argument", "Datos de pedido incompletos.");
     if (!Array.isArray(data.items) || !data.items.length || data.items.length > 50) throw new HttpsError("invalid-argument", "Items inválidos.");
     // Rechazar duplicados evita reservar una variante dos veces contra la misma disponibilidad.
@@ -48,6 +54,21 @@ exports.createOrderWithReservation = onCall(
     if (!["normal", "express"].includes(shippingType)) throw new HttpsError("invalid-argument", "Tipo de envío inválido.");
     const shippingAddress = Object.fromEntries(["provincia", "canton", "distrito", "codigoPostal", "señas"]
       .map((key) => [key, clean(data.shippingAddress?.[key], key === "señas" ? 1000 : 150)]));
+    const customerEmail = clean(data.customerEmail, 320);
+    let customerPhone = clean(data.customerPhone, 40);
+    if (cashOnDelivery) {
+      // No se reserva inventario para una entrega sin contacto o dirección útil.
+      customerPhone = normalizeGiveawayPhone(data.customerPhone);
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+        throw new HttpsError("invalid-argument", "Ingresá un correo válido para coordinar la entrega.");
+      }
+      if (!isValidGiveawayPhone(data.customerPhone)) {
+        throw new HttpsError("invalid-argument", GIVEAWAY_PHONE_ERROR);
+      }
+      if (["provincia", "canton", "distrito", "señas"].some(key => !shippingAddress[key])) {
+        throw new HttpsError("invalid-argument", "Completá provincia, cantón, distrito y señas exactas para la entrega.");
+      }
+    }
     const customerUid = request.auth.uid;
     const orderRef = db.collection("orders").doc();
     const orderId = orderRef.id;
@@ -55,7 +76,7 @@ exports.createOrderWithReservation = onCall(
     const now = new Date().toISOString();
 
     try {
-      await db.runTransaction(async (transaction) => {
+      const confirmedTotals = await db.runTransaction(async (transaction) => {
         let totals;
         try {
           totals = await computeTotalsCRC(db, items, { canton: shippingAddress.canton, shippingType }, { transaction });
@@ -63,6 +84,11 @@ exports.createOrderWithReservation = onCall(
           throw new HttpsError("failed-precondition", error.message);
         }
         const canonical = fulfillment.normalizeLines(totals.lines, { priced: true });
+        // Contra entrega es una orden completa en stock. El navegador no puede
+        // ocultar una línea Bajo pedido ni eliminar su adelanto del 50%.
+        if (cashOnDelivery && canonical.some((line) => line.supplyType !== "stock_propio")) {
+          throw new HttpsError("failed-precondition", "El pago contra entrega solo está disponible si todos los productos están en stock. Los productos Bajo pedido requieren el adelanto del 50%.");
+        }
         // Tilopay reserva cuando crea el intento LIVE, en su propia transacción. Un pedido TEST no reserva nada.
         const reserveLines = paymentMethod === "tilopay" ? [] : canonical.filter((line) => line.supplyType === "stock_propio");
         const reserves = [];
@@ -95,14 +121,19 @@ exports.createOrderWithReservation = onCall(
         for (const reserve of reserves) transaction.update(reserve.ref, { reservedStock: reserve.reservedStock + reserve.line.quantity });
         transaction.set(orderRef, {
           orderNumber, uid: customerUid, customerUid,
-          customerEmail: clean(data.customerEmail, 320), customerName, customerPhone: clean(data.customerPhone, 40),
+          customerEmail, customerName, customerPhone,
+          ...(cashOnDelivery ? {
+            customerCedula: clean(data.customerCedula, 40),
+            isGuest: request.auth.token?.firebase?.sign_in_provider === "anonymous",
+            cashOnDelivery: { version: 1, state: "pending", createdAt: now },
+          } : {}),
           status: "pendiente_pago", paymentStatus: "pendiente", paymentMethod,
           paymentProofUrl: "", paymentPhone: clean(data.paymentPhone, 40),
           paymentTransactionId: "", paymentAmount: 0, paymentDate: "",
           subtotal: totals.subtotal, shippingCost: totals.shippingCost, total: totals.total,
           shippingType, shippingAddress, trackingNumber: "", trackingUrl: "",
           hasBackorderItems, hasBackorder: hasBackorderItems, backorderDeposit: depositTotal, depositTotal,
-          remainingTotal: backorder.balanceDue,
+          remainingTotal: cashOnDelivery ? totals.total : backorder.balanceDue,
           depositStatus: hasBackorderItems ? "pendiente" : "no_aplica",
           remainingStatus: hasBackorderItems ? "pendiente" : "no_aplica",
           backorderDepositPaid: false, backorderRemainingPaid: false,
@@ -114,16 +145,27 @@ exports.createOrderWithReservation = onCall(
           customerNotes, notes: "", createdAt: now, updatedAt: now,
         });
         for (const item of orderItems) transaction.set(orderRef.collection("items").doc(item.itemId), item);
+        return { subtotal: totals.subtotal, shippingCost: totals.shippingCost, total: totals.total };
       });
-      // Test y live Tilopay comparten este callable; sus efectos comerciales esperan a la captura live.
-      if (paymentMethod !== "tilopay") await updateCrmOnOrderCreated(customerUid);
-      return { orderId, orderNumber };
+      // Tilopay espera a la captura live. Contra entrega crea/actualiza el CRM en
+      // la transacción de cobro: el alta legacy fuera de transacción podría pisar
+      // los acumulados si un administrador confirma efectivo simultáneamente.
+      if (paymentMethod !== "tilopay" && !cashOnDelivery) await updateCrmOnOrderCreated(customerUid);
+      return { orderId, orderNumber, ...(cashOnDelivery ? {
+        ...confirmedTotals, paymentMethod: "contra_entrega", paymentStatus: "pendiente",
+        amountDueOnDelivery: confirmedTotals.total,
+      } : {}) };
     } catch (error) {
       if (error instanceof HttpsError) throw error;
       console.error("Error creating order with reservation:", error.message);
       throw new HttpsError("internal", "Error al crear el pedido. Intenta de nuevo.");
     }
   }
+);
+
+exports.manageCashOnDeliveryOrder = onCall(
+  { secrets: [], invoker: "public", cors: true },
+  (request) => manageCashOnDeliveryOrder({ db, request, crmDefaults: CRM_DEFAULT_FIELDS })
 );
 
 async function sendPaidEffects(orderId, kind = "paid") {
@@ -236,6 +278,9 @@ exports.deleteOrder = onCall(async (request) => {
       const order = snap.data();
       if (fulfillment.hasTilopay(order)) {
         throw new HttpsError("failed-precondition", "Los pedidos Tilopay conservan sus referencias de pago. Cancela el pedido y concilia sus intentos; no lo elimines.");
+      }
+      if (order.paymentMethod === "contra_entrega" || order.cashOnDelivery) {
+        throw new HttpsError("failed-precondition", "Los pedidos contra entrega conservan su registro. Usá la acción de cancelar contra entrega antes de la entrega.");
       }
       const items = await transaction.get(ref.collection("items"));
       const releases = order.inventoryReservation?.state === "reserved"

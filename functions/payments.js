@@ -3,6 +3,9 @@ const { db } = require("./utils");
 const { hasTilopay, isPaidState, isTerminalOrder, validDocumentId, moneyMinor } = require("./lib/orderFulfillment");
 
 function assertManualFlow(order) {
+  if (order.paymentMethod === "contra_entrega" || Object.prototype.hasOwnProperty.call(order, "cashOnDelivery")) {
+    throw new HttpsError("failed-precondition", "Este pedido se cobra contra entrega. Usá la confirmación de efectivo recibido; no admite comprobantes ni aprobación manual de transferencias.");
+  }
   if (hasTilopay(order)) {
     throw new HttpsError("failed-precondition", "Este pedido usa Tilopay. Confirma el pago con tilopayConfirm; un comprobante o una aprobación manual no sustituyen la consulta del cobro.");
   }

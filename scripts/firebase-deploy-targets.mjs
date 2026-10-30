@@ -2,11 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
-// Mantiene los endpoints que el proyecto ya publica. Una entrega exclusiva del
-// sorteo solo despliega su endpoint y reglas, sin publicar funciones de pagos.
+// Los cambios aislados de sorteo, pedidos o pagos manuales publican únicamente
+// sus endpoints y reglas. Los cambios compartidos conservan el alcance general.
 const existingFunctions = [
   'tilopayGetConfig', 'tilopayCreatePayment', 'tilopayConfirm',
-  'createOrderWithReservation', 'deleteOrder', 'submitPaymentProof', 'approvePaymentManually',
+  'createOrderWithReservation', 'deleteOrder', 'manageCashOnDeliveryOrder', 'submitPaymentProof', 'approvePaymentManually',
   'paypalCreateOrder', 'paypalCaptureOrder', 'paypalGetQuote', 'cleanExpiredReservations',
 ];
 const giveawayFiles = new Set([
@@ -19,10 +19,13 @@ const giveawayFiles = new Set([
 // orders.js publica estos callables. El trigger de notificaciones conserva su
 // exclusión existente hasta configurar Gmail; no requiere desplegar pasarelas.
 const orderFiles = new Set([
-  'functions/orders.js', 'functions/lib/customerNotes.mjs',
+  'functions/orders.js', 'functions/lib/customerNotes.mjs', 'functions/lib/cashOnDelivery.js',
+  // El teléfono CR es compartido por sorteo y contra entrega.
+  'functions/lib/giveawayPhone.mjs',
   'functions/test/order-payment-integration.test.js',
   'functions/test/firestore-payments.emulator.test.js',
 ]);
+const manualPaymentFiles = new Set(['functions/payments.js']);
 
 function withoutGiveawayExport(source) {
   return source.replace(/^const giveaway = require\("\.\/giveaway"\);\r?\n/gm, '')
@@ -32,12 +35,14 @@ function withoutGiveawayExport(source) {
 export function firebaseDeployTargets(changedPaths, indexBefore = '', indexAfter = '') {
   const hasGiveawayChanges = changedPaths.some((path) => giveawayFiles.has(path));
   const hasOrderChanges = changedPaths.some((path) => orderFiles.has(path));
+  const hasManualPaymentChanges = changedPaths.some((path) => manualPaymentFiles.has(path));
   const otherFunctionsChanged = changedPaths.some((path) => path.startsWith('functions/')
-    && path !== 'functions/index.js' && !giveawayFiles.has(path) && !orderFiles.has(path));
+    && path !== 'functions/index.js' && !giveawayFiles.has(path) && !orderFiles.has(path) && !manualPaymentFiles.has(path));
   const indexChanged = changedPaths.includes('functions/index.js')
     && (!indexBefore || !indexAfter || withoutGiveawayExport(indexBefore) !== withoutGiveawayExport(indexAfter));
-  const names = (hasGiveawayChanges || hasOrderChanges) && !otherFunctionsChanged && !indexChanged
-    ? [...(hasOrderChanges ? ['createOrderWithReservation', 'deleteOrder'] : []),
+  const names = (hasGiveawayChanges || hasOrderChanges || hasManualPaymentChanges) && !otherFunctionsChanged && !indexChanged
+    ? [...(hasOrderChanges ? ['createOrderWithReservation', 'deleteOrder', 'manageCashOnDeliveryOrder'] : []),
+      ...(hasManualPaymentChanges ? ['submitPaymentProof', 'approvePaymentManually'] : []),
       ...(hasGiveawayChanges ? ['enterGiveaway'] : [])]
     : [...existingFunctions, 'enterGiveaway'];
   return ['firestore:rules', ...names.map((name) => `functions:default:${name}`)].join(',');
