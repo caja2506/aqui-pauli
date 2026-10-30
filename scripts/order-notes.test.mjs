@@ -7,12 +7,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transformWithEsbuild } from 'vite';
 import { MAX_CUSTOMER_NOTES_LENGTH, normalizeCustomerNotes } from '../functions/lib/customerNotes.mjs';
+import { GIVEAWAY_PHONE_ERROR } from '../functions/lib/giveawayPhone.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const MANUAL = 'src/services/orderService.js';
 const PAYPAL = 'src/services/payments/paypalClient.js';
+const CASH = 'src/services/payments/cashOnDeliveryClient.js';
 const abs = relative => path.join(root, relative);
-const files = [MANUAL, PAYPAL, 'src/utils/backorder.js', 'src/utils/formatters.js', 'functions/lib/customerNotes.mjs'];
+const files = [MANUAL, PAYPAL, CASH, 'src/utils/backorder.js', 'src/utils/formatters.js', 'functions/lib/customerNotes.mjs', 'functions/lib/giveawayPhone.mjs'];
 const compiled = new Map(await Promise.all(files.map(async relative => {
   const filename = abs(relative);
   const { code } = await transformWithEsbuild(await readFile(filename, 'utf8'), filename, {
@@ -67,7 +69,10 @@ function loadServices() {
       assert.equal(functions, firebase.functions);
       return async data => {
         effects.callables.push({ name, data: structuredClone(data) });
-        return { data: { orderId: 'server-order', orderNumber: 'AP-TEST' } };
+        return { data: { orderId: 'server-order', orderNumber: 'AP-TEST',
+          ...(data.paymentMethod === 'contra_entrega' ? { subtotal: 52000, shippingCost: 0, total: 52000,
+            paymentMethod: 'contra_entrega', paymentStatus: 'pendiente', amountDueOnDelivery: 52000 } : {}),
+        } };
       };
     } }],
   ]);
@@ -90,7 +95,7 @@ function loadServices() {
     new Function('require', 'module', 'exports', compiled.get(filename))(localRequire, module, module.exports);
     return module.exports;
   }
-  return { manual: load(abs(MANUAL)), paypal: load(abs(PAYPAL)), effects, writes, store };
+  return { manual: load(abs(MANUAL)), paypal: load(abs(PAYPAL)), cash: load(abs(CASH)), effects, writes, store };
 }
 
 test('el contrato compartido normaliza notas opcionales y conserva saltos de línea sin truncar', () => {
@@ -152,8 +157,54 @@ test('PayPal transmite notas normalizadas al callable junto con IDs y cantidades
   assert.equal(h.effects.commits, 0);
 });
 
-for (const method of ['manual', 'paypal']) {
-  const create = (h, body) => method === 'manual' ? h.manual.createOrder(body) : h.paypal.createPaypalPendingOrder(body);
+test('contra entrega serializa solo contacto, notas, envío e IDs/cantidades y conserva la respuesta canónica pendiente', async () => {
+  const h = loadServices();
+  const body = orderFixture({ paymentMethod: 'efectivo', uid: 'otro-dueño', isGuest: false,
+    customerCedula: '101110111', customerNotes: '  Tocar timbre.  ', total: 1,
+    paymentStatus: 'pagado', paymentAmount: 1, remainingTotal: 0, status: 'pagado',
+    cashOnDelivery: { paid: true }, subtotal: 1, shippingCost: 999,
+    items: [{ productId: 'stock', variantId: 'v1', quantity: 1, price: 1, supplyType: 'stock_propio' }],
+  });
+  const result = await h.cash.createCashOnDeliveryOrder(body);
+  assert.deepEqual(h.effects.callables, [{ name: 'createOrderWithReservation', data: {
+    paymentMethod: 'contra_entrega', customerName: body.customerName, customerEmail: body.customerEmail,
+    customerPhone: body.customerPhone, customerCedula: '101110111', customerNotes: 'Tocar timbre.',
+    shippingAddress: body.shippingAddress, shippingType: body.shippingType,
+    items: [{ productId: 'stock', variantId: 'v1', quantity: 1 }],
+  } }]);
+  assert.deepEqual(result, { orderId: 'server-order', orderNumber: 'AP-TEST', subtotal: 52000, shippingCost: 0,
+    total: 52000, paymentMethod: 'contra_entrega', paymentStatus: 'pendiente', amountDueOnDelivery: 52000 });
+  assert.equal(h.effects.batches, 0);
+  assert.equal(h.effects.commits, 0);
+  assert.equal(h.writes.length, 0);
+});
+
+test('el cliente COD normaliza una sola vez prefijo CR, espacios y guiones antes de llamar al servidor', async () => {
+  for (const [raw, expected] of [
+    ['83100015', '83100015'], [' +506 8310-0015 ', '83100015'], ['506 8310 0015', '83100015'], ['50612345', '50612345'],
+  ]) {
+    const h = loadServices();
+    await h.cash.createCashOnDeliveryOrder(orderFixture({ customerPhone: raw }));
+    assert.equal(h.effects.callables.length, 1);
+    assert.equal(h.effects.callables[0].data.customerPhone, expected);
+    assert.equal(h.effects.commits, 0);
+  }
+});
+
+test('el cliente COD rechaza diez dígitos, prefijos duplicados y números inválidos sin llamadas ni escrituras', async () => {
+  for (const customerPhone of ['8310001512', '+5068310001512', '+50650683100015', '50650683100015', '18310001', '8310001', '', '8310ABC5', 83100015, null]) {
+    const h = loadServices();
+    await assert.rejects(() => h.cash.createCashOnDeliveryOrder(orderFixture({ customerPhone })), error =>
+      error.code === 'functions/invalid-argument' && error.message === GIVEAWAY_PHONE_ERROR);
+    assert.equal(h.effects.callables.length, 0);
+    assert.equal(h.effects.refs, 0);
+    assert.equal(h.effects.commits, 0);
+  }
+});
+
+for (const method of ['manual', 'paypal', 'cash']) {
+  const create = (h, body) => method === 'manual' ? h.manual.createOrder(body)
+    : method === 'cash' ? h.cash.createCashOnDeliveryOrder(body) : h.paypal.createPaypalPendingOrder(body);
   test(`${method}: notas omitidas o vacías siguen permitiendo crear el pedido`, async () => {
     for (const customerNotes of [undefined, null, '', ' \n ']) {
       const h = loadServices();

@@ -150,3 +150,58 @@ test('las notas del checkout aparecen durante la carga; vacío o valor inválido
   }
   assert.ok(!render({ savedOrder: { orderNumber: 'AP-SIN-NOTAS' }, state: { customerNotes: 'Estado viejo' } }).html.includes('Estado viejo'));
 });
+
+test('contra entrega indica cero adelanto y total en efectivo, sin comprobante ni falso pago online', () => {
+  const page = render({ state: {
+    orderNumber: 'AP-CONTRA-ENTREGA', total: 52000, paymentMethod: 'contra_entrega',
+    // Un estado de navegación viejo no acredita un pago ni cambia el método.
+    paid: true, online: true,
+  } });
+  assert.match(page.html, /data-testid="cash-on-delivery-confirmation"/);
+  assert.match(page.html, /Pago contra entrega \(efectivo\)/);
+  assert.match(page.html, /Pagás ahora: <strong>₡0<\/strong>/);
+  assert.match(page.html, /Total a pagar al recibir: <strong>₡52\s000<\/strong>/);
+  assert.match(page.html, /pendiente de cobro contra entrega/);
+  assert.match(page.html, /No necesitás un adelanto/);
+  assert.doesNotMatch(page.html, /Enviar Comprobante|Adjunto mi comprobante|Pagué|Pago recibido|Pago en efectivo registrado|Realiza el pago/);
+  assert.ok(!page.elements.some(element => element.type === 'a' && element.props.href?.startsWith('https://wa.me/')));
+});
+
+test('al recargar contra entrega usa total, método y notas guardados, aunque el estado de navegación difiera', () => {
+  const savedOrder = { orderNumber: 'AP-COD-GUARDADO', total: 32000, paymentMethod: 'contra_entrega',
+    paymentStatus: 'pendiente', status: 'pendiente_pago', customerNotes: 'Llamar al llegar',
+    itemsSummary: [{ supplyType: 'stock_propio', price: 32000, quantity: 1 }], shippingCost: 0 };
+  for (const state of [{}, { orderNumber: 'AP-VIEJO', total: 1, paymentMethod: 'sinpe', paid: true, online: true }]) {
+    const page = render({ savedOrder, state });
+    assert.match(page.html, /AP-COD-GUARDADO/);
+    assert.match(page.html, /Total a pagar al recibir: <strong>₡32\s000<\/strong>/);
+    assert.match(page.html, /Llamar al llegar/);
+    assert.match(page.html, /pendiente de cobro contra entrega/);
+    assert.doesNotMatch(page.html, /data-testid="sinpe-instructions"|Enviar Comprobante|Pago recibido|AP-VIEJO/);
+  }
+});
+
+test('contra entrega ya cobrado no vuelve a pedir efectivo al recargar', () => {
+  for (const paymentStatus of ['pagado', 'verificado']) {
+    const page = render({ savedOrder: { orderNumber: 'AP-COD-COBRADO', total: 52000,
+      paymentMethod: 'contra_entrega', paymentStatus, status: 'entregado' },
+      state: { paid: false, online: true } });
+    assert.match(page.html, /Pago en efectivo registrado/);
+    assert.doesNotMatch(page.html, /Total a pagar al recibir|Prepará el monto|pendiente de cobro|Enviar Comprobante|Pago recibido con PayPal/);
+  }
+});
+
+test('contra entrega cancelado no deja instrucciones de cobro pendientes', () => {
+  const page = render({ savedOrder: { orderNumber: 'AP-COD-CANCELADO', total: 52000,
+    paymentMethod: 'contra_entrega', paymentStatus: 'pendiente', status: 'cancelado' } });
+  assert.match(page.html, /Este pedido fue cancelado/);
+  assert.doesNotMatch(page.html, /Total a pagar al recibir|Prepará el monto|Estado del pago: pendiente|Enviar Comprobante/);
+});
+
+test('el método guardado de una orden PayPal prevalece sobre un estado anterior de contra entrega', () => {
+  const page = render({ savedOrder: { orderNumber: 'AP-PAYPAL', total: 52000,
+    paymentMethod: 'paypal', paymentStatus: 'pagado', paymentAmount: 52000 },
+    state: { paymentMethod: 'contra_entrega', total: 1 } });
+  assert.match(page.html, /Pago recibido con PayPal/);
+  assert.ok(!page.html.includes('data-testid="cash-on-delivery-confirmation"'));
+});

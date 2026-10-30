@@ -51,12 +51,14 @@ export const PAYMENT_METHODS = {
   PAYPAL: 'paypal',
   SINPE: 'sinpe',
   TRANSFERENCIA: 'transferencia',
+  CONTRA_ENTREGA: 'contra_entrega',
 };
 
 export const PAYMENT_METHOD_LABELS = {
   paypal: 'PayPal',
   sinpe: 'SINPE Móvil',
   transferencia: 'Transferencia Bancaria',
+  contra_entrega: 'Contra entrega (efectivo)',
 };
 
 // --- Estados comerciales de variante ---

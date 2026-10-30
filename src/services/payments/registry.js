@@ -2,7 +2,7 @@
 // Registro de métodos de pago del checkout.
 //
 // kind: 'manual'  → el cliente crea el pedido con el botón "Confirmar Pedido"
-//                    y paga fuera de la web (SINPE, transferencia).
+//                    y paga fuera de la web (SINPE, transferencia o efectivo al recibir).
 //       'online'  → el método trae su propio panel (Panel) con sus botones y
 //                    se encarga de pagar; el pedido se crea al iniciar el pago.
 //
@@ -16,13 +16,14 @@
 //
 // Tilopay (tarjeta, colones) ya está registrado pero apagado por config; ver docs/payments-tilopay.md.
 // ==============================================
-import { Smartphone, Building } from 'lucide-react';
+import { Smartphone, Building, Banknote } from 'lucide-react';
 import { paypalProvider } from './paypalProvider';
 import { tilopayProvider } from './tilopayProvider';
 
 export const MANUAL_METHODS = {
   sinpe: { id: 'sinpe', kind: 'manual', label: 'SINPE Móvil', icon: Smartphone },
   transferencia: { id: 'transferencia', kind: 'manual', label: 'Transferencia Bancaria', icon: Building },
+  contra_entrega: { id: 'contra_entrega', kind: 'manual', label: 'Contra entrega (efectivo)', icon: Banknote, stockOnly: true },
 };
 
 export const ONLINE_PROVIDERS = {
@@ -38,9 +39,18 @@ export function isOnlineMethod(id) {
   return !!ONLINE_PROVIDERS[id];
 }
 
-/** Métodos que se muestran en el checkout, según disponibilidad de los online. */
-export function listPaymentMethods(availability = {}) {
+// Esta comprobación controla la presentación; el servidor vuelve a consultar
+// abastecimiento y disponibilidad en el catálogo antes de reservar el pedido.
+export function isCashOnDeliveryEligible(items) {
+  return Array.isArray(items) && items.length > 0
+    && items.every((item) => item?.supplyType === 'stock_propio');
+}
+
+/** Métodos según disponibilidad online y composición actual del carrito. */
+export function listPaymentMethods(availability = {}, { items = [] } = {}) {
+  const manual = Object.values(MANUAL_METHODS)
+    .filter((method) => !method.stockOnly || isCashOnDeliveryEligible(items));
   const online = Object.values(ONLINE_PROVIDERS).filter((p) => availability[p.id]?.available);
-  return [...Object.values(MANUAL_METHODS), ...online];
+  return [...manual, ...online];
 }
 

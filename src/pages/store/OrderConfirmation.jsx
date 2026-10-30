@@ -62,6 +62,7 @@ export default function OrderConfirmation() {
   const paymentMethod = savedOrder?.paymentMethod || location.state?.paymentMethod || '';
   const isSinpe = paymentMethod === 'sinpe' || paymentMethod === 'sinpe_movil';
   const isPaypal = paymentMethod === 'paypal';
+  const isCashOnDelivery = paymentMethod === 'contra_entrega';
   const totalNum = Number(total) || 0;
   // Nuevos pedidos: 50% solo de Bajo pedido. Al cargar, prima el apartado guardado.
   const paypalQuote = savedOrder?.paypal || location.state?.paypalQuote;
@@ -74,7 +75,11 @@ export default function OrderConfirmation() {
   const amountToPay = hasDeposit ? backorder.payNowTotal : totalNum;
 
   const paid = savedOrder ? !!fullyPaid || (isPaypal && savedOrder.paymentStatus === 'parcial') : !!location.state?.paid;
-  const online = savedOrder ? ['paypal', 'tilopay'].includes(paymentMethod) : !!location.state?.online;
+  const online = ['paypal', 'tilopay'].includes(paymentMethod) && (savedOrder ? true : !!location.state?.online);
+  // Contra entrega sigue pendiente al salir del checkout. Solo el pedido guardado
+  // puede confirmar que el administrador ya registró el efectivo recibido.
+  const cashOnDeliveryPaid = isCashOnDelivery && !!fullyPaid;
+  const cashOnDeliveryCancelled = isCashOnDelivery && savedOrder?.status === 'cancelado';
   const paypalReceived = paid && typeof savedOrder?.paymentAmount === 'number' ? savedOrder.paymentAmount : amountToPay;
   const paypalRemaining = fullyPaid ? 0 : (typeof savedOrder?.remainingTotal === 'number'
     ? savedOrder.remainingTotal : backorder?.balanceDue || 0);
@@ -111,6 +116,24 @@ export default function OrderConfirmation() {
         <section className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-left mb-6" data-testid="order-customer-notes">
           <h2 className="text-sm font-bold text-slate-800 mb-2">Notas del pedido</h2>
           <p className="whitespace-pre-wrap break-words text-sm text-slate-600">{customerNotes}</p>
+        </section>
+      )}
+
+      {isCashOnDelivery && (
+        <section className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-5 text-left mb-6 space-y-2" data-testid="cash-on-delivery-confirmation">
+          <h2 className="text-base font-black text-blue-900">Pago contra entrega (efectivo)</h2>
+          {cashOnDeliveryCancelled ? (
+            <p className="text-sm text-blue-900">Este pedido fue cancelado. No hay un pago contra entrega pendiente.</p>
+          ) : cashOnDeliveryPaid ? (
+            <p className="text-sm font-bold text-green-700">Pago en efectivo registrado.</p>
+          ) : (
+            <>
+              <p className="text-sm text-blue-900">Pagás ahora: <strong>{formatCRC(0)}</strong></p>
+              <p className="text-sm text-blue-900">Total a pagar al recibir: <strong>{formatCRC(totalNum)}</strong></p>
+              <p className="text-sm text-blue-900">Pagá el monto completo en efectivo cuando recibás tu pedido. No necesitás un adelanto.</p>
+              <p className="text-sm font-bold text-blue-900">Estado del pago: pendiente de cobro contra entrega.</p>
+            </>
+          )}
         </section>
       )}
 
@@ -172,7 +195,10 @@ export default function OrderConfirmation() {
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-left mb-6">
         <h3 className="text-sm font-bold text-amber-800 mb-2">Próximos pasos:</h3>
         <ul className="text-sm text-amber-800 space-y-1.5">
-          {!online && (isSinpe
+          {isCashOnDelivery && !cashOnDeliveryPaid && !cashOnDeliveryCancelled && (
+            <li>• Prepará el monto completo en efectivo para pagar al recibir tu pedido.</li>
+          )}
+          {!online && !isCashOnDelivery && (isSinpe
             ? <li>• Hacé el SINPE con los datos de arriba, con tu número de pedido en la descripción</li>
             : <li>• Realiza el pago con el método seleccionado</li>)}
           {needsProof && <li>• <strong>Envía tu comprobante por WhatsApp</strong> con el botón verde</li>}

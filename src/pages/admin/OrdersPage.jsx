@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db, functions } from '../../firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -6,7 +6,7 @@ import { Search, ClipboardList, ChevronDown, MapPin, Package, Phone, Image, Chec
 import { useCollection } from '../../hooks/useCollection';
 import { updateOrderStatus } from '../../services/orderService';
 import { formatCRC, formatDateTime } from '../../utils/formatters';
-import { ORDER_STATUS_LABELS, ORDER_STATUS } from '../../utils/constants';
+import { ORDER_STATUS_LABELS, ORDER_STATUS, PAYMENT_METHOD_LABELS } from '../../utils/constants';
 import StatusBadge from '../../components/ui/StatusBadge';
 import EmptyState from '../../components/ui/EmptyState';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
@@ -22,6 +22,24 @@ const STATUS_FLOW = [
   ORDER_STATUS.CANCELADO,
 ];
 
+const CASH_STATUS_FLOW = [
+  ORDER_STATUS.PENDIENTE_PAGO,
+  ORDER_STATUS.POR_PREPARAR,
+  ORDER_STATUS.PREPARANDO,
+  ORDER_STATUS.ENVIADO,
+  ORDER_STATUS.ENTREGADO,
+];
+
+function cashStatusOptions(order) {
+  const currentIndex = CASH_STATUS_FLOW.indexOf(order.status);
+  if (currentIndex < 0) return [order.status];
+  const options = CASH_STATUS_FLOW.slice(currentIndex);
+  if (order.paymentStatus === 'pendiente' && order.status !== ORDER_STATUS.ENTREGADO) {
+    options.push(ORDER_STATUS.CANCELADO);
+  }
+  return options;
+}
+
 export default function OrdersPage() {
   const { data: orders, loading } = useCollection('orders', { orderByField: 'createdAt', orderDirection: 'desc' });
   const [search, setSearch] = useState('');
@@ -31,6 +49,11 @@ export default function OrdersPage() {
   const [proofModal, setProofModal] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, title: '', message: '', onConfirm: null });
+  const [cashConfirmation, setCashConfirmation] = useState(null);
+  const [cashAction, setCashAction] = useState({ orderId: '', action: '', pending: false, error: '' });
+  const cashActionInFlight = useRef(false);
+  const [statusAction, setStatusAction] = useState({ orderId: '', pending: false, error: '' });
+  const statusActionInFlight = useRef(false);
 
   // Aprobar/rechazar pago manualmente
   const handlePaymentAction = async (orderId, action) => {
@@ -54,8 +77,48 @@ export default function OrdersPage() {
     return matchesSearch && matchesStatus;
   });
 
+  const openCashConfirmation = (order, action) => {
+    if (cashActionInFlight.current || statusActionInFlight.current || order.paymentMethod !== 'contra_entrega'
+        || order.status === 'cancelado' || ['pagado', 'verificado'].includes(order.paymentStatus)) return;
+    if (action === 'confirm_payment' && order.paymentStatus !== 'pendiente') return;
+    if (action === 'cancel' && order.status === 'entregado') return;
+    setCashConfirmation({ order, action });
+  };
+
+  const handleCashAction = async (order, action) => {
+    if (cashActionInFlight.current) return;
+    cashActionInFlight.current = true;
+    setCashAction({ orderId: order.id, action, pending: true, error: '' });
+    try {
+      const manageOrder = httpsCallable(functions, 'manageCashOnDeliveryOrder');
+      await manageOrder({ orderId: order.id, action });
+      setCashAction({ orderId: '', action: '', pending: false, error: '' });
+    } catch (error) {
+      setCashAction({ orderId: order.id, action, pending: false,
+        error: error?.message || 'No se pudo actualizar el pedido contra entrega. Intentá de nuevo.' });
+    } finally {
+      cashActionInFlight.current = false;
+    }
+  };
+
   const handleStatusChange = async (orderId, newStatus) => {
-    await updateOrderStatus(orderId, newStatus);
+    const order = orders.find(item => item.id === orderId);
+    if (order?.paymentMethod === 'contra_entrega') {
+      if (cashActionInFlight.current || statusActionInFlight.current
+          || !cashStatusOptions(order).includes(newStatus) || newStatus === order.status) return;
+      if (newStatus === ORDER_STATUS.CANCELADO) return openCashConfirmation(order, 'cancel');
+    }
+    statusActionInFlight.current = true;
+    setStatusAction({ orderId, pending: true, error: '' });
+    try {
+      await updateOrderStatus(orderId, newStatus);
+      setStatusAction({ orderId: '', pending: false, error: '' });
+    } catch (error) {
+      setStatusAction({ orderId, pending: false,
+        error: error?.message || 'No se pudo cambiar el estado del pedido. Intentá de nuevo.' });
+    } finally {
+      statusActionInFlight.current = false;
+    }
   };
 
   const getOrderTotal = (order) => {
@@ -99,6 +162,7 @@ export default function OrdersPage() {
   };
 
   const handleDeleteOrder = (orderId, orderNumber) => {
+    if (orders.find(order => order.id === orderId)?.paymentMethod === 'contra_entrega') return;
     setConfirmDelete({
       isOpen: true,
       title: 'Eliminar Pedido',
@@ -162,6 +226,15 @@ export default function OrdersPage() {
         message={confirmDelete.message}
         onConfirm={confirmDelete.onConfirm}
         onClose={() => setConfirmDelete({ isOpen: false, title: '', message: '', onConfirm: null })}
+      />
+      <ConfirmDialog
+        isOpen={!!cashConfirmation}
+        title={cashConfirmation?.action === 'confirm_payment' ? 'Confirmar efectivo recibido' : 'Cancelar pedido contra entrega'}
+        message={cashConfirmation ? (cashConfirmation.action === 'confirm_payment'
+          ? `¿Confirmás que ya recibiste ${formatCRC(getOrderTotal(cashConfirmation.order))} en efectivo por el pedido ${cashConfirmation.order.orderNumber}? El pago se registrará como cobrado.`
+          : `¿Cancelar el pedido ${cashConfirmation.order.orderNumber}? Cancelá solo si los productos siguen en la tienda o ya fueron devueltos; volverán a estar disponibles para la venta. Se liberará el stock reservado y no se registrará un pago.`) : ''}
+        onConfirm={() => cashConfirmation && handleCashAction(cashConfirmation.order, cashConfirmation.action)}
+        onClose={() => setCashConfirmation(null)}
       />
 
       {/* Proof Modal */}
@@ -242,10 +315,15 @@ export default function OrdersPage() {
             const itemCount = order.itemCount || items.length;
             const ocr = order.ocrData || {};
             const gmail = order.gmailVerification || {};
+            const isCashOnDelivery = order.paymentMethod === 'contra_entrega';
+            const canConfirmCash = isCashOnDelivery && order.paymentStatus === 'pendiente' && order.status !== 'cancelado';
+            const cashBusy = cashAction.pending && cashAction.orderId === order.id;
+            const statusBusy = statusAction.pending && statusAction.orderId === order.id;
+            const visibleStatusFlow = isCashOnDelivery ? cashStatusOptions(order) : STATUS_FLOW;
 
             return (
               <div key={order.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                <div className="flex flex-wrap items-center gap-4 p-5 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => toggleExpand(order.id)}>
+                <div className="flex flex-wrap items-center gap-4 p-5 cursor-pointer hover:bg-slate-50 transition-colors" data-testid={`order-summary-${order.id}`} onClick={() => toggleExpand(order.id)}>
                   <button className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}><ChevronDown className="w-4 h-4 text-slate-400" /></button>
                   <div className="min-w-[100px]">
                     <span className="font-mono font-bold text-indigo-600 text-xs">{order.orderNumber}</span>
@@ -260,7 +338,7 @@ export default function OrdersPage() {
                   {order.paymentStatus === 'verificado' && <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">✅ Verificado</span>}
                   {order.paymentStatus === 'verificando' && <span className="text-[9px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">⏳ Verificando</span>}
                   {order.paymentStatus === 'parcial' && <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">Apartado recibido · saldo pendiente</span>}
-                  {order.paymentStatus === 'revision_humana' && (
+                  {order.paymentStatus === 'revision_humana' && !isCashOnDelivery && (
                     <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1">
                       👁️ SINPE - Revisión
                       <button onClick={e => { e.stopPropagation(); handlePaymentAction(order.id, 'approve'); }} className="ml-1 bg-emerald-500 text-white px-1.5 py-0.5 rounded-full hover:bg-emerald-600 text-[8px]" title="Aprobar pago">✓</button>
@@ -268,19 +346,25 @@ export default function OrdersPage() {
                     </span>
                   )}
                   {order.paymentStatus === 'rechazado' && <span className="text-[9px] font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">❌ Rechazado</span>}
-                  {(order.paymentStatus === 'pendiente' || !order.paymentStatus) && !order.paymentProofUrl && <span className="text-[9px] font-bold bg-red-50 text-red-500 px-2 py-0.5 rounded-full">💳 Pago pendiente</span>}
+                  {(order.paymentStatus === 'pendiente' || !order.paymentStatus) && !order.paymentProofUrl && <span className="text-[9px] font-bold bg-red-50 text-red-500 px-2 py-0.5 rounded-full">{isCashOnDelivery ? (order.status === 'cancelado' ? 'Contra entrega · cancelado' : '💵 Contra entrega · pendiente') : '💳 Pago pendiente'}</span>}
+                  {isCashOnDelivery && order.paymentStatus === 'pagado' && <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">💵 Efectivo recibido</span>}
                   <StatusBadge status={order.status} />
                   <span className="text-sm font-black text-slate-900 min-w-[90px] text-right">{formatCRC(total)}</span>
-                  <select value={order.status} onChange={e => { e.stopPropagation(); handleStatusChange(order.id, e.target.value); }} onClick={e => e.stopPropagation()} className="text-xs px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold">
-                    {STATUS_FLOW.map(s => (<option key={s} value={s}>{ORDER_STATUS_LABELS[s]}</option>))}
+                  <select aria-label={`Estado del pedido ${order.orderNumber}`} value={order.status} disabled={isCashOnDelivery && (cashAction.pending || statusAction.pending || visibleStatusFlow.length < 2)} onChange={e => { e.stopPropagation(); return handleStatusChange(order.id, e.target.value); }} onClick={e => e.stopPropagation()} className="text-xs px-3 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold disabled:opacity-50">
+                    {visibleStatusFlow.map(s => (<option key={s} value={s}>{ORDER_STATUS_LABELS[s]}</option>))}
                   </select>
                   <button onClick={e => { e.stopPropagation(); handleEditOrder(order); }} className="p-2 hover:bg-blue-50 rounded-xl transition-colors" title="Editar pedido">
                     <Edit3 className="w-4 h-4 text-blue-500" />
                   </button>
-                  <button onClick={e => { e.stopPropagation(); e.preventDefault(); handleDeleteOrder(order.id, order.orderNumber); }} className="p-2 hover:bg-red-50 rounded-xl transition-colors" title="Eliminar pedido">
+                  {!isCashOnDelivery && <button onClick={e => { e.stopPropagation(); e.preventDefault(); handleDeleteOrder(order.id, order.orderNumber); }} className="p-2 hover:bg-red-50 rounded-xl transition-colors" title="Eliminar pedido">
                     <Trash2 className="w-4 h-4 text-red-400" />
-                  </button>
+                  </button>}
                 </div>
+
+                {cashBusy && <p role="status" className="px-5 pb-4 text-sm font-bold text-blue-700">{cashAction.action === 'confirm_payment' ? 'Registrando efectivo recibido…' : 'Cancelando pedido y liberando reserva…'}</p>}
+                {cashAction.orderId === order.id && cashAction.error && <p role="alert" className="px-5 pb-4 text-sm font-bold text-red-700">{cashAction.error}</p>}
+                {statusBusy && <p role="status" className="px-5 pb-4 text-sm font-bold text-blue-700">Actualizando estado del pedido…</p>}
+                {statusAction.orderId === order.id && statusAction.error && <p role="alert" className="px-5 pb-4 text-sm font-bold text-red-700">{statusAction.error}</p>}
 
                 {isExpanded && (
                   <div className="border-t border-slate-100 bg-slate-50 p-5 space-y-5 animate-in fade-in duration-200">
@@ -335,7 +419,12 @@ export default function OrdersPage() {
                               <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase ${paymentStatusColors[order.paymentStatus] || paymentStatusColors.pendiente}`}>
                                 {order.paymentStatus === 'parcial' ? 'Apartado recibido · saldo pendiente' : (order.paymentStatus || 'pendiente')}
                               </span>
-                              {order.paymentStatus === 'verificando' && order.paymentMethod !== 'paypal' && !order.paypal && (
+                              {canConfirmCash && (
+                                <button type="button" onClick={() => openCashConfirmation(order, 'confirm_payment')} disabled={cashAction.pending || statusAction.pending} className="flex items-center gap-1 text-xs font-bold bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
+                                  <CheckCircle className="w-3 h-3" /> {cashBusy ? 'Registrando…' : 'Confirmar efectivo recibido'}
+                                </button>
+                              )}
+                              {order.paymentStatus === 'verificando' && !isCashOnDelivery && order.paymentMethod !== 'paypal' && !order.paypal && (
                                 <div className="flex gap-2">
                                   <button onClick={() => handleApprovePayment(order.id)} className="flex items-center gap-1 text-[10px] font-bold bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors">
                                     <CheckCircle className="w-3 h-3" /> Aprobar
@@ -353,7 +442,15 @@ export default function OrdersPage() {
                               )}
                             </div>
 
-                            {order.paymentProofUrl ? (
+                            {order.paymentMethod === 'contra_entrega' ? (
+                              <div className="p-4 border-b border-slate-100 text-sm text-blue-900 bg-blue-50" data-testid="admin-cash-on-delivery">
+                                {order.status === 'cancelado'
+                                  ? 'Pedido contra entrega cancelado.'
+                                  : ['pagado', 'verificado'].includes(order.paymentStatus)
+                                    ? 'Pago en efectivo registrado.'
+                                    : <>Cobrar <strong>{formatCRC(total)}</strong> en efectivo al entregar. Este pedido no requiere adelanto ni comprobante de transferencia.</>}
+                              </div>
+                            ) : order.paymentProofUrl ? (
                               <div className="p-4 border-b border-slate-100">
                                 <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Comprobante WhatsApp</p>
                                 <div className="flex items-start gap-3">
@@ -421,7 +518,7 @@ export default function OrdersPage() {
                           <div className="bg-white rounded-xl p-4 border border-slate-200 space-y-2">
                             <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 text-slate-400" /><span className="text-sm text-slate-700">{order.customerPhone || 'Sin teléfono'}</span></div>
                             <div className="text-xs text-slate-400">
-                              <p>Pago: <span className="font-bold text-slate-600 capitalize">{order.paymentMethod?.replace('_', ' ')}</span></p>
+                              <p>Pago: <span className="font-bold text-slate-600">{PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod?.replaceAll('_', ' ')}</span></p>
                               {order.paymentPhone && <p>Tel. SINPE: <span className="font-bold text-slate-600">{order.paymentPhone}</span></p>}
                             </div>
                           </div>
