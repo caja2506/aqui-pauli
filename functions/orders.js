@@ -6,6 +6,7 @@ const { CRM_DEFAULT_FIELDS, updateCrmOnOrderCreated } = require("./crm");
 const { sendPaidOrderEmail } = require("./lib/orderEmail");
 const { computeTotalsCRC } = require("./lib/pricing");
 const fulfillment = require("./lib/orderFulfillment");
+const { normalizeCustomerNotes } = require("./lib/customerNotes.mjs");
 
 const telegramBotToken = defineSecret("TELEGRAM_BOT_TOKEN");
 const telegramChatId = defineSecret("TELEGRAM_CHAT_ID");
@@ -25,6 +26,9 @@ exports.createOrderWithReservation = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "Debes iniciar sesión para crear un pedido.");
     const data = request.data || {};
     const customerName = clean(data.customerName, 150);
+    let customerNotes;
+    try { customerNotes = normalizeCustomerNotes(data.customerNotes); }
+    catch (error) { throw new HttpsError("invalid-argument", error.message); }
     const paymentMethod = data.paymentMethod;
     if (!customerName || !PAYMENT_METHODS.has(paymentMethod)) throw new HttpsError("invalid-argument", "Datos de pedido incompletos.");
     if (!Array.isArray(data.items) || !data.items.length || data.items.length > 50) throw new HttpsError("invalid-argument", "Items inválidos.");
@@ -107,7 +111,7 @@ exports.createOrderWithReservation = onCall(
             version: 1, state: "reserved", createdAt: now,
             lines: reserveLines.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),
           } } : {}),
-          notes: "", createdAt: now, updatedAt: now,
+          customerNotes, notes: "", createdAt: now, updatedAt: now,
         });
         for (const item of orderItems) transaction.set(orderRef.collection("items").doc(item.itemId), item);
       });

@@ -66,13 +66,13 @@ jobs:
           --no-package-lock --ignore-scripts --no-audit --no-fund
           @firebase/rules-unit-testing@6.0.0 firebase@13.1.0
 
-      - name: Verify giveaway privacy with a local emulator before loading credentials
+      - name: Verify orders and giveaway privacy with a local emulator before loading credentials
         env:
           NODE_PATH: ${{ runner.temp }}/giveaway-rules-tools/node_modules
         run: >-
           firebase emulators:exec --only firestore
           --project demo-aqui-pauli-giveaway --config firebase.tilopay-emulator.json
-          "node functions/test/firestore-giveaway.emulator.test.js"
+          "node functions/test/firestore-payments.emulator.test.js && node functions/test/firestore-giveaway.emulator.test.js"
 
       - name: Prepare Firebase application default credentials
         env:

@@ -16,6 +16,13 @@ const giveawayFiles = new Set([
   'functions/lib/giveawayPhone.mjs',
   'functions/test/giveaway.test.js', 'functions/test/firestore-giveaway.emulator.test.js',
 ]);
+// orders.js publica estos callables. El trigger de notificaciones conserva su
+// exclusión existente hasta configurar Gmail; no requiere desplegar pasarelas.
+const orderFiles = new Set([
+  'functions/orders.js', 'functions/lib/customerNotes.mjs',
+  'functions/test/order-payment-integration.test.js',
+  'functions/test/firestore-payments.emulator.test.js',
+]);
 
 function withoutGiveawayExport(source) {
   return source.replace(/^const giveaway = require\("\.\/giveaway"\);\r?\n/gm, '')
@@ -24,12 +31,15 @@ function withoutGiveawayExport(source) {
 
 export function firebaseDeployTargets(changedPaths, indexBefore = '', indexAfter = '') {
   const hasGiveawayChanges = changedPaths.some((path) => giveawayFiles.has(path));
+  const hasOrderChanges = changedPaths.some((path) => orderFiles.has(path));
   const otherFunctionsChanged = changedPaths.some((path) => path.startsWith('functions/')
-    && path !== 'functions/index.js' && !giveawayFiles.has(path));
+    && path !== 'functions/index.js' && !giveawayFiles.has(path) && !orderFiles.has(path));
   const indexChanged = changedPaths.includes('functions/index.js')
     && (!indexBefore || !indexAfter || withoutGiveawayExport(indexBefore) !== withoutGiveawayExport(indexAfter));
-  const names = hasGiveawayChanges && !otherFunctionsChanged && !indexChanged
-    ? ['enterGiveaway'] : [...existingFunctions, 'enterGiveaway'];
+  const names = (hasGiveawayChanges || hasOrderChanges) && !otherFunctionsChanged && !indexChanged
+    ? [...(hasOrderChanges ? ['createOrderWithReservation', 'deleteOrder'] : []),
+      ...(hasGiveawayChanges ? ['enterGiveaway'] : [])]
+    : [...existingFunctions, 'enterGiveaway'];
   return ['firestore:rules', ...names.map((name) => `functions:default:${name}`)].join(',');
 }
 

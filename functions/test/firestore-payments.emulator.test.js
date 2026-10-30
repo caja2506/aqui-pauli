@@ -62,6 +62,58 @@ describe("reglas de pagos (Firestore Emulator)", { skip: !process.env.FIRESTORE_
     await assertFails(sdk.setDoc(sdk.doc(d, "orders/o1/items/item_1"), cartItem()));
   });
 
+  test("notas del cliente son opcionales y admiten texto hasta 1000 caracteres en un pedido propio", async () => {
+    const values = [undefined, "", "Entregar después de las 3.\nTocar timbre.", "x".repeat(1000)];
+    for (const [index, customerNotes] of values.entries()) {
+      const d = db("owner");
+      const id = `notes-valid-${index}`;
+      const ref = sdk.doc(d, "orders", id);
+      const batch = sdk.writeBatch(d);
+      batch.set(ref, order("owner", { paymentMethod: "sinpe", ...(customerNotes === undefined ? {} : { customerNotes }) }));
+      batch.set(sdk.doc(d, "orders", id, "items/item_0"), cartItem());
+      await assertSucceeds(batch.commit());
+      const snapshot = await assertSucceeds(sdk.getDoc(ref));
+      if (customerNotes !== undefined && snapshot.data().customerNotes !== customerNotes) throw new Error("Las reglas alteraron las notas del pedido");
+      await assertFails(sdk.getDoc(sdk.doc(db("other"), "orders", id)));
+    }
+  });
+
+  test("notas no admiten objetos, números, null ni más de 1000 caracteres al crear", async () => {
+    for (const [index, customerNotes] of [null, false, 123, [], {}, "x".repeat(1001)].entries()) {
+      const d = db("owner"); const batch = sdk.writeBatch(d);
+      const id = `notes-invalid-${index}`;
+      batch.set(sdk.doc(d, "orders", id), order("owner", { paymentMethod: "sinpe", customerNotes }));
+      batch.set(sdk.doc(d, "orders", id, "items/item_0"), cartItem());
+      await assertFails(batch.commit());
+      await env.withSecurityRulesDisabled(async ctx => {
+        const saved = await sdk.getDoc(sdk.doc(ctx.firestore(), "orders", id));
+        if (saved.exists()) throw new Error("Un pedido con notas inválidas llegó a persistir");
+      });
+    }
+  });
+
+  test("el dueño no puede editar, borrar ni agregar customerNotes después de crear el pedido", async () => {
+    for (const paymentMethod of ["sinpe", "paypal", "tilopay"]) {
+      await seed({ paymentMethod, customerNotes: "Entregar por la tarde" });
+      const ref = sdk.doc(db("owner"), "orders/o1");
+      await assertFails(sdk.updateDoc(ref, { customerNotes: "Cambiar la entrega" }));
+      await assertFails(sdk.updateDoc(ref, { customerNotes: sdk.deleteField() }));
+      await assertFails(sdk.updateDoc(ref, { customerNotes: "Cambiar entrega", paymentStatus: "pagado", total: 1 }));
+      await seed({ paymentMethod });
+      await assertFails(sdk.updateDoc(ref, { customerNotes: "Agregar después" }));
+    }
+  });
+
+  test("agregar notas válidas no permite falsificar pago, reserva o propietario durante creación", async () => {
+    const notes = { customerNotes: "Dejar en recepción" };
+    for (const [index, extra] of [
+      { uid: "other" }, { customerUid: "other" }, { paymentStatus: "pagado" },
+      { paymentAmount: 100 }, { inventoryReservation: {} }, { paypal: {} },
+    ].entries()) {
+      await assertFails(sdk.setDoc(sdk.doc(db("owner"), "orders", `notes-forged-${index}`), order("owner", { ...notes, ...extra })));
+    }
+  });
+
   test("creación rechaza dueño ajeno y todo snapshot, reserva o pago aportado", async () => {
     for (const fields of [{ uid: "other" }, { customerUid: "other" }, { tilopay: {} }, { paypal: {} },
       { paymentAmount: 100 }, { inventoryReservation: {} }, { fulfillment: {} }, { paidEffects: {} },

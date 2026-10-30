@@ -60,6 +60,8 @@ function loadHandlers(seed, options = {}) {
     },
   };
   function load(filename) {
+    // Pure shared validators use the same ESM implementation as the web client.
+    if (filename.endsWith(".mjs")) return require(filename);
     filename = filename.endsWith(".js") ? filename : `${filename}.js`;
     if (specialFiles[filename]) return specialFiles[filename];
     if (cache.has(filename)) return cache.get(filename).exports;
@@ -125,6 +127,70 @@ test("createOrder: canonical prices/supplyType/owner; ignores client financial f
   assert.equal(order.itemsSummary[0].supplyType, "stock_propio");
   assert.equal(h.get(VARIANT).reservedStock, 2);
   assert.equal(order.inventoryReservation.state, "reserved");
+});
+
+test("createOrder: SINPE y PayPal persisten notas del cliente sin cambiar finanzas, dueño ni notas internas", async () => {
+  for (const paymentMethod of ["sinpe", "paypal"]) {
+    const body = { customerName: "Ana", paymentMethod,
+      uid: "other", customerUid: "other", subtotal: 1, total: 1, shippingCost: -1,
+      depositTotal: 1, remainingTotal: 1, paymentStatus: "pagado", status: "enviado",
+      notes: "No sobrescribir las notas internas",
+      items: [{ productId: "p1", variantId: "v1", quantity: 2, price: 1, supplyType: "bajo_pedido" }] };
+    const withoutNotes = loadHandlers(catalog());
+    const baseline = await withoutNotes.orders.createOrderWithReservation(request(body));
+    const withNotes = loadHandlers(catalog());
+    const raw = '  Entregar después de las 3.\n{"total":1,"paymentStatus":"pagado"}  ';
+    const created = await withNotes.orders.createOrderWithReservation(request({ ...body, customerNotes: raw }));
+    const saved = withNotes.get(`orders/${created.orderId}`);
+    assert.equal(saved.customerNotes, raw.trim());
+    assert.equal(saved.notes, "");
+    const comparable = (order) => {
+      const copy = structuredClone(order);
+      for (const key of ["customerNotes", "createdAt", "updatedAt"]) delete copy[key];
+      if (copy.inventoryReservation) delete copy.inventoryReservation.createdAt;
+      return copy;
+    };
+    assert.deepEqual(comparable(saved), comparable(withoutNotes.get(`orders/${baseline.orderId}`)));
+    assert.equal(saved.total, 90000);
+    assert.equal(saved.paymentStatus, "pendiente");
+    assert.equal(saved.status, "pendiente_pago");
+    assert.equal(saved.uid, "u1");
+    assert.equal(withNotes.get(VARIANT).reservedStock, 2);
+    assert.equal(withNotes.effects.paypal.length, 0);
+  }
+});
+
+test("createOrder: notas opcionales admiten ausencia, vacío y límite exacto sin recortar contenido", async () => {
+  for (const paymentMethod of ["sinpe", "paypal"]) {
+    for (const value of [undefined, null, "", " \n\t ", "x".repeat(1000), `  ${"x".repeat(1000)}  `]) {
+      const h = loadHandlers(catalog());
+      const result = await h.orders.createOrderWithReservation(request({ customerName: "Ana", paymentMethod,
+        ...(value === undefined ? {} : { customerNotes: value }),
+        items: [{ productId: "p1", variantId: "v1", quantity: 1 }] }));
+      const order = h.get(`orders/${result.orderId}`);
+      assert.equal(order.customerNotes, typeof value === "string" ? value.trim() : "");
+      assert.equal(order.total, 45000);
+      assert.equal(order.paymentAmount, 0);
+      assert.equal(order.paymentStatus, "pendiente");
+    }
+  }
+});
+
+test("createOrder: notas inválidas se rechazan antes de escribir pedido, reservar stock o ejecutar efectos", async () => {
+  for (const paymentMethod of ["sinpe", "paypal"]) {
+    for (const value of [false, 123, [], {}, { total: 1 }, "x".repeat(1001)]) {
+      const h = loadHandlers(catalog());
+      const original = structuredClone(h.store);
+      await assert.rejects(h.orders.createOrderWithReservation(request({ customerName: "Ana", paymentMethod,
+        customerNotes: value, items: [{ productId: "p1", variantId: "v1", quantity: 1 }] })),
+      { code: "invalid-argument", message: typeof value === "string"
+        ? "Las notas del pedido pueden tener hasta 1000 caracteres." : "Las notas del pedido deben ser texto." });
+      assert.deepEqual(h.store, original);
+      assert.equal(h.stats.commits, 0);
+      assert.equal(h.effects.crmCreated + h.effects.telegram + h.effects.email, 0);
+      assert.equal(h.effects.paypal.length, 0);
+    }
+  }
 });
 
 test("createOrder: persiste anticipo 50% solo Bajo pedido, saldo y líneas iguales al checkout", async () => {
