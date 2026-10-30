@@ -47,7 +47,19 @@ function render(relative, { item = product, variants = options, selected = null,
   const titles = [];
   const cartAdds = [];
   const buttons = [];
-  const componentReact = { ...React, useState(initial) { return React.useState(slot < states.length ? states[slot++] : initial); } };
+  const refs = [];
+  const stateUpdates = [];
+  const componentReact = { ...React,
+    useState(initial) {
+      const index = slot++;
+      const [value, setValue] = React.useState(index < states.length ? states[index] : initial);
+      return [value, change => {
+        stateUpdates.push({ index, value: typeof change === 'function' ? change(value) : change });
+        setValue(change);
+      }];
+    },
+    useRef(initial) { const ref = React.useRef(initial); refs.push(ref); return ref; },
+  };
   const jsx = require('react/jsx-runtime');
   const jsxSpies = { ...jsx, ...Object.fromEntries(['jsx', 'jsxs'].map(key => [key, (type, props, ...rest) => {
     if (type === 'button' && props?.onClick) buttons.push(props);
@@ -85,7 +97,8 @@ function render(relative, { item = product, variants = options, selected = null,
   const html = renderToStaticMarkup(React.createElement(MemoryRouter, { initialEntries: ['/producto/tenis'] },
     React.createElement(Routes, null, React.createElement(Route, { path: '/producto/:productId',
       element: React.createElement(Component, { product: item }) }))));
-  return { html, text: plain(html), price: plain(html.match(/<div[^>]*data-testid="product-price"[^>]*>([\s\S]*?)<\/div>/)?.[1] || ''), titles, cartAdds,
+  return { html, text: plain(html), price: plain(html.match(/<div[^>]*data-testid="product-price"[^>]*>([\s\S]*?)<\/div>/)?.[1] || ''), titles, cartAdds, buttons, refs, stateUpdates,
+    mobilePrice: plain(html.match(/<p[^>]*data-testid="product-mobile-price"[^>]*>([\s\S]*?)<\/p>/)?.[1] || ''),
     addToCart: buttons.find(button => childrenText(button.children).includes('Agregar al Carrito'))?.onClick };
 }
 
@@ -258,5 +271,69 @@ test('selección mínima y desempate son iguales aunque Firestore entregue otro 
     variant('first', 60000, { order: 0 })];
   for (const input of [variants, [...variants].reverse()]) {
     assert.equal(getProductPriceSummary(product, input).mainVariant.id, 'a');
+  }
+});
+
+test('móvil tiene una sola barra fija con precio exacto, cantidad y espacio inferior seguro', () => {
+  const page = render(PAGE, { selected: options[1], quantity: 2 });
+  assert.equal((page.html.match(/data-testid="product-purchase-bar"/g) || []).length, 1);
+  assert.match(page.html, /data-testid="product-purchase-bar" class="[^"]*fixed[^\"]*bottom-0[^\"]*lg:static/);
+  assert.ok(page.html.includes('pb-[calc(10rem+env(safe-area-inset-bottom,0px))]'));
+  assert.ok(page.html.includes('pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]'));
+  assert.equal(page.mobilePrice, page.price);
+  assert.equal(page.mobilePrice, money(119000));
+  assert.equal(page.buttons.filter(button => childrenText(button.children).includes('Agregar al Carrito')).length, 1);
+  assert.match(page.html, /aria-label="Cantidad"/);
+  assert.match(page.html, /aria-pressed="true"[^>]*>Rojo 34<\/button>/);
+});
+
+test('sin selección la barra muestra Desde y lleva a la primera variante disponible sin agregar', () => {
+  const page = render(PAGE);
+  assert.equal(page.mobilePrice, `Desde ${money(100000)}`);
+  const button = page.buttons.find(button => childrenText(button.children) === 'Elegí una variante');
+  assert.ok(button);
+  assert.equal(button['aria-controls'], 'product-variants');
+  const calls = [];
+  page.refs[0].current = {
+    scrollIntoView: options => calls.push(['scroll', options]),
+    querySelector: selector => { calls.push(['selector', selector]); return { focus: options => calls.push(['focus', options]) }; },
+  };
+  button.onClick();
+  assert.deepEqual(calls, [
+    ['scroll', { behavior: 'smooth', block: 'center' }],
+    ['selector', 'button:not(:disabled)'], ['focus', { preventScroll: true }],
+  ]);
+  assert.equal(page.cartAdds.length, 0);
+});
+
+test('un doble toque inmediato en Agregar no duplica la línea y conserva la cantidad', () => {
+  const page = render(PAGE, { selected: options[1], quantity: 2 });
+  page.addToCart();
+  page.addToCart();
+  assert.equal(page.cartAdds.length, 1);
+  assert.equal(page.cartAdds[0][2], 2);
+  assert.equal(page.cartAdds[0][1].price, 119000);
+});
+
+test('los controles de cantidad tienen etiquetas y no permiten bajar de una unidad', () => {
+  const single = render(PAGE, { selected: options[1] });
+  const less = single.buttons.find(button => button['aria-label'] === 'Disminuir cantidad');
+  assert.equal(less.disabled, true);
+  less.onClick();
+  assert.equal(single.stateUpdates.at(-1).value, 1);
+  const page = render(PAGE, { selected: options[1], quantity: 3 });
+  page.buttons.find(button => button['aria-label'] === 'Aumentar cantidad').onClick();
+  assert.equal(page.stateUpdates.at(-1).value, 4);
+  page.buttons.find(button => button['aria-label'] === 'Disminuir cantidad').onClick();
+  assert.equal(page.stateUpdates.at(-1).value, 2);
+});
+
+test('la barra no habilita compra para una consulta fallida o sin variantes comprables', () => {
+  for (const options of [{ variants: [], error: true },
+    { variants: [variant('sold-out', 25000, { commercialStatus: 'agotado' })] },
+    { variants: [variant('invalid', 0)] }]) {
+    const page = render(PAGE, options);
+    assert.ok(!page.html.includes('data-testid="product-purchase-bar"'));
+    assert.equal(page.addToCart, undefined);
   }
 });

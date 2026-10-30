@@ -16,8 +16,10 @@ import { SINPE_INFO } from '../../utils/constants';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
+import usePageTitle from '../../hooks/usePageTitle';
 
 export default function CheckoutPage() {
+  usePageTitle('Checkout | Aquí Pauli');
   const { user, loading: authLoading, ensureGuestSession } = useAuth();
   const [guestError, setGuestError] = useState(null);
   const { items, subtotal, clearCart } = useCart();
@@ -36,10 +38,10 @@ export default function CheckoutPage() {
     paymentMethod: '',
     shippingType: 'normal',
     paymentPhone: '',
+    customerNotes: '',
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
-  const [loadingCrm, setLoadingCrm] = useState(true);
   // Disponibilidad de pasarelas online (PayPal, a futuro Tilopay)
   const [availability, setAvailability] = useState({});
   const [paypalQuote, setPaypalQuote] = useState(null);
@@ -64,16 +66,9 @@ export default function CheckoutPage() {
     });
   }, [authLoading, user, items.length]);
 
-  // PayPal es la opción recomendada: se preselecciona si está disponible y el cliente aún no eligió
-  // (un cliente recurrente conserva su método preferido del CRM).
-  useEffect(() => {
-    if (loadingCrm || !availability.paypal?.available) return;
-    setForm(prev => (prev.paymentMethod ? prev : { ...prev, paymentMethod: 'paypal' }));
-  }, [loadingCrm, availability.paypal?.available]);
-
   // Cargar datos del CRM para pre-llenar
   useEffect(() => {
-    if (!user?.uid || user.isAnonymous) { setLoadingCrm(false); return; }
+    if (!user?.uid || user.isAnonymous) return;
     const loadCrmData = async () => {
       try {
         const crmDoc = await getDoc(doc(db, 'crm_contacts', user.uid));
@@ -90,14 +85,11 @@ export default function CheckoutPage() {
             distrito: crm.lastAddress?.distrito || '',
             codigoPostal: crm.lastAddress?.codigoPostal || '',
             señas: crm.lastAddress?.señas || '',
-            paymentMethod: crm.preferredPaymentMethod || '',
             paymentPhone: crm.paymentPhone || '',
           }));
         }
       } catch (err) {
         console.error('Error loading CRM data:', err);
-      } finally {
-        setLoadingCrm(false);
       }
     };
     loadCrmData();
@@ -185,8 +177,8 @@ export default function CheckoutPage() {
     }
   };
 
-  // PayPal primero (opción recomendada); el resto conserva su orden.
-  const paymentMethods = [...listPaymentMethods(availability)].sort((a, b) => (b.id === 'paypal') - (a.id === 'paypal'));
+  // Cada compra requiere una elección explícita, también para clientes recurrentes.
+  const paymentMethods = listPaymentMethods(availability);
   const selectedMethod = getPaymentMethod(form.paymentMethod);
   const OnlinePanel = isOnlineMethod(form.paymentMethod) && availability[form.paymentMethod]?.available ? selectedMethod.Panel : null;
   const paypalSelected = form.paymentMethod === 'paypal';
@@ -207,6 +199,7 @@ export default function CheckoutPage() {
     if (!form.canton) newErrors.canton = 'Cantón requerido';
     if (!form.distrito) newErrors.distrito = 'Distrito requerido';
     if (!form.señas.trim()) newErrors.señas = 'Señas requeridas';
+    if (form.customerNotes.length > 1000) newErrors.customerNotes = 'Las notas pueden tener hasta 1000 caracteres.';
     if (!form.paymentMethod || !paymentMethods.some(m => m.id === form.paymentMethod)) newErrors.paymentMethod = 'Selecciona método de pago';
     if (form.paymentMethod === 'sinpe' && !form.paymentPhone.trim()) {
       newErrors.paymentPhone = 'Teléfono de SINPE requerido';
@@ -222,6 +215,7 @@ export default function CheckoutPage() {
     customerName: form.name,
     customerPhone: form.phone,
     customerCedula: form.cedula,
+    customerNotes: form.customerNotes.trim(),
     paymentMethod,
     paymentPhone: form.paymentPhone,
     subtotal,
@@ -251,10 +245,13 @@ export default function CheckoutPage() {
     const data = buildOrderData(paymentMethod);
     const key = JSON.stringify(data);
     if (pendingOrderRef.current?.key === key) return pendingOrderRef.current.promise;
-    const pending = { key, promise: paymentMethod === 'paypal' ? createPaypalPendingOrder(data) : createOrder(data) };
+    const pending = { key, customerNotes: data.customerNotes,
+      promise: paymentMethod === 'paypal' ? createPaypalPendingOrder(data) : createOrder(data) };
     pendingOrderRef.current = pending;
     try {
-      return await pending.promise;
+      const result = await pending.promise;
+      pending.orderId = result.orderId;
+      return result;
     } catch (error) {
       if (pendingOrderRef.current === pending) pendingOrderRef.current = null;
       throw error;
@@ -265,7 +262,8 @@ export default function CheckoutPage() {
     clearCart();
     navigate(`/orden-confirmada/${orderId}`, {
       state: { orderNumber, total: confirmedQuote?.crcTotal ?? total, paymentMethod: form.paymentMethod,
-        paid: paypalResult !== 'pending', online: true, paypalQuote: confirmedQuote, partial },
+        paid: paypalResult !== 'pending', online: true, paypalQuote: confirmedQuote, partial,
+        customerNotes: pendingOrderRef.current?.orderId === orderId ? pendingOrderRef.current.customerNotes : undefined },
     });
   };
 
@@ -280,7 +278,8 @@ export default function CheckoutPage() {
       const result = await createOrder(buildOrderData(form.paymentMethod));
 
       clearCart();
-      navigate(`/orden-confirmada/${result.orderId}`, { state: { orderNumber: result.orderNumber, total, paymentMethod: form.paymentMethod, backorder: computeBackorder(items, shippingCost) } });
+      navigate(`/orden-confirmada/${result.orderId}`, { state: { orderNumber: result.orderNumber, total, paymentMethod: form.paymentMethod,
+        customerNotes: form.customerNotes.trim(), backorder: computeBackorder(items, shippingCost) } });
     } catch (err) {
       console.error('Error creating order:', err);
       const errorMessage = err?.code === 'functions/failed-precondition'
@@ -407,9 +406,10 @@ export default function CheckoutPage() {
                   <label key={opt.type} className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${form.shippingType === opt.type ? 'border-rose-400 bg-rose-50' : 'border-slate-200 hover:border-rose-200'}`}>
                     <div className="flex items-center gap-3">
                       <input type="radio" name="shipping" value={opt.type} checked={form.shippingType === opt.type} onChange={() => handleChange('shippingType', opt.type)} className="accent-rose-600" />
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-sm font-bold text-slate-900">{opt.label}</p>
                         <p className="text-xs text-slate-400">{opt.estimatedDays}</p>
+                        {opt.description && <p className="text-xs text-slate-500 mt-1">{opt.description}</p>}
                       </div>
                     </div>
                     <span className="text-sm font-black text-emerald-600">{opt.price > 0 ? formatCRC(opt.price) : 'Envío incluido'}</span>
@@ -419,21 +419,38 @@ export default function CheckoutPage() {
             )}
           </div>
 
+          <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm space-y-2">
+            <label htmlFor="checkout-customer-notes" className="block font-black text-lg text-slate-900">Notas del pedido (opcional)</label>
+            <p id="checkout-customer-notes-help" className="text-sm text-slate-500">Podés agregar indicaciones para preparar o entregar tu pedido.</p>
+            <textarea
+              id="checkout-customer-notes"
+              value={form.customerNotes}
+              onChange={e => handleChange('customerNotes', e.target.value)}
+              maxLength={1000}
+              rows={3}
+              aria-invalid={Boolean(errors.customerNotes)}
+              aria-describedby={`checkout-customer-notes-help checkout-customer-notes-count${errors.customerNotes ? ' checkout-customer-notes-error' : ''}`}
+              placeholder="Ej.: llamar antes de entregar."
+              className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 resize-y ${errors.customerNotes ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}
+            />
+            <p id="checkout-customer-notes-count" className="text-xs text-slate-400 text-right">{form.customerNotes.length}/1000 caracteres</p>
+            {errors.customerNotes && <p id="checkout-customer-notes-error" role="alert" className="text-xs text-red-500">{errors.customerNotes}</p>}
+          </div>
+
           {/* Payment */}
           <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm space-y-4">
             <h2 className="font-black text-lg text-slate-900">Método de Pago</h2>
+            {!form.paymentMethod && <p className="text-sm text-slate-500">Elegí cómo querés pagar este pedido.</p>}
             {errors.paymentMethod && <p className="text-xs text-red-500">{errors.paymentMethod}</p>}
             <div className="space-y-2">
               {paymentMethods.map(({ id: key, label, icon }) => {
                 const Icon = icon || CreditCard;
-                const recommended = key === 'paypal';
                 const selected = form.paymentMethod === key;
                 return (
-                  <label key={key} className={`relative flex items-center gap-3 p-4 rounded-xl border cursor-pointer transition-all ${recommended ? (selected ? 'border-2 border-emerald-500 bg-emerald-50 shadow-md' : 'border-2 border-emerald-400 bg-emerald-50/50 hover:bg-emerald-50') : selected ? 'border-rose-400 bg-rose-50' : 'border-slate-200 hover:border-rose-200'}`}>
-                    <input type="radio" name="payment" value={key} checked={selected} onChange={() => handleChange('paymentMethod', key)} className={recommended ? 'accent-emerald-600' : 'accent-rose-600'} />
+                  <label key={key} className={`relative flex items-center gap-3 p-4 rounded-xl border cursor-pointer transition-all ${selected ? 'border-rose-400 bg-rose-50' : 'border-slate-200 hover:border-rose-200'}`}>
+                    <input type="radio" name="payment" value={key} checked={selected} onChange={() => handleChange('paymentMethod', key)} className="accent-rose-600" />
                     <Icon className="w-5 h-5 text-slate-500" />
                     <span className="text-sm font-bold text-slate-900">{label}</span>
-                    {recommended && <span className="ml-auto text-[11px] font-black uppercase tracking-wide bg-emerald-600 text-white px-2.5 py-1 rounded-full">Recomendado</span>}
                   </label>
                 );
               })}

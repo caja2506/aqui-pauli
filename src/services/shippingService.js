@@ -113,7 +113,8 @@ export function getShippingOptions(canton) {
   const options = [
     {
       type: 'normal',
-      label: 'Envío Normal (Correos de Costa Rica)',
+      label: 'Envío Normal',
+      description: 'Mensajería local o Correos de Costa Rica, según tu zona.',
       price: SHIPPING_INCLUDED ? 0 : (isInGAM(canton) ? prices.normalGAM : prices.normalOutside),
       estimatedDays: isInGAM(canton) ? SHIPPING_DELIVERY_TIMES.normalGAM : SHIPPING_DELIVERY_TIMES.normalOutside,
     },

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
 import ProductCard from '../../components/storefront/ProductCard';
@@ -16,7 +17,14 @@ export default function CatalogPage() {
   const { data: brands } = useCollection('brands');
   const { data: categories } = useCollection('categories');
 
-  const [search, setSearch] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const search = searchParams.get('q') || '';
+  const setSearch = (query) => {
+    const next = new URLSearchParams(searchParams);
+    if (query) next.set('q', query);
+    else next.delete('q');
+    setSearchParams(next, { replace: true });
+  };
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -68,6 +76,8 @@ export default function CatalogPage() {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
+            type="search"
+            aria-label="Buscar productos"
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Buscar productos..."

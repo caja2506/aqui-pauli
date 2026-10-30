@@ -18,6 +18,7 @@ import LoginPage from './components/auth/LoginPage';
 import HomePage from './pages/store/HomePage';
 import CatalogPage from './pages/store/CatalogPage';
 import ProductPage from './pages/store/ProductPage';
+import CartPage from './pages/store/CartPage';
 import CheckoutPage from './pages/store/CheckoutPage';
 import OrderConfirmation from './pages/store/OrderConfirmation';
 import TilopayReturnPage from './pages/store/TilopayReturnPage';
@@ -119,8 +120,7 @@ export default function App() {
           <Route path="/devoluciones" element={<DevolucionesPage />} />
           <Route path="/envios" element={<EnviosPage />} />
           <Route path="/privacidad" element={<PrivacidadPage />} />
-          {/* El carrito es un panel lateral; la página real de compra es /checkout */}
-          <Route path="/carrito" element={<Navigate to="/checkout" replace />} />
+          <Route path="/carrito" element={<CartPage />} />
           {/* 404 real dentro del layout de la tienda */}
           <Route path="*" element={<NotFoundPage />} />
         </Route>

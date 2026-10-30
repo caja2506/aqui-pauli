@@ -1,6 +1,6 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowRight, Truck, Shield, CreditCard, ShoppingBag } from 'lucide-react';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ArrowRight, Truck, Shield, CreditCard, ShoppingBag, Search } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
 import ProductCard from '../../components/storefront/ProductCard';
 import LoadError from '../../components/ui/LoadError';
@@ -9,8 +9,15 @@ import usePageTitle from '../../hooks/usePageTitle';
 
 export default function HomePage() {
   usePageTitle('Aquí Pauli | Tienda online en Costa Rica');
+  const navigate = useNavigate();
+  const [search, setSearch] = useState('');
   const { data: products, loading, error, retry } = useCollection('products', { orderByField: 'createdAt', orderDirection: 'desc' });
   const activeProducts = products.filter(p => p.active && !p.deleted && !p.unlisted).slice(0, 8);
+  const handleSearch = (event) => {
+    event.preventDefault();
+    const query = search.trim();
+    navigate(query ? `/catalogo?${new URLSearchParams({ q: query })}` : '/catalogo');
+  };
 
   return (
     <div className="min-h-screen">
@@ -21,7 +28,7 @@ export default function HomePage() {
           <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-rose-300 rounded-full blur-[150px]" />
           <div className="absolute bottom-1/4 right-1/4 w-72 h-72 bg-rose-200 rounded-full blur-[120px]" />
         </div>
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 sm:py-32">
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-24">
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 bg-white/60 backdrop-blur-sm px-4 py-2 rounded-full mb-6 border border-rose-200">
               <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -34,6 +41,22 @@ export default function HomePage() {
             <p className="text-lg text-slate-600 mt-6 leading-relaxed max-w-lg">
               Productos de calidad, con precios transparentes y envío seguro a todo el país. Compra fácil, rápido y sin complicaciones.
             </p>
+            <form role="search" aria-label="Buscar en la tienda" onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 mt-6 max-w-xl">
+              <label htmlFor="home-product-search" className="sr-only">Buscar productos</label>
+              <div className="relative flex-1 min-w-0">
+                <Search aria-hidden="true" className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  id="home-product-search"
+                  name="q"
+                  type="search"
+                  value={search}
+                  onChange={event => setSearch(event.target.value)}
+                  placeholder="Buscá perfumes, bolsos, zapatos…"
+                  className="w-full pl-12 pr-4 py-4 border border-rose-200 rounded-2xl text-base outline-none focus:ring-2 focus:ring-rose-500 bg-white shadow-sm"
+                />
+              </div>
+              <button type="submit" className="px-7 py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all">Buscar</button>
+            </form>
             <div className="flex flex-wrap gap-4 mt-8">
               <Link
                 to="/catalogo"
@@ -51,7 +74,7 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-12 relative z-10">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
-            { icon: Truck, title: 'Envío Nacional', desc: 'Con Correos de Costa Rica' },
+            { icon: Truck, title: 'Envío Nacional', desc: 'Mensajería local o Correos, según la zona' },
             { icon: Shield, title: 'Compra Segura', desc: 'Pago protegido y verificado' },
             { icon: CreditCard, title: 'Métodos de Pago', desc: 'SINPE, PayPal, Transferencia' },
           ].map((feat, i) => (

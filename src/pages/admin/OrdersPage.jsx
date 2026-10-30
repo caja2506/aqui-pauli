@@ -197,7 +197,7 @@ export default function OrdersPage() {
                 </div>
               ))}
               <div>
-                <label className="text-xs font-bold text-slate-500 block mb-1">Notas</label>
+                <label className="text-xs font-bold text-slate-500 block mb-1">Notas internas</label>
                 <textarea
                   value={editForm.notes || ''}
                   onChange={e => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
@@ -411,6 +411,12 @@ export default function OrdersPage() {
                         </div>
 
                         <div>
+                          {order.customerNotes && (
+                            <section className="mb-4" aria-label="Notas del cliente">
+                              <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Notas del cliente</h4>
+                              <p className="bg-white rounded-xl p-4 border border-slate-200 text-sm text-slate-700 whitespace-pre-wrap break-words">{order.customerNotes}</p>
+                            </section>
+                          )}
                           <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Datos del Cliente</h4>
                           <div className="bg-white rounded-xl p-4 border border-slate-200 space-y-2">
                             <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 text-slate-400" /><span className="text-sm text-slate-700">{order.customerPhone || 'Sin teléfono'}</span></div>

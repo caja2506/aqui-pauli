@@ -10,6 +10,7 @@ import { CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 import { backorderFromPaypalQuote } from '../../services/payments/paypalQuote';
+import usePageTitle from '../../hooks/usePageTitle';
 
 // Número de WhatsApp Business de Aquí Pauli (formato internacional sin +)
 const WHATSAPP_NUMBER = '50671613342';
@@ -55,6 +56,8 @@ export default function OrderConfirmation() {
   }, [user, orderId]);
 
   const orderNumber = savedOrder?.orderNumber || location.state?.orderNumber || orderId;
+  usePageTitle(orderNumber ? `Pedido ${orderNumber} | Aquí Pauli` : 'Confirmación de pedido | Aquí Pauli');
+  const customerNotes = savedOrder ? savedOrder.customerNotes : location.state?.customerNotes;
   const total = savedOrder?.total ?? location.state?.total ?? '';
   const paymentMethod = savedOrder?.paymentMethod || location.state?.paymentMethod || '';
   const isSinpe = paymentMethod === 'sinpe' || paymentMethod === 'sinpe_movil';
@@ -103,6 +106,13 @@ export default function OrderConfirmation() {
       )}
 
       {isGuest && <div className="mb-6 text-left"><SaveAccountPrompt /></div>}
+
+      {typeof customerNotes === 'string' && customerNotes.trim() && (
+        <section className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-left mb-6" data-testid="order-customer-notes">
+          <h2 className="text-sm font-bold text-slate-800 mb-2">Notas del pedido</h2>
+          <p className="whitespace-pre-wrap break-words text-sm text-slate-600">{customerNotes}</p>
+        </section>
+      )}
 
       {isPaypal && (savedOrder || paypalQuote) && (
         <div className="bg-sky-50 border-2 border-sky-200 rounded-2xl p-5 text-left mb-6 space-y-2" data-testid="paypal-confirmation">
