@@ -5,11 +5,12 @@ import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { formatCRC } from '../../utils/formatters';
-import { listPaymentMethods, getPaymentMethod, isOnlineMethod, ONLINE_PROVIDERS } from '../../services/payments/registry';
+import { listPaymentMethods, getPaymentMethod, isOnlineMethod, isCashOnDeliveryEligible, ONLINE_PROVIDERS } from '../../services/payments/registry';
 import { getProvincias, getCantones, getDistritos, buscarPorCodigoPostal } from '../../data/costaRicaTerritorial';
 import { calculateShippingCost, getShippingOptions } from '../../services/shippingService';
 import { createOrder } from '../../services/orderService';
 import { createPaypalPendingOrder } from '../../services/payments/paypalClient';
+import { createCashOnDeliveryOrder } from '../../services/payments/cashOnDeliveryClient';
 import { backorderFromPaypalQuote, paypalQuoteKey } from '../../services/payments/paypalQuote';
 import { computeBackorder, BACKORDER_DEPOSIT_LABEL, BACKORDER_BALANCE_TIMING } from '../../utils/backorder';
 import { SINPE_INFO } from '../../utils/constants';
@@ -17,6 +18,18 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import usePageTitle from '../../hooks/usePageTitle';
+import { GIVEAWAY_PHONE_ERROR, isValidGiveawayPhone } from '../../../functions/lib/giveawayPhone.mjs';
+
+// Mensajes de validación públicos del callable. Los errores desconocidos no se
+// muestran íntegros, para no presentar detalles internos al comprador.
+const CASH_VALIDATION_MESSAGES = new Set([
+  'Ingresá tu nombre completo para coordinar la entrega.',
+  'Ingresá un correo válido para coordinar la entrega.',
+  GIVEAWAY_PHONE_ERROR,
+  'Completá provincia, cantón, distrito y señas exactas para la entrega.',
+  'Las notas del pedido deben ser texto.',
+  'Las notas del pedido pueden tener hasta 1000 caracteres.',
+]);
 
 export default function CheckoutPage() {
   usePageTitle('Checkout | Aquí Pauli');
@@ -47,6 +60,12 @@ export default function CheckoutPage() {
   const [paypalQuote, setPaypalQuote] = useState(null);
   // Pedido pendiente ya creado para el intento de pago online actual (evita duplicados)
   const pendingOrderRef = useRef(null);
+  const submittingRef = useRef(false);
+  const cashOnDeliveryEligible = isCashOnDeliveryEligible(items);
+  const invalidCashOnDeliverySelection = form.paymentMethod === 'contra_entrega' && !cashOnDeliveryEligible;
+  // Derivar la selección válida evita mostrar un radio activo o aceptar un
+  // envío antes de que un efecto alcance a reaccionar al cambio del carrito.
+  const selectedPaymentMethod = invalidCashOnDeliverySelection ? '' : form.paymentMethod;
 
   useEffect(() => {
     let cancelled = false;
@@ -178,10 +197,11 @@ export default function CheckoutPage() {
   };
 
   // Cada compra requiere una elección explícita, también para clientes recurrentes.
-  const paymentMethods = listPaymentMethods(availability);
-  const selectedMethod = getPaymentMethod(form.paymentMethod);
-  const OnlinePanel = isOnlineMethod(form.paymentMethod) && availability[form.paymentMethod]?.available ? selectedMethod.Panel : null;
-  const paypalSelected = form.paymentMethod === 'paypal';
+  const paymentMethods = listPaymentMethods(availability, { items });
+  const selectedMethod = getPaymentMethod(selectedPaymentMethod);
+  const OnlinePanel = isOnlineMethod(selectedPaymentMethod) && availability[selectedPaymentMethod]?.available ? selectedMethod.Panel : null;
+  const paypalSelected = selectedPaymentMethod === 'paypal';
+  const cashOnDeliverySelected = selectedPaymentMethod === 'contra_entrega';
   const activePaypalQuote = paypalQuote?.key === paypalQuoteKey(items, form.canton, form.shippingType) ? paypalQuote.quote : null;
   const paymentSummary = paypalSelected ? backorderFromPaypalQuote(activePaypalQuote) : backorder;
   const showPaymentDeposit = paymentSummary?.hasBackorder && paymentSummary.depositTotal > 0
@@ -191,8 +211,12 @@ export default function CheckoutPage() {
   const validateForm = () => {
     const newErrors = {};
     if (!form.name.trim()) newErrors.name = 'Nombre requerido';
-    if (!form.phone.trim()) newErrors.phone = 'Teléfono requerido';
-    else if (form.phone.replace(/\D/g, '').length < 8) newErrors.phone = 'Teléfono inválido (mínimo 8 dígitos)';
+    if (cashOnDeliverySelected) {
+      if (!isValidGiveawayPhone(form.phone)) newErrors.phone = GIVEAWAY_PHONE_ERROR;
+    } else {
+      if (!form.phone.trim()) newErrors.phone = 'Teléfono requerido';
+      else if (form.phone.replace(/\D/g, '').length < 8) newErrors.phone = 'Teléfono inválido (mínimo 8 dígitos)';
+    }
     if (!form.email.trim()) newErrors.email = 'Correo requerido';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) newErrors.email = 'Correo inválido';
     if (!form.provincia) newErrors.provincia = 'Selecciona provincia';
@@ -200,7 +224,11 @@ export default function CheckoutPage() {
     if (!form.distrito) newErrors.distrito = 'Distrito requerido';
     if (!form.señas.trim()) newErrors.señas = 'Señas requeridas';
     if (form.customerNotes.length > 1000) newErrors.customerNotes = 'Las notas pueden tener hasta 1000 caracteres.';
-    if (!form.paymentMethod || !paymentMethods.some(m => m.id === form.paymentMethod)) newErrors.paymentMethod = 'Selecciona método de pago';
+    if (!selectedPaymentMethod || !paymentMethods.some(m => m.id === selectedPaymentMethod)) newErrors.paymentMethod = 'Selecciona método de pago';
+    if (invalidCashOnDeliverySelection) {
+      newErrors.paymentMethod = 'Contra entrega solo está disponible cuando todos los productos están en stock. Elegí otro método de pago.';
+      setForm(prev => ({ ...prev, paymentMethod: '' }));
+    }
     if (form.paymentMethod === 'sinpe' && !form.paymentPhone.trim()) {
       newErrors.paymentPhone = 'Teléfono de SINPE requerido';
     }
@@ -270,24 +298,39 @@ export default function CheckoutPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     // Los métodos online pagan desde su propio panel
-    if (OnlinePanel) return;
+    if (OnlinePanel || submittingRef.current) return;
     if (!validateForm()) return;
 
+    submittingRef.current = true;
     setSubmitting(true);
     try {
-      const result = await createOrder(buildOrderData(form.paymentMethod));
+      const data = buildOrderData(selectedPaymentMethod);
+      const result = cashOnDeliverySelected
+        ? await createCashOnDeliveryOrder(data) : await createOrder(data);
 
       clearCart();
-      navigate(`/orden-confirmada/${result.orderId}`, { state: { orderNumber: result.orderNumber, total, paymentMethod: form.paymentMethod,
-        customerNotes: form.customerNotes.trim(), backorder: computeBackorder(items, shippingCost) } });
+      navigate(`/orden-confirmada/${result.orderId}`, { state: {
+        orderNumber: result.orderNumber, total: cashOnDeliverySelected ? result.total : total, paymentMethod: selectedPaymentMethod,
+        customerNotes: data.customerNotes,
+        ...(cashOnDeliverySelected
+          ? { paid: false, online: false, paymentStatus: 'pendiente', amountDueOnDelivery: result.amountDueOnDelivery }
+          : { backorder: computeBackorder(items, shippingCost) }),
+      } });
     } catch (err) {
-      console.error('Error creating order:', err);
-      const errorMessage = err?.code === 'functions/failed-precondition'
+      if (cashOnDeliverySelected) console.error('Error creating cash-on-delivery order:', err?.code || 'unknown');
+      else console.error('Error creating order:', err);
+      const cashValidationError = cashOnDeliverySelected && err?.code === 'functions/invalid-argument';
+      const errorMessage = cashValidationError
+        ? (CASH_VALIDATION_MESSAGES.has(err.message) ? err.message : 'Revisá tu nombre, teléfono, correo y dirección de entrega e intentá de nuevo.')
+        : err?.code === 'functions/failed-precondition'
         ? err.message || 'Stock insuficiente para uno o más productos.'
         : err?.code === 'functions/unauthenticated'
           ? 'Tu sesión expiró. Por favor inicia sesión de nuevo.'
           : 'Error al crear el pedido. Intenta de nuevo.';
-      setErrors({ submit: errorMessage });
+      setErrors({ submit: errorMessage,
+        ...(cashValidationError && errorMessage === GIVEAWAY_PHONE_ERROR ? { phone: GIVEAWAY_PHONE_ERROR } : {}),
+      });
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -324,9 +367,9 @@ export default function CheckoutPage() {
                 {errors.cedula && <p className="text-xs text-red-500 mt-1">{errors.cedula}</p>}
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Teléfono</label>
-                <input value={form.phone} onChange={e => handleChange('phone', e.target.value)} placeholder="8888-8888" className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 ${errors.phone ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
-                {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone}</p>}
+                <label htmlFor="checkout-phone" className="text-xs font-bold text-slate-400 uppercase mb-1 block">Teléfono</label>
+                <input id="checkout-phone" type="tel" autoComplete="tel" value={form.phone} onChange={e => handleChange('phone', e.target.value)} placeholder="8888-8888" aria-invalid={Boolean(errors.phone)} aria-describedby={errors.phone ? 'checkout-phone-error' : undefined} className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 ${errors.phone ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
+                {errors.phone && <p id="checkout-phone-error" role="alert" className="text-xs text-red-500 mt-1">{errors.phone}</p>}
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Email</label>
@@ -440,12 +483,14 @@ export default function CheckoutPage() {
           {/* Payment */}
           <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm space-y-4">
             <h2 className="font-black text-lg text-slate-900">Método de Pago</h2>
-            {!form.paymentMethod && <p className="text-sm text-slate-500">Elegí cómo querés pagar este pedido.</p>}
+            {!selectedPaymentMethod && <p className="text-sm text-slate-500">Elegí cómo querés pagar este pedido.</p>}
             {errors.paymentMethod && <p className="text-xs text-red-500">{errors.paymentMethod}</p>}
+            {invalidCashOnDeliverySelection && <p role="alert" className="text-sm text-amber-800">La selección de contra entrega dejó de ser válida porque el carrito cambió. Elegí otro método de pago.</p>}
+            {!cashOnDeliveryEligible && <p className="text-xs text-slate-500">Contra entrega solo está disponible para pedidos con todos sus productos en stock. Los productos Bajo pedido requieren el apartado del {BACKORDER_DEPOSIT_LABEL}.</p>}
             <div className="space-y-2">
               {paymentMethods.map(({ id: key, label, icon }) => {
                 const Icon = icon || CreditCard;
-                const selected = form.paymentMethod === key;
+                const selected = selectedPaymentMethod === key;
                 return (
                   <label key={key} className={`relative flex items-center gap-3 p-4 rounded-xl border cursor-pointer transition-all ${selected ? 'border-rose-400 bg-rose-50' : 'border-slate-200 hover:border-rose-200'}`}>
                     <input type="radio" name="payment" value={key} checked={selected} onChange={() => handleChange('paymentMethod', key)} className="accent-rose-600" />
@@ -455,6 +500,12 @@ export default function CheckoutPage() {
                 );
               })}
             </div>
+            {cashOnDeliverySelected && (
+              <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50" data-testid="cash-on-delivery-instructions">
+                <p className="text-sm font-bold text-emerald-900">Pagás el total en efectivo al recibir tu pedido.</p>
+                <p className="text-sm text-emerald-900 mt-1">No necesitás adelanto ni comprobante de pago. Revisaremos el stock y el monto al confirmar el pedido.</p>
+              </div>
+            )}
             {paypalSelected && paymentMethods.some(m => m.id === 'paypal') && (
               <div className="flex gap-3 p-4 rounded-xl border-2 border-emerald-300 bg-emerald-50" data-testid="paypal-trust-note">
                 <ShieldCheck className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
@@ -536,6 +587,13 @@ export default function CheckoutPage() {
               {paypalSelected && !paymentSummary && (
                 <p className="text-xs text-sky-800">El servidor confirmará el monto a pagar ahora y el saldo antes de habilitar PayPal.</p>
               )}
+              {cashOnDeliverySelected && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-1.5" data-testid="cash-on-delivery-summary">
+                  <p className="text-sm font-bold text-emerald-900">Pagás ahora {formatCRC(0)}</p>
+                  <p className="text-sm font-black text-emerald-900">Pagás al recibir {formatCRC(total)}</p>
+                  <p className="text-xs text-emerald-800">En efectivo, por el total del pedido.</p>
+                </div>
+              )}
               {paypalSelected && paymentSummary && !showPaymentDeposit && (
                 <p className="text-sm font-black text-sky-900">Pagás ahora {formatCRC(paymentSummary.payNowTotal)}</p>
               )}
@@ -570,7 +628,8 @@ export default function CheckoutPage() {
               disabled={submitting}
               className="w-full py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
-              {submitting ? 'Procesando...' : (showDeposit ? `Apartá con ${formatCRC(backorder.payNowTotal)} (${BACKORDER_DEPOSIT_LABEL})` : `Confirmar Pedido · ${formatCRC(total)}`)}
+              {submitting ? 'Procesando...' : cashOnDeliverySelected ? 'Confirmar pedido contra entrega'
+                : (showDeposit ? `Apartá con ${formatCRC(backorder.payNowTotal)} (${BACKORDER_DEPOSIT_LABEL})` : `Confirmar Pedido · ${formatCRC(total)}`)}
             </button>
             )}
           </div>

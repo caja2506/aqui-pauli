@@ -13,6 +13,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { transformWithEsbuild } from 'vite';
 import { formatCRC } from '../src/utils/formatters.js';
 import { paypalQuoteKey, isPayablePaypalQuote, samePaypalQuote } from '../src/services/payments/paypalQuote.js';
+import { GIVEAWAY_PHONE_ERROR } from '../functions/lib/giveawayPhone.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url);
@@ -33,6 +34,7 @@ const realFiles = [
   'src/components/ui/StatusBadge.jsx', 'src/utils/shippingText.js',
   'src/utils/shippingDelivery.js', 'src/utils/productPrice.js', 'src/hooks/usePageTitle.js',
   'functions/lib/catalogPrice.mjs',
+  'functions/lib/giveawayPhone.mjs',
   'src/components/legal/LegalLayout.jsx',
 ];
 
@@ -82,7 +84,8 @@ function renderPage(relative, options = {}) {
   const navigations = [];
   const cache = new Map();
   const abs = (name) => path.join(root, name);
-  const user = { uid: 'render-test-user', displayName: 'Ana Prueba', email: 'ana@example.invalid', isAnonymous: false };
+  const user = Object.hasOwn(options, 'user') ? options.user
+    : { uid: 'render-test-user', displayName: 'Ana Prueba', email: 'ana@example.invalid', isAnonymous: false };
   const paypalProvider = {
     id: 'paypal', kind: 'online', label: 'PayPal / Tarjeta',
     getAvailability: options.allowCheckoutEffects ? async () => ({ available: Boolean(options.paypalAvailable) }) : forbidden('PayPal availability'),
@@ -104,6 +107,9 @@ function renderPage(relative, options = {}) {
     }) }],
     [abs('src/firebase.js'), { db: {} }],
     [abs('src/services/orderService.js'), { createOrder: options.createOrder || forbidden('order creation') }],
+    [abs('src/services/payments/cashOnDeliveryClient.js'), {
+      createCashOnDeliveryOrder: options.createCashOnDeliveryOrder || forbidden('cash-on-delivery order creation'),
+    }],
     [abs('src/services/payments/paypalClient.js'), { ...Object.fromEntries([
       'createPaypalPendingOrder', 'loadPaypalSdk', 'paypalCaptureOrder', 'paypalCreateOrder', 'paypalGetConfig', 'paypalGetQuote',
     ].map((name) => [name, forbidden(name)])), ...(options.paypalClient || {}) }],
@@ -359,7 +365,7 @@ test('cada checkout comienza sin método preseleccionado y sin distintivo recome
     crmData: { displayName: 'Cliente recurrente', preferredPaymentMethod: 'paypal' },
   });
   const paymentInputs = [...page.html.matchAll(/<input\b[^>]*name="payment"[^>]*>/g)].map(([tag]) => tag);
-  assert.equal(paymentInputs.length, 3);
+  assert.equal(paymentInputs.length, 4);
   assert.ok(paymentInputs.every((tag) => !/\bchecked/.test(tag)));
   contains(page.html, 'Elegí cómo querés pagar este pedido.');
   assert.doesNotMatch(page.html, /Recomendado|data-testid="paypal-trust-note"|data-testid="paypal-panel"/);
@@ -403,6 +409,185 @@ const validCheckoutForm = {
   name: 'Ana Prueba', email: 'ana@example.invalid', phone: '88888888',
   provincia: 'Alajuela', canton: 'Grecia', distrito: 'Grecia', señas: 'Dirección ficticia de prueba', paymentPhone: '88888888',
 };
+
+test('contra entrega aparece solo en carritos compuestos enteramente por stock conocido', () => {
+  for (const items of [[line('stock_propio', 30000)], [line('stock_propio', 30000, 'p1'), line('stock_propio', 22000, 'p2')]]) {
+    const { html } = renderPage(CHECKOUT, { items, paymentMethod: '', paypalAvailable: true });
+    assert.match(html, /name="payment"[^>]*value="contra_entrega"/);
+    contains(html, 'Contra entrega (efectivo)');
+    assert.doesNotMatch(html, /name="payment"[^>]*checked/);
+    assert.match(html, /value="sinpe"/);
+    assert.match(html, /value="transferencia"/);
+    assert.match(html, /value="paypal"/);
+  }
+  for (const items of [[], [line('bajo_pedido', 32000)],
+    [line('stock_propio', 30000), line('bajo_pedido', 32000)], [line(undefined, 30000)], [line('otro', 30000)]]) {
+    const { html } = renderPage(CHECKOUT, { items, paymentMethod: '' });
+    assert.doesNotMatch(html, /name="payment"[^>]*value="contra_entrega"/);
+    if (items.length) contains(html, 'Contra entrega solo está disponible para pedidos con todos sus productos en stock.');
+  }
+});
+
+test('contra entrega anuncia cero adelanto y el total al recibir, sin pago online ni comprobante', () => {
+  const { html, paypalTotals } = renderPage(CHECKOUT, {
+    items: [line('stock_propio', 52000)], paymentMethod: 'contra_entrega', paypalAvailable: true,
+  });
+  contains(html, `Pagás ahora ${formatCRC(0)}`);
+  contains(html, `Pagás al recibir ${formatCRC(52000)}`);
+  contains(html, 'Pagás el total en efectivo al recibir tu pedido.');
+  contains(html, 'Confirmar pedido contra entrega');
+  assert.match(html, /data-testid="cash-on-delivery-summary"/);
+  assert.doesNotMatch(html, /data-testid="deposit-summary"|data-testid="paypal-panel"|data-testid="paypal-trust-note"/);
+  assert.doesNotMatch(html, /Teléfono SINPE|Datos para transferencia/);
+  assert.deepEqual(paypalTotals, []);
+});
+
+test('invitado confirma contra entrega por el servicio canónico y muestra el total devuelto por el servidor', async () => {
+  const calls = [];
+  let cleared = 0;
+  const page = renderPage(CHECKOUT, {
+    items: [line('stock_propio', 30000)], paymentMethod: 'contra_entrega',
+    user: { uid: 'anonymous-owner', isAnonymous: true },
+    form: { ...validCheckoutForm, paymentPhone: '', customerNotes: '  Llamar al llegar.  ' },
+    createCashOnDeliveryOrder: async data => {
+      calls.push(data);
+      return { orderId: 'cod-server', orderNumber: 'AP-COD', total: 32000, amountDueOnDelivery: 32000 };
+    },
+    clearCart: () => { cleared++; },
+  });
+  await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].paymentMethod, 'contra_entrega');
+  assert.equal(calls[0].customerNotes, 'Llamar al llegar.');
+  assert.equal(calls[0].isGuest, true);
+  assert.equal(cleared, 1);
+  assert.deepEqual(page.navigations, [['/orden-confirmada/cod-server', { state: {
+    orderNumber: 'AP-COD', total: 32000, paymentMethod: 'contra_entrega', customerNotes: 'Llamar al llegar.',
+    paid: false, online: false, paymentStatus: 'pendiente', amountDueOnDelivery: 32000,
+  } }]]);
+});
+
+test('una selección de contra entrega queda invalidada al encontrar Bajo pedido sin esperar efectos', async () => {
+  const page = renderPage(CHECKOUT, {
+    items: [line('stock_propio', 30000), line('bajo_pedido', 32000)],
+    paymentMethod: 'contra_entrega', form: validCheckoutForm, allowCheckoutEffects: true,
+    user: { uid: 'anonymous-owner', isAnonymous: true },
+  });
+  await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+  assert.match(page.checkoutStates[2].paymentMethod, /todos los productos están en stock/);
+  assert.equal(page.navigations.length, 0);
+  assert.doesNotMatch(page.html, /data-testid="cash-on-delivery-summary"/);
+  assert.doesNotMatch(page.html, /name="payment"[^>]*checked/);
+  contains(page.html, 'La selección de contra entrega dejó de ser válida porque el carrito cambió.');
+  contains(page.html, `Apartá con ${formatCRC(46000)} (50%)`);
+  assert.equal(page.checkoutStates[1].paymentMethod, '');
+  assert.match(page.checkoutStates[2].paymentMethod, /Elegí otro método de pago/);
+});
+
+test('doble toque de confirmar contra entrega reutiliza la petición en curso y no duplica reservas', async () => {
+  let resolve;
+  const pending = new Promise(done => { resolve = done; });
+  let calls = 0;
+  let cleared = 0;
+  const page = renderPage(CHECKOUT, {
+    items: [line('stock_propio', 52000)], paymentMethod: 'contra_entrega', form: validCheckoutForm,
+    createCashOnDeliveryOrder: () => { calls++; return pending; }, clearCart: () => { cleared++; },
+  });
+  const submit = page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit;
+  const first = submit({ preventDefault() {} });
+  await submit({ preventDefault() {} });
+  assert.equal(calls, 1);
+  assert.equal(cleared, 0);
+  resolve({ orderId: 'single-cod', orderNumber: 'AP-COD-ONE', total: 52000, amountDueOnDelivery: 52000 });
+  await first;
+  assert.equal(cleared, 1);
+  assert.equal(page.navigations.length, 1);
+});
+
+test('si el catálogo rechaza contra entrega, conserva el carrito y muestra el error del servidor', async () => {
+  const page = renderPage(CHECKOUT, {
+    items: [line('stock_propio', 52000)], paymentMethod: 'contra_entrega', form: validCheckoutForm,
+    createCashOnDeliveryOrder: async () => {
+      throw Object.assign(new Error('Contra entrega no está disponible: el producto cambió a Bajo pedido.'), { code: 'functions/failed-precondition' });
+    },
+  });
+  await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+  assert.equal(page.navigations.length, 0);
+  assert.match(page.checkoutStates[2].submit, /producto cambió a Bajo pedido/);
+  assert.equal(page.checkoutStates[3], false);
+});
+
+test('contra entrega acepta teléfono local y prefijo de Costa Rica sin exigir número SINPE', async () => {
+  for (const phone of ['83100015', '+506 8310-0015', '506 8310 0015', '50612345']) {
+    const calls = [];
+    const page = renderPage(CHECKOUT, {
+      items: [line('stock_propio', 52000)], paymentMethod: 'contra_entrega',
+      form: { ...validCheckoutForm, phone, paymentPhone: '' }, clearCart() {},
+      createCashOnDeliveryOrder: async data => {
+        calls.push(data);
+        return { orderId: 'cod-phone', orderNumber: 'AP-PHONE', total: 52000, amountDueOnDelivery: 52000 };
+      },
+    });
+    await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+    assert.equal(calls.length, 1);
+    assert.equal(page.navigations.length, 1);
+    assert.equal(page.checkoutStates[2].phone, undefined);
+    assert.equal(page.checkoutStates[1].phone, phone, 'El texto del campo no se recorta silenciosamente');
+  }
+});
+
+test('teléfono COD de diez dígitos o prefijo repetido se rechaza antes del servicio con error asociado al campo', async () => {
+  for (const phone of ['8310001512', '+5068310001512', '+50650683100015', '18310001', '8310ABC5']) {
+    let calls = 0;
+    const options = { items: [line('stock_propio', 52000)], paymentMethod: 'contra_entrega',
+      form: { ...validCheckoutForm, phone }, createCashOnDeliveryOrder: async () => { calls++; } };
+    const page = renderPage(CHECKOUT, options);
+    await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+    assert.equal(calls, 0);
+    assert.equal(page.navigations.length, 0);
+    assert.equal(page.checkoutStates[2].phone, GIVEAWAY_PHONE_ERROR);
+    assert.equal(page.checkoutStates[1].phone, phone);
+    const errorPage = renderPage(CHECKOUT, { ...options, errors: page.checkoutStates[2] });
+    contains(errorPage.html, GIVEAWAY_PHONE_ERROR);
+    assert.match(errorPage.html, /id="checkout-phone-error" role="alert"/);
+    const input = errorPage.checkoutElements.find(({ type, props }) => type === 'input' && props.id === 'checkout-phone');
+    assert.equal(input.props['aria-invalid'], true);
+    assert.equal(input.props['aria-describedby'], 'checkout-phone-error');
+    assert.equal(input.props.maxLength, undefined, 'No limitar el campo antes de poder explicar el error');
+  }
+});
+
+test('la validación de teléfono de otros métodos conserva el comportamiento existente', async () => {
+  for (const paymentMethod of ['sinpe', 'transferencia']) {
+    let calls = 0;
+    const page = renderPage(CHECKOUT, {
+      items: [line('stock_propio', 52000)], paymentMethod, form: { ...validCheckoutForm, phone: '1234567890' }, clearCart() {},
+      createOrder: async () => { calls++; return { orderId: 'manual-phone', orderNumber: 'AP-MANUAL' }; },
+    });
+    await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+    assert.equal(calls, 1);
+    assert.equal(page.checkoutStates[2].phone, undefined);
+  }
+});
+
+test('COD presenta invalid-argument públicos conocidos y oculta mensajes internos desconocidos', async () => {
+  for (const message of [GIVEAWAY_PHONE_ERROR,
+    'Ingresá tu nombre completo para coordinar la entrega.',
+    'Ingresá un correo válido para coordinar la entrega.',
+    'Completá provincia, cantón, distrito y señas exactas para la entrega.',
+    'Internal detail: credential=DO-NOT-DISPLAY']) {
+    const page = renderPage(CHECKOUT, {
+      items: [line('stock_propio', 52000)], paymentMethod: 'contra_entrega', form: validCheckoutForm,
+      createCashOnDeliveryOrder: async () => { throw Object.assign(new Error(message), { code: 'functions/invalid-argument' }); },
+    });
+    await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+    assert.equal(page.navigations.length, 0);
+    assert.equal(page.checkoutStates[2].submit, message.startsWith('Internal detail:')
+      ? 'Revisá tu nombre, teléfono, correo y dirección de entrega e intentá de nuevo.' : message);
+    assert.doesNotMatch(page.checkoutStates[2].submit, /DO-NOT-DISPLAY/);
+    if (message === GIVEAWAY_PHONE_ERROR) assert.equal(page.checkoutStates[2].phone, GIVEAWAY_PHONE_ERROR);
+  }
+});
 
 test('las notas opcionales muestran límite y descripción accesible sin recortar texto por código', () => {
   const page = renderPage(CHECKOUT, { items: [line('stock_propio', 30000)], form: { customerNotes: 'Llamar antes.' } });
@@ -501,12 +686,13 @@ test('las políticas reflejan los medios de pago disponibles y el apartado solo 
   const shipping = renderPage(LEGAL, { exportName: 'EnviosPage', url: '/envios' }).html;
   const terms = renderPage(LEGAL, { exportName: 'TerminosPage', url: '/terminos' }).html;
   const returns = renderPage(LEGAL, { exportName: 'DevolucionesPage', url: '/devoluciones' }).html;
-  contains(shipping, 'El pago contra entrega, en efectivo o por SINPE Móvil, no está disponible');
-  contains(terms, 'El pago contra entrega no está disponible');
-  contains(shipping, 'Los productos en stock se pagan completos');
+  contains(shipping, 'Si todos los productos están en stock, podés elegir contra entrega en efectivo');
+  contains(shipping, 'pagás el monto completo al recibir, sin adelanto');
+  contains(terms, 'Contra entrega en efectivo: disponible cuando todos los productos del pedido están en stock');
+  contains(shipping, 'Si tu pedido incluye productos Bajo pedido, no se ofrece contra entrega.');
   contains(shipping, 'el 50% de esas líneas y el importe completo de las líneas en stock');
-  assert.doesNotMatch(text(shipping), /Ofrecemos pago contra entrega|pagas cuando recibes/);
-  assert.doesNotMatch(text(terms), /cuando aceptamos el pago contra entrega/);
+  assert.doesNotMatch(text(shipping), /El pago contra entrega, en efectivo o por SINPE Móvil, no está disponible/);
+  assert.doesNotMatch(text(terms), /El pago contra entrega no está disponible para los pedidos realizados en la tienda en línea/);
   assert.doesNotMatch(text(returns), /Pago contra entrega: el reembolso/);
 });
 

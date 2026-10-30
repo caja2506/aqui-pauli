@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { Package, ChevronRight, ShoppingBag, LogIn } from 'lucide-react';
 import { formatCRC, formatDateTime } from '../../utils/formatters';
-import { ORDER_STATUS_LABELS, humanizeStatus } from '../../utils/constants';
+import { ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS, humanizeStatus } from '../../utils/constants';
 
 const PAYMENT_STATUS_LABELS = {
   pendiente: { text: '💳 Pendiente', color: 'bg-red-50 text-red-600' },
@@ -98,7 +98,14 @@ export default function MyOrdersPage() {
           const items = order.itemsSummary || [];
           const total = order.total || (order.subtotal || 0) + (order.shippingCost || 0);
           const statusLabel = ORDER_STATUS_LABELS[order.status] || humanizeStatus(order.status);
-          const paymentInfo = PAYMENT_STATUS_LABELS[order.paymentStatus] || PAYMENT_STATUS_LABELS.pendiente;
+          const isCashOnDelivery = order.paymentMethod === 'contra_entrega';
+          const cashPaid = ['pagado', 'verificado'].includes(order.paymentStatus);
+          const cashCancelled = order.status === 'cancelado';
+          const paymentInfo = isCashOnDelivery
+            ? (cashCancelled ? { text: 'Contra entrega cancelado', color: 'bg-slate-100 text-slate-600' }
+              : cashPaid ? { text: '💵 Efectivo recibido', color: 'bg-emerald-50 text-emerald-700' }
+                : { text: '💵 Pago al recibir', color: 'bg-amber-50 text-amber-700' })
+            : PAYMENT_STATUS_LABELS[order.paymentStatus] || PAYMENT_STATUS_LABELS.pendiente;
 
           return (
             <div key={order.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -143,8 +150,17 @@ export default function MyOrdersPage() {
                 </div>
               </div>
 
+              {isCashOnDelivery && (
+                <div className="px-4 py-3 text-sm text-blue-900 bg-blue-50" data-testid="my-order-cash-on-delivery">
+                  <p className="font-bold">{PAYMENT_METHOD_LABELS.contra_entrega}</p>
+                  <p>{cashCancelled ? 'Pedido cancelado. No tenés un cobro contra entrega pendiente.'
+                    : cashPaid ? 'El pago en efectivo ya está registrado.'
+                      : <>Pagás <strong>{formatCRC(total)}</strong> en efectivo al recibir tu pedido.</>}</p>
+                </div>
+              )}
+
               {/* WhatsApp para enviar comprobante si pago pendiente */}
-              {(order.paymentStatus === 'pendiente' || !order.paymentStatus) && (
+              {!isCashOnDelivery && (order.paymentStatus === 'pendiente' || !order.paymentStatus) && (
                 <div className="px-4 pb-4">
                   <a
                     href={`https://wa.me/50671613342?text=${encodeURIComponent(`¡Hola! Envío mi comprobante para el pedido ${order.orderNumber}`)}`}

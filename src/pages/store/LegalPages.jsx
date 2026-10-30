@@ -60,8 +60,9 @@ export function TerminosPage() {
           <li>SINPE Móvil y transferencia bancaria (envías el comprobante por WhatsApp).</li>
           <li>PayPal, cobrado en dólares al tipo de cambio de referencia que se muestra antes de pagar.</li>
           <li>Tarjeta de crédito o débito en colones: próximamente.</li>
+          <li>Contra entrega en efectivo: disponible cuando todos los productos del pedido están en stock. Pagás el monto completo al recibir, sin adelanto.</li>
         </ul>
-        <p>El pago contra entrega no está disponible para los pedidos realizados en la tienda en línea.</p>
+        <p>Si el carrito incluye productos Bajo pedido, el pago inicial incluye el 50% de esas líneas y el importe completo de las líneas en stock. En esos pedidos no se ofrece contra entrega; el saldo de los productos Bajo pedido se paga cuando el pedido esté listo para entregarse.</p>
         <p>No vemos ni guardamos los datos de tu tarjeta: los pagos con tarjeta los procesa la pasarela de pago, en su página segura.</p>
       </Section>
       <Section title="5. Envíos, devoluciones y reembolsos">
@@ -116,7 +117,7 @@ export function DevolucionesPage() {
         </ul>
       </Section>
       <Section title="6. Cancelación antes del envío">
-        <p>Puedes cancelar tu pedido antes de que sea despachado, escribiéndonos con tu número de pedido, y te reembolsamos el 100 %. Una vez despachado, aplican las condiciones de devolución de esta página.</p>
+        <p>Puedes cancelar tu pedido antes de que sea despachado, escribiéndonos con tu número de pedido, y te reembolsamos el 100 % de lo que hayas pagado. Una vez despachado, aplican las condiciones de devolución de esta página.</p>
       </Section>
       <Section title="7. Disputas">
         <p>Si tienes un problema con tu compra, escríbenos primero: lo resolvemos lo antes posible. También conservas tus derechos como consumidor ante tu banco y ante el Ministerio de Economía, Industria y Comercio (MEIC).</p>
@@ -140,8 +141,8 @@ export function EnviosPage() {
         <p>Los plazos se cuentan en días hábiles desde que se confirma tu pedido o tu pago. Si algún producto necesita más tiempo, te avisamos por WhatsApp antes del despacho.</p>
       </Section>
       <Section title="3. Pago del pedido">
-        <p>Elegís entre los métodos disponibles al finalizar la compra. El pago contra entrega, en efectivo o por SINPE Móvil, no está disponible para los pedidos realizados en la tienda en línea.</p>
-        <p>Los productos en stock se pagan completos. Si tu pedido incluye productos Bajo pedido, el pago inicial incluye el 50% de esas líneas y el importe completo de las líneas en stock. El resumen de la compra muestra el monto a pagar ahora y el saldo pendiente.</p>
+        <p>Elegís entre los métodos disponibles al finalizar la compra. Si todos los productos están en stock, podés elegir contra entrega en efectivo: pagás el monto completo al recibir, sin adelanto. También podés pagar antes de la entrega por SINPE Móvil, transferencia o PayPal.</p>
+        <p>Si tu pedido incluye productos Bajo pedido, no se ofrece contra entrega. El pago inicial incluye el 50% de esas líneas y el importe completo de las líneas en stock. El resumen de la compra muestra el monto a pagar ahora y el saldo pendiente.</p>
         <p>El saldo de los productos Bajo pedido se paga cuando el pedido esté listo para entregarse. Te avisamos por WhatsApp antes de despacharlo.</p>
       </Section>
       <Section title="4. Mensajería">
