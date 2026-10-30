@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { CheckCircle2, Gift, Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGiveaway, useGiveawayEntry, useGiveawayProducts } from '../../hooks/useGiveaway';
+import usePageTitle from '../../hooks/usePageTitle';
 import { CONTACT } from '../../components/legal/LegalLayout';
 import { GIVEAWAY, enterGiveaway, giveawayErrorMessage, giveawayPrizeLabel, searchGiveawayProducts } from '../../services/giveawayService';
 import { formatCRC } from '../../utils/formatters';
@@ -20,6 +21,7 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [phoneError, setPhoneError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const phoneInput = useRef(null);
   const catalog = useGiveawayProducts();
   const selected = catalog.products.find((product) => product.productId === form.productId);
@@ -27,9 +29,22 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
   // Mantiene visible la selección existente cuando se busca otra colonia.
   const visibleChoices = selected && !filtered.some((product) => product.productId === selected.productId)
     ? [selected, ...filtered] : filtered;
-  const canSubmit = canEnter && !catalog.loading && !catalog.error && Boolean(selected);
+  // Permitimos intentar enviar para explicar los datos o casillas que faltan.
+  // Solo bloqueamos cuando no hay un catálogo disponible o se está guardando.
+  const canSubmit = canEnter && !catalog.loading && !catalog.error && catalog.products.length > 0;
   const busy = useRef(false);
-  const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const update = (field, value) => {
+    if (fieldErrors[field]) setFieldErrors((current) => ({ ...current, [field]: '' }));
+    setForm((current) => ({ ...current, [field]: value }));
+  };
+  const validationErrors = [
+    ['giveaway-name', fieldErrors.fullName],
+    ['giveaway-phone', phoneError],
+    ['giveaway-email', fieldErrors.email],
+    ['giveaway-product', fieldErrors.productId],
+    ['giveaway-eligibility', fieldErrors.eligibilityAccepted],
+    ['giveaway-privacy', fieldErrors.privacyConsent],
+  ].filter(([, message]) => message);
   const updatePhone = (input, showError = false) => {
     const valid = isValidGiveawayPhone(input.value);
     input.setCustomValidity(valid ? '' : GIVEAWAY_PHONE_ERROR);
@@ -42,17 +57,36 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (busy.current || !canSubmit) return;
+    const errors = {};
+    const name = typeof form.fullName === 'string' ? form.fullName.trim().replace(/\s+/g, ' ') : '';
+    if (name.length < 3 || name.length > 120 || /[\u0000-\u001f\u007f]/.test(form.fullName)) {
+      errors.fullName = 'Ingresá tu nombre completo (entre 3 y 120 caracteres).';
+    }
     if (!isValidGiveawayPhone(form.phone)) {
-      setPhoneError(GIVEAWAY_PHONE_ERROR);
-      phoneInput.current?.setCustomValidity(GIVEAWAY_PHONE_ERROR);
-      phoneInput.current?.focus();
-      phoneInput.current?.reportValidity();
+      errors.phone = GIVEAWAY_PHONE_ERROR;
+    }
+    const email = typeof form.email === 'string' ? form.email.trim() : '';
+    if (email.length > 254 || !/^[^\s@<>\u0000-\u001f\u007f]+@[^\s@<>\u0000-\u001f\u007f]+\.[^\s@<>\u0000-\u001f\u007f]+$/.test(email)) {
+      errors.email = 'Ingresá un correo electrónico válido para contactarte sobre el sorteo.';
+    }
+    if (!selected) errors.productId = 'Escogé una colonia de la lista para participar.';
+    if (form.eligibilityAccepted !== true) {
+      errors.eligibilityAccepted = 'Confirmá que sos mayor de 18 años y tenés una dirección en Costa Rica.';
+    }
+    if (form.privacyConsent !== true) {
+      errors.privacyConsent = 'Autorizá el uso de tus datos para administrar el sorteo y contactarte.';
+    }
+    const { phone, ...otherErrors } = errors;
+    setPhoneError(phone || '');
+    phoneInput.current?.setCustomValidity(phone || '');
+    setFieldErrors(otherErrors);
+    setError('');
+    if (Object.keys(errors).length > 0) {
+      event.currentTarget?.elements?.namedItem(Object.keys(errors)[0])?.focus();
       return;
     }
-    setPhoneError('');
     busy.current = true;
     setSaving(true);
-    setError('');
     try {
       const result = await enterGiveaway({ ...form, phone: normalizeGiveawayPhone(form.phone) });
       onEntered(result);
@@ -65,13 +99,23 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6" data-testid="giveaway-form">
+    <form onSubmit={handleSubmit} noValidate className="space-y-6" data-testid="giveaway-form">
       <fieldset disabled={saving || !canEnter} className="space-y-6 disabled:opacity-70">
         <legend className="sr-only">Tus datos para participar</legend>
+        {validationErrors.length > 0 && (
+          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            <p className="font-bold">Revisá estos datos antes de participar:</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {validationErrors.map(([id, message]) => <li key={id}><a href={`#${id}`} className="underline underline-offset-2">{message}</a></li>)}
+            </ul>
+          </div>
+        )}
         <div>
           <label htmlFor="giveaway-name" className="mb-2 block text-sm font-bold text-slate-800">Nombre completo</label>
           <input id="giveaway-name" name="fullName" autoComplete="name" required minLength={3} maxLength={120}
+            aria-invalid={Boolean(fieldErrors.fullName)} aria-describedby={fieldErrors.fullName ? 'giveaway-name-error' : undefined}
             value={form.fullName} onChange={(event) => update('fullName', event.target.value)} className={fieldClass} />
+          {fieldErrors.fullName && <p id="giveaway-name-error" className="mt-2 text-sm text-red-700">{fieldErrors.fullName}</p>}
         </div>
         <div>
           <label htmlFor="giveaway-phone" className="mb-2 block text-sm font-bold text-slate-800">Teléfono de Costa Rica</label>
@@ -90,10 +134,11 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
           <label htmlFor="giveaway-email" className="mb-2 block text-sm font-bold text-slate-800">Correo electrónico</label>
           <input id="giveaway-email" name="email" type="email" autoComplete="email" required maxLength={254}
             readOnly={Boolean(user.email)} value={form.email} onChange={(event) => update('email', event.target.value)}
-            aria-describedby="giveaway-email-help" className={`${fieldClass} read-only:bg-rose-50/50`} />
+            aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? 'giveaway-email-help giveaway-email-error' : 'giveaway-email-help'} className={`${fieldClass} read-only:bg-rose-50/50`} />
           <p id="giveaway-email-help" className="mt-2 text-xs text-slate-500">
             {user.email ? 'Usamos el correo de tu cuenta de la tienda.' : 'Usaremos este correo para contactarte sobre el sorteo.'}
           </p>
+          {fieldErrors.email && <p id="giveaway-email-error" className="mt-2 text-sm text-red-700">{fieldErrors.email}</p>}
         </div>
         <section className="space-y-3" aria-labelledby="giveaway-prize-heading">
           <h2 id="giveaway-prize-heading" className="text-sm font-bold text-slate-800">¿Cuál colonia te gustaría ganar?</h2>
@@ -111,10 +156,12 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
                 placeholder="Nombre o marca, por ejemplo Versace" className={fieldClass} autoComplete="off" />
               <label htmlFor="giveaway-product" className="block text-sm font-bold text-slate-800">Colonia escogida</label>
               <select id="giveaway-product" name="productId" required value={selected?.productId || ''}
-                onChange={(event) => update('productId', event.target.value)} aria-describedby="giveaway-prize-help" className={fieldClass}>
+                onChange={(event) => update('productId', event.target.value)} aria-invalid={Boolean(fieldErrors.productId)}
+                aria-describedby={fieldErrors.productId ? 'giveaway-prize-help giveaway-product-error' : 'giveaway-prize-help'} className={fieldClass}>
                 <option value="">Escogé una colonia</option>
                 {visibleChoices.map((product) => <option key={product.productId} value={product.productId}>{product.productName} — {formatCRC(product.productPrice)}</option>)}
               </select>
+              {fieldErrors.productId && <p id="giveaway-product-error" className="text-sm text-red-700">{fieldErrors.productId}</p>}
               {filtered.length === 0 && <p role="status" className="text-sm text-slate-600">No hay coincidencias con esa búsqueda.</p>}
               {selected && <p className="rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-900">Colonia escogida: {selected.productName} — {formatCRC(selected.productPrice)}</p>}
               {form.productId && !selected && <p role="alert" className="text-sm text-red-700">La colonia elegida ya no está en la lista. Escogé otra antes de participar.</p>}
@@ -128,16 +175,24 @@ export function GiveawayForm({ user, onEntered, canEnter = true }) {
             El nombre, teléfono, correo, premio y las dos casillas obligatorias son necesarios para inscribirte. Podés solicitar acceso, rectificación, eliminación o retirar tu consentimiento por DM a{' '}
             <a href="https://www.instagram.com/aqui.paulina/" target="_blank" rel="noopener noreferrer" className={linkClass}>@aqui.paulina</a>.
           </p>
-          <label className="flex items-start gap-3 text-sm leading-relaxed text-slate-700">
-            <input type="checkbox" name="eligibilityAccepted" required checked={form.eligibilityAccepted}
-              onChange={(event) => update('eligibilityAccepted', event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-rose-600" />
-            <span>{GIVEAWAY.eligibilityText}</span>
-          </label>
-          <label className="flex items-start gap-3 text-sm leading-relaxed text-slate-700">
-            <input type="checkbox" name="privacyConsent" required checked={form.privacyConsent}
-              onChange={(event) => update('privacyConsent', event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-rose-600" />
-            <span>{GIVEAWAY.privacyConsentText}</span>
-          </label>
+          <div>
+            <label htmlFor="giveaway-eligibility" className="flex items-start gap-3 text-sm leading-relaxed text-slate-700">
+              <input id="giveaway-eligibility" type="checkbox" name="eligibilityAccepted" required checked={form.eligibilityAccepted}
+                aria-invalid={Boolean(fieldErrors.eligibilityAccepted)} aria-describedby={fieldErrors.eligibilityAccepted ? 'giveaway-eligibility-error' : undefined}
+                onChange={(event) => update('eligibilityAccepted', event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-rose-600" />
+              <span>{GIVEAWAY.eligibilityText}</span>
+            </label>
+            {fieldErrors.eligibilityAccepted && <p id="giveaway-eligibility-error" className="mt-2 text-sm text-red-700">{fieldErrors.eligibilityAccepted}</p>}
+          </div>
+          <div>
+            <label htmlFor="giveaway-privacy" className="flex items-start gap-3 text-sm leading-relaxed text-slate-700">
+              <input id="giveaway-privacy" type="checkbox" name="privacyConsent" required checked={form.privacyConsent}
+                aria-invalid={Boolean(fieldErrors.privacyConsent)} aria-describedby={fieldErrors.privacyConsent ? 'giveaway-privacy-error' : undefined}
+                onChange={(event) => update('privacyConsent', event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-rose-600" />
+              <span>{GIVEAWAY.privacyConsentText}</span>
+            </label>
+            {fieldErrors.privacyConsent && <p id="giveaway-privacy-error" className="mt-2 text-sm text-red-700">{fieldErrors.privacyConsent}</p>}
+          </div>
           <label className="flex items-start gap-3 text-sm leading-relaxed text-slate-700">
             <input type="checkbox" name="promotionsConsent" checked={form.promotionsConsent}
               onChange={(event) => update('promotionsConsent', event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-rose-600" />
@@ -170,6 +225,7 @@ function Receipt({ entry }) {
 }
 
 export default function GiveawayPage() {
+  usePageTitle('Sorteo | Aquí Pauli');
   const { user, loading: authLoading } = useAuth();
   const giveaway = useGiveaway();
   const uid = user && !user.isAnonymous ? user.uid : null;

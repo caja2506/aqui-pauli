@@ -320,8 +320,8 @@ export default function CheckoutPage() {
                 {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Cédula</label>
-                <input value={form.cedula} onChange={e => handleChange('cedula', e.target.value)} placeholder="0-0000-0000" className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 ${errors.cedula ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
+                <label htmlFor="checkout-cedula" className="text-xs font-bold text-slate-400 uppercase mb-1 block">Cédula (opcional)</label>
+                <input id="checkout-cedula" value={form.cedula} onChange={e => handleChange('cedula', e.target.value)} placeholder="0-0000-0000" className={`w-full px-4 py-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500 ${errors.cedula ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
                 {errors.cedula && <p className="text-xs text-red-500 mt-1">{errors.cedula}</p>}
               </div>
               <div>
@@ -438,7 +438,7 @@ export default function CheckoutPage() {
                 );
               })}
             </div>
-            {paymentMethods.some(m => m.id === 'paypal') && (
+            {paypalSelected && paymentMethods.some(m => m.id === 'paypal') && (
               <div className="flex gap-3 p-4 rounded-xl border-2 border-emerald-300 bg-emerald-50" data-testid="paypal-trust-note">
                 <ShieldCheck className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
                 <div>

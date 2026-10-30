@@ -5,8 +5,10 @@ import { useCollection } from '../../hooks/useCollection';
 import ProductCard from '../../components/storefront/ProductCard';
 import LoadError from '../../components/ui/LoadError';
 import GiveawayBanner from '../../components/storefront/GiveawayBanner';
+import usePageTitle from '../../hooks/usePageTitle';
 
 export default function HomePage() {
+  usePageTitle('Aquí Pauli | Tienda online en Costa Rica');
   const { data: products, loading, error, retry } = useCollection('products', { orderByField: 'createdAt', orderDirection: 'desc' });
   const activeProducts = products.filter(p => p.active && !p.deleted && !p.unlisted).slice(0, 8);
 

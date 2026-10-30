@@ -16,7 +16,8 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url);
 const PAGE = 'src/components/auth/LoginPage.jsx';
 const SERVICE = 'src/services/passwordReset.js';
-const files = [PAGE, SERVICE, 'src/components/auth/FacebookIcon.jsx'];
+const TITLE_HOOK = 'src/hooks/usePageTitle.js';
+const files = [PAGE, SERVICE, TITLE_HOOK, 'src/components/auth/FacebookIcon.jsx'];
 const compiled = new Map(await Promise.all(files.map(async (relative) => {
   const filename = path.join(root, relative);
   const result = await transformWithEsbuild(await readFile(filename, 'utf8'), filename, {
@@ -111,10 +112,11 @@ function runtime(options = {}) {
     const module = { exports: {} };
     cache.set(filename, module);
     const localRequire = (name) => {
-      if (name === 'react') return filename === abs(PAGE) ? localReact : React;
+      if (name === 'react') return [abs(PAGE), abs(TITLE_HOOK)].includes(filename) ? localReact : React;
       if (name === 'react/jsx-runtime') return jsxRuntime;
       if (name === 'lucide-react') return require(name);
       if (name === 'react-router-dom') return {
+        Link: ({ to, children, ...props }) => React.createElement('a', { ...props, href: to }, children),
         useLocation: () => location,
         useNavigate: () => (...args) => navigations.push(args),
       };
@@ -172,8 +174,37 @@ function runtime(options = {}) {
     return pending;
   }
   return { render, button, input, enter, openReset, submit, forms, inputs, buttons, sdkCalls,
-    authCalls, navigations, auth, service: () => load(abs(SERVICE)) };
+    authCalls, navigations, auth, service: () => load(abs(SERVICE)),
+    unmount: () => { hooks.forEach((hook) => hook.cleanup?.()); } };
 }
+
+test('login, registro y recuperación actualizan el título y permiten volver a la tienda', () => {
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  globalThis.document = { title: 'Catálogo | Aquí Pauli' };
+  try {
+    const app = runtime();
+    const checkStoreLink = (html) => {
+      assert.match(html, /<a\b[^>]*href="\/"[^>]*>[\s\S]*?Volver a la tienda[\s\S]*?<\/a>/);
+      contains(html, `© ${new Date().getFullYear()} Aquí Pauli`);
+    };
+    checkStoreLink(app.render());
+    assert.equal(document.title, 'Iniciar sesión | Aquí Pauli');
+    app.button('Crear Cuenta').onClick();
+    checkStoreLink(app.render());
+    assert.equal(document.title, 'Crear cuenta | Aquí Pauli');
+    app.button('Iniciar Sesión').onClick();
+    app.render();
+    checkStoreLink(app.openReset());
+    assert.equal(document.title, 'Restablecer contraseña | Aquí Pauli');
+    app.unmount();
+    assert.equal(document.title, 'Catálogo | Aquí Pauli');
+    assert.deepEqual(app.sdkCalls, []);
+    assert.deepEqual(app.authCalls, []);
+  } finally {
+    if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+    else delete globalThis.document;
+  }
+});
 
 test('SDK: normaliza espacios, usa español y entrega el enlace al handler de Firebase sin actionCodeSettings', async () => {
   const app = runtime();

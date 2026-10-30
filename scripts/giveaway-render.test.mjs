@@ -27,9 +27,11 @@ const SIDEBAR = 'src/components/admin/AdminSidebar.jsx';
 const CONFIG = 'functions/lib/giveawayConfig.json';
 const POLICY = 'functions/lib/giveawayCatalog.mjs';
 const PHONE_POLICY = 'functions/lib/giveawayPhone.mjs';
+const PAGE_TITLE = 'src/hooks/usePageTitle.js';
+const CATALOG_PRICE = 'functions/lib/catalogPrice.mjs';
 const files = [SERVICE, HOOK, BANNER, PAGE, BASES, LOGIN, HOME, CATALOG, ADMIN, APP, SIDEBAR,
-  POLICY, PHONE_POLICY, 'src/utils/giveawayExport.js', 'src/utils/formatters.js',
-  'src/components/legal/LegalLayout.jsx', 'src/components/auth/FacebookIcon.jsx'];
+  POLICY, PHONE_POLICY, CATALOG_PRICE, 'src/utils/giveawayExport.js', 'src/utils/formatters.js',
+  'src/components/legal/LegalLayout.jsx', 'src/components/auth/FacebookIcon.jsx', PAGE_TITLE];
 const config = JSON.parse(await readFile(path.join(root, CONFIG), 'utf8'));
 const compiled = new Map(await Promise.all(files.map(async (relative) => {
   const filename = path.join(root, relative);
@@ -104,6 +106,7 @@ function runtime(options = {}) {
     useState(initial) {
       let next = initial;
       if (initial && Object.hasOwn(initial, 'fullName') && options.form) next = options.form;
+      if (initial && typeof initial === 'object' && Object.keys(initial).length === 0 && options.fieldErrors) next = options.fieldErrors;
       if (initial === null && options.submitted) next = options.submitted;
       if (initial === '' && ++emptyStringSlot === 2 && options.search) next = options.search;
       if (initial === '' && emptyStringSlot === 3 && options.phoneError) next = options.phoneError;
@@ -157,6 +160,9 @@ function runtime(options = {}) {
     const module = { exports: {} };
     cache.set(filename, module);
     const localRequire = (name) => {
+      if (name === 'react' && filename === abs(PAGE_TITLE) && options.pageTitleEffects) {
+        return { ...React, useEffect: (effect) => options.pageTitleEffects.push(effect) };
+      }
       if (name === 'react') return filename === abs(HOOK) && options.hookReact ? options.hookReact
         : filename === abs(PAGE) || filename === abs(ADMIN) ? pageReact : filename === abs(LOGIN) ? loginReact : React;
       if (name === 'react/jsx-runtime') return jsxRuntime;
@@ -194,6 +200,24 @@ function runtime(options = {}) {
   }
   return { render, load: (relative) => load(abs(relative)), forms, links, buttons, calls, snapshots, updates, queries, writes, reads, inputs, selects };
 }
+
+test('la ruta del sorteo usa su título propio y lo restaura al salir', () => {
+  const effects = [];
+  const hadDocument = Object.hasOwn(globalThis, 'document');
+  const previousDocument = globalThis.document;
+  try {
+    globalThis.document = { title: 'Página anterior | Aquí Pauli' };
+    runtime({ pageTitleEffects: effects }).render();
+    assert.equal(effects.length, 1);
+    const cleanup = effects[0]();
+    assert.equal(globalThis.document.title, 'Sorteo | Aquí Pauli');
+    cleanup();
+    assert.equal(globalThis.document.title, 'Página anterior | Aquí Pauli');
+  } finally {
+    if (hadDocument) globalThis.document = previousDocument;
+    else delete globalThis.document;
+  }
+});
 
 test('banner exacto, rosado y enlazado a la inscripción', () => {
   const html = runtime().render(BANNER);
@@ -299,9 +323,9 @@ const validPhoneCases = [
   ['+506 5061-2345', '50612345'], ['506 5061-2345', '50612345'],
 ];
 const invalidPhones = [
-  '', '8888777', '888877777', '8888-77777', '8888a7777', '(8888)7777', '8888.7777',
+  '', '8888777', '888877777', '8888777711', '5068888777', '8888-77777', '8888a7777', '(8888)7777', '8888.7777',
   ...['0', '1', '3', '9'].map((start) => `${start}1234567`),
-  '+506 888877777', '506 888877777', '+506 506 88887777', '50650688887777',
+  '+506 888877777', '506 888877777', '+506 8888777711', '506 8888777711', '+506 506 88887777', '50650688887777',
   '+506 +506 88887777', '+507 88887777', '00506 88887777',
 ];
 const phoneTarget = (value) => ({ value, message: '', setCustomValidity(message) { this.message = message; } });
@@ -375,6 +399,71 @@ test('el error del teléfono es visible, está asociado al campo y se limpia al 
   assert.equal(target.message, '');
   assert.ok(app.updates.includes(''));
   assert.equal(lastFormUpdate(app, validForm).phone, '88887777');
+});
+
+test('un intento incompleto explica todos los campos y casillas pendientes sin llamar al servidor', async () => {
+  const form = { ...validForm, fullName: '', phone: '8888777711', email: 'sin-correo', productId: '',
+    eligibilityAccepted: false, privacyConsent: false };
+  const app = runtime({ user: { ...user, email: null }, form });
+  const html = app.render();
+  assert.match(html, /<form[^>]*noValidate=""/);
+  assert.equal(findButton(app, 'Participar en el sorteo').disabled, false);
+  const focused = [];
+  await app.forms[0].onSubmit({ preventDefault() {}, currentTarget: {
+    elements: { namedItem: (name) => ({ focus: () => focused.push(name) }) },
+  } });
+  assert.deepEqual(focused, ['fullName']);
+  assert.equal(app.calls.length, 0);
+  const fieldErrors = app.updates.find((value) => value && typeof value === 'object');
+  assert.deepEqual(Object.keys(fieldErrors).sort(), ['email', 'eligibilityAccepted', 'fullName', 'privacyConsent', 'productId'].sort());
+  const { GIVEAWAY_PHONE_ERROR } = app.load(PHONE_POLICY);
+  assert.ok(app.updates.includes(GIVEAWAY_PHONE_ERROR));
+  const shown = runtime({ user: { ...user, email: null }, form, fieldErrors, phoneError: GIVEAWAY_PHONE_ERROR }).render();
+  contains(shown, 'Revisá estos datos antes de participar:');
+  assert.match(shown, /name="phone"[^>]*value="8888777711"/);
+  for (const id of ['name', 'phone', 'email', 'product', 'eligibility', 'privacy']) {
+    assert.match(shown, new RegExp(`href="#giveaway-${id}"`));
+    assert.match(shown, new RegExp(`id="giveaway-${id}-error"`));
+    const field = shown.match(new RegExp(`<(?:input|select)[^>]*id="giveaway-${id}"[^>]*>`))?.[0];
+    assert.match(field, /aria-invalid="true"/);
+    assert.ok(field.includes(`giveaway-${id}-error`));
+  }
+});
+
+test('cada casilla obligatoria explica el error, recibe foco y bloquea el envío', async () => {
+  for (const [name, id, expectedText] of [
+    ['eligibilityAccepted', 'eligibility', 'mayor de 18 años'],
+    ['privacyConsent', 'privacy', 'uso de tus datos'],
+  ]) {
+    const form = { ...validForm, [name]: false };
+    const app = runtime({ form });
+    app.render();
+    assert.equal(findButton(app, 'Participar en el sorteo').disabled, false);
+    const focused = [];
+    await app.forms[0].onSubmit({ preventDefault() {}, currentTarget: {
+      elements: { namedItem: (field) => ({ focus: () => focused.push(field) }) },
+    } });
+    assert.deepEqual(focused, [name]);
+    assert.equal(app.calls.length, 0);
+    const fieldErrors = app.updates.find((value) => value && typeof value === 'object');
+    assert.deepEqual(Object.keys(fieldErrors), [name]);
+    assert.ok(fieldErrors[name].includes(expectedText));
+    const errored = runtime({ form, fieldErrors });
+    const shown = errored.render();
+    contains(shown, expectedText);
+    const field = shown.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0];
+    assert.match(field, new RegExp(`aria-describedby="giveaway-${id}-error"`));
+    const checkbox = errored.inputs.find((input) => input.name === name);
+    checkbox.onChange({ target: { checked: true } });
+    const updates = errored.updates.filter((value) => typeof value === 'function');
+    assert.equal(updates[0](fieldErrors)[name], '');
+    const correctedForm = updates.at(-1)(form);
+    const corrected = runtime({ form: correctedForm, call: async () => ({ data: receipt }) });
+    corrected.render();
+    await corrected.forms[0].onSubmit({ preventDefault() {} });
+    assert.equal(corrected.calls.length, 1);
+    assert.equal(corrected.calls[0].payload.promotionsConsent, false);
+  }
 });
 
 test('el correo puede completarse cuando el proveedor de cuenta no lo entrega', () => {
@@ -724,6 +813,27 @@ test('catálogo Firestore usa política compartida, precio de venta y no exige s
   assert.ok(app.reads.every((read) => !/bag\/variants|inactive\/variants|deleted\/variants|unlisted\/variants/.test(read)));
 });
 
+test('el selector muestra el mínimo válido de variantes activas sin sustituir un precio cero por el precio base', async () => {
+  const fixture = catalogFixture();
+  fixture['products/p1/variants'] = [
+    { id: 'first', active: true, price: 62000, order: 0 },
+    { id: 'inactive', active: false, price: 1000, order: 1 },
+    { id: 'deleted', active: true, deleted: true, price: 1000, order: 2 },
+    { id: 'invalid', active: true, price: '1000x', order: 3 },
+    { id: 'minimum', active: true, price: 45000, order: 4, stock: 0, supplyType: 'bajo_pedido' },
+  ];
+  fixture['products/p2/variants'] = [{ id: 'zero', active: true, price: 0 }];
+  const app = runtime({ firestore: fixture });
+  const products = await app.load(SERVICE).loadGiveawayProducts();
+  const product = products.find((item) => item.productId === 'p1');
+  assert.equal(product.productPrice, 45000);
+  assert.equal(product.variantId, 'minimum');
+  assert.equal(products.some((item) => item.productId === 'p2'), false);
+  const html = runtime({ catalog: { products } }).render();
+  contains(html, `${choices[0].productName} — ₡45 000`);
+  assert.ok(!plain(html).includes(choices[1].productName));
+});
+
 test('fallo de una consulta de variantes falla cerrado sin reemplazar precio por base', async () => {
   const app = runtime({ firestore: catalogFixture(), readError: (path) => path === 'products/p1/variants' });
   await assert.rejects(app.load(SERVICE).loadGiveawayProducts(), /Firestore unavailable/);
@@ -745,16 +855,17 @@ test('búsqueda ignora tildes y mayúsculas, conserva selección visible y no vu
   contains(noMatches, 'No hay coincidencias con esa búsqueda.');
 });
 
-test('selector entrega únicamente productId al formulario y bloquea una opción que desapareció', async () => {
+test('selector entrega únicamente productId y explica una opción que desapareció al enviar', async () => {
   const app = runtime();
   app.render();
   app.selects[0].onChange({ target: { value: 'p2' } });
   assert.deepEqual(app.updates.at(-1)(validForm), { ...validForm, productId: 'p2' });
   const missing = runtime({ form: { ...validForm, productId: 'removed' }, call: forbidden('removed product') });
   contains(missing.render(), 'La colonia elegida ya no está en la lista. Escogé otra antes de participar.');
-  assert.equal(findButton(missing, 'Participar en el sorteo').disabled, true);
+  assert.equal(findButton(missing, 'Participar en el sorteo').disabled, false);
   await missing.forms[0].onSubmit({ preventDefault() {} });
   assert.equal(missing.calls.length, 0);
+  assert.ok(missing.updates.some((value) => value?.productId === 'Escogé una colonia de la lista para participar.'));
 });
 
 test('carga, error y catálogo vacío impiden inscripción y permiten reintentar', async () => {
