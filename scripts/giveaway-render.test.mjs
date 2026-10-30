@@ -76,6 +76,11 @@ function runtime(options = {}) {
     [abs('src/contexts/AuthContext.js'), { useAuth: () => ({ user: auth, loading: false, ...options.auth }), socialAuthErrorMessage: forbidden('auth error formatting') }],
     [abs('src/contexts/RoleContext.js'), { useRole: () => ({ isAdmin: true, roleLoading: false, role: 'admin', ...options.role }) }],
     [abs('src/hooks/useAuthFlags.js'), { useAuthFlags: () => ({ facebookEnabled: false }) }],
+    [abs('src/services/passwordReset.js'), {
+      requestPasswordReset: forbidden('password reset email'),
+      passwordResetErrorMessage: forbidden('password reset error formatting'),
+      PASSWORD_RESET_SUCCESS: 'Password reset fixture',
+    }],
     [abs('src/hooks/useCollection.js'), { useCollection: (collection, queryOptions) => {
       queries.push({ collection, options: queryOptions });
       return { data: [], loading: false, error: false, retry: () => {}, ...options.collection };

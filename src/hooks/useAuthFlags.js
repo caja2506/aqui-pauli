@@ -3,7 +3,8 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 // Flags públicos de autenticación en config/auth (lectura pública, escritura solo admin).
-// facebookEnabled: false por defecto; se enciende cuando el proveedor Facebook esté configurado en Firebase.
+// Facebook ya está configurado en Firebase. Documento/campo ausente lo habilita;
+// facebookEnabled: false permite apagar el botón explícitamente.
 let cached = null;
 let pending = null;
 
@@ -11,9 +12,12 @@ function loadFlags() {
   if (cached) return Promise.resolve(cached);
   if (!pending) {
     pending = getDoc(doc(db, 'config', 'auth'))
-      .then((snap) => ({ facebookEnabled: snap.exists() && snap.data().facebookEnabled === true }))
+      .then((snap) => {
+        cached = { facebookEnabled: !snap.exists() || snap.data().facebookEnabled !== false };
+        return cached;
+      })
       .catch(() => ({ facebookEnabled: false }))
-      .then((flags) => { cached = flags; return flags; });
+      .finally(() => { pending = null; });
   }
   return pending;
 }

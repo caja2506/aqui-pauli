@@ -5,7 +5,7 @@ import { useAuthFlags } from '../../hooks/useAuthFlags';
 import FacebookIcon from './FacebookIcon';
 
 // Ofrece al invitado (sesión anónima) guardar su cuenta con Google (o Facebook si está habilitado)
-// sin perder sus pedidos: usa linkWithPopup / linkWithRedirect, que conserva el uid.
+// Una vinculación nueva conserva el uid. Ingresar a una cuenta existente no fusiona pedidos.
 export default function SaveAccountPrompt({ compact = false }) {
   const { user, signInWithGoogle, signInWithFacebook, redirectError } = useAuth();
   const { facebookEnabled } = useAuthFlags();
@@ -35,7 +35,7 @@ export default function SaveAccountPrompt({ compact = false }) {
         <p className="text-xs font-bold text-slate-700">{compact ? 'Estás comprando como invitado' : 'Opcional'}</p>
         {!compact && (
           <p className="text-[11px] text-slate-500">
-            Si querés, guardá tu cuenta con {facebookEnabled ? 'Google o Facebook' : 'Google'} para ver tus pedidos luego. No perdés este pedido.
+            Si querés, guardá tu cuenta con {facebookEnabled ? 'Google o Facebook' : 'Google'} para ver tus pedidos luego. Los pedidos de invitado no se transfieren automáticamente a una cuenta que ya existía.
           </p>
         )}
         {(error || redirectError) && <p className="text-[11px] text-red-500 mt-1" role="alert">{error || redirectError}</p>}

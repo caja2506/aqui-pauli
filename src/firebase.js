@@ -21,7 +21,7 @@ export const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: 
 export const functions = getFunctions(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-// Facebook Login (solo visible si config/auth.facebookEnabled === true)
+// Facebook Login habilitado; config/auth.facebookEnabled=false oculta el botón.
 export const facebookProvider = new FacebookAuthProvider();
 facebookProvider.addScope('email');
 facebookProvider.addScope('public_profile');
