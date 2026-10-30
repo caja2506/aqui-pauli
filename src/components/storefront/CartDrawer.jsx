@@ -1,4 +1,4 @@
-import React from 'react';
+import { useEffect, useRef } from 'react';
 import { X, Minus, Plus, ShoppingBag, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useCart } from '../../contexts/CartContext';
@@ -6,24 +6,64 @@ import { formatCRC } from '../../utils/formatters';
 
 export default function CartDrawer() {
   const { items, isCartOpen, setIsCartOpen, removeItem, updateQuantity, subtotal, itemCount } = useCart();
+  const drawerRef = useRef(null);
+  const closeRef = useRef(null);
+
+  useEffect(() => {
+    if (!isCartOpen || typeof document === 'undefined') return undefined;
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeRef.current?.focus();
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setIsCartOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = [...(drawerRef.current?.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) || [])].filter(element => element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first) {
+        event.preventDefault();
+        drawerRef.current?.focus();
+      } else if (event.shiftKey && (document.activeElement === first || !drawerRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !drawerRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [isCartOpen, setIsCartOpen]);
 
   if (!isCartOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[200]">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setIsCartOpen(false)} />
+      <div aria-hidden="true" className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setIsCartOpen(false)} />
 
       {/* Drawer */}
-      <div className="absolute right-0 top-0 h-dvh max-h-full w-full max-w-md bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+      <div ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title" tabIndex={-1} className="absolute right-0 top-0 h-dvh max-h-full w-full max-w-md bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <ShoppingBag className="w-5 h-5 text-rose-600" />
-            <h2 className="text-lg font-black text-slate-900">Mi Carrito</h2>
+            <h2 id="cart-drawer-title" className="text-lg font-black text-slate-900">Mi Carrito</h2>
             <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{itemCount}</span>
           </div>
-          <button onClick={() => setIsCartOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all">
+          <button ref={closeRef} type="button" aria-label="Cerrar carrito" onClick={() => setIsCartOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all">
             <X className="w-5 h-5 text-slate-400" />
           </button>
         </div>
@@ -45,7 +85,7 @@ export default function CartDrawer() {
               </Link>
             </div>
           ) : (
-            items.map((item, idx) => (
+            items.map((item) => (
               <div key={`${item.productId}-${item.variantId}`} className="flex gap-4 bg-slate-50 rounded-2xl p-3">
                 {/* Image */}
                 <div className="w-20 h-20 rounded-xl bg-white border border-slate-200 flex-shrink-0 overflow-hidden">
@@ -65,6 +105,8 @@ export default function CartDrawer() {
                   {/* Quantity */}
                   <div className="flex items-center gap-2 mt-2">
                     <button
+                      type="button"
+                      aria-label={`Reducir cantidad de ${item.productName}, ${item.variantName}`}
                       onClick={() => updateQuantity(item.productId, item.variantId, item.quantity - 1)}
                       className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center hover:bg-slate-100 transition-all"
                     >
@@ -72,6 +114,8 @@ export default function CartDrawer() {
                     </button>
                     <span className="text-sm font-bold text-slate-700 min-w-[24px] text-center">{item.quantity}</span>
                     <button
+                      type="button"
+                      aria-label={`Aumentar cantidad de ${item.productName}, ${item.variantName}`}
                       onClick={() => updateQuantity(item.productId, item.variantId, item.quantity + 1)}
                       className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center hover:bg-slate-100 transition-all"
                     >
@@ -98,6 +142,13 @@ export default function CartDrawer() {
               <span className="text-xl font-black text-slate-900">{formatCRC(subtotal)}</span>
             </div>
             <p className="text-[10px] text-slate-400">Envío incluido a todo el país</p>
+            <Link
+              to="/carrito"
+              onClick={() => setIsCartOpen(false)}
+              className="block text-center text-sm font-bold text-rose-600 hover:text-rose-700 underline underline-offset-4"
+            >
+              Ver carrito completo
+            </Link>
             <Link
               to="/checkout"
               onClick={() => setIsCartOpen(false)}

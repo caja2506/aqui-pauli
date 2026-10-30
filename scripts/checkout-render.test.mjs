@@ -73,13 +73,21 @@ function renderPage(relative, options = {}) {
   const paypalEffects = [];
   const paypalRefs = [];
   const paypalStateUpdates = [];
+  const paypalProps = [];
+  const checkoutEffects = [];
+  const checkoutStateUpdates = [];
+  const checkoutStates = [];
+  const checkoutElements = [];
+  const titleEffects = [];
+  const navigations = [];
   const cache = new Map();
   const abs = (name) => path.join(root, name);
   const user = { uid: 'render-test-user', displayName: 'Ana Prueba', email: 'ana@example.invalid', isAnonymous: false };
   const paypalProvider = {
     id: 'paypal', kind: 'online', label: 'PayPal / Tarjeta',
-    getAvailability: forbidden('PayPal availability'),
+    getAvailability: options.allowCheckoutEffects ? async () => ({ available: Boolean(options.paypalAvailable) }) : forbidden('PayPal availability'),
     Panel: (props) => {
+      paypalProps.push(props);
       const { totalCRC } = props;
       paypalTotals.push(totalCRC);
       return React.createElement('div', { 'data-testid': 'paypal-panel', 'data-total-crc': totalCRC },
@@ -92,10 +100,10 @@ function renderPage(relative, options = {}) {
       items, subtotal, itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
       isCartOpen: options.cartOpen === true, setIsCartOpen: forbidden('cart mutation'),
       addItem: forbidden('add to cart'),
-      clearCart: forbidden('cart clear'), removeItem: forbidden('item removal'), updateQuantity: forbidden('quantity change'),
+      clearCart: options.clearCart || forbidden('cart clear'), removeItem: forbidden('item removal'), updateQuantity: forbidden('quantity change'),
     }) }],
     [abs('src/firebase.js'), { db: {} }],
-    [abs('src/services/orderService.js'), { createOrder: forbidden('order creation') }],
+    [abs('src/services/orderService.js'), { createOrder: options.createOrder || forbidden('order creation') }],
     [abs('src/services/payments/paypalClient.js'), { ...Object.fromEntries([
       'createPaypalPendingOrder', 'loadPaypalSdk', 'paypalCaptureOrder', 'paypalCreateOrder', 'paypalGetConfig', 'paypalGetQuote',
     ].map((name) => [name, forbidden(name)])), ...(options.paypalClient || {}) }],
@@ -106,7 +114,7 @@ function renderPage(relative, options = {}) {
     [abs('src/services/payments/paypalProvider.js'), { paypalProvider }],
     [abs('src/services/payments/tilopayProvider.js'), { tilopayProvider: {
       id: 'tilopay', kind: 'online', label: 'Tarjeta',
-      getAvailability: forbidden('Tilopay availability'), Panel: forbidden('Tilopay panel'),
+      getAvailability: options.allowCheckoutEffects ? async () => ({ available: false }) : forbidden('Tilopay availability'), Panel: forbidden('Tilopay panel'),
     } }],
     [abs('src/components/auth/SaveAccountPrompt.js'), { __esModule: true, default: () => null }],
   ]);
@@ -118,22 +126,35 @@ function renderPage(relative, options = {}) {
   let checkoutStateSlot = 0;
   const checkoutReact = {
     ...React,
+    useEffect(effect, dependencies) {
+      checkoutEffects.push(effect);
+      return React.useEffect(effect, dependencies);
+    },
     useState(initial) {
       const slot = checkoutStateSlot++;
       let value = initial;
       if (initial && typeof initial === 'object' && Object.hasOwn(initial, 'paymentMethod')) {
-        value = { ...initial, paymentMethod: options.paymentMethod || 'sinpe',
-          provincia: options.provincia || 'Alajuela', canton: options.canton || 'Grecia', distrito: 'Grecia' };
+        value = { ...initial, paymentMethod: options.paymentMethod ?? 'sinpe',
+          provincia: options.provincia || 'Alajuela', canton: options.canton || 'Grecia', distrito: 'Grecia',
+          ...options.form };
       }
-      if (slot === 5) {
+      if (slot === 2 && options.errors) value = options.errors;
+      if (slot === 4) {
         assert.deepEqual(initial, {}, 'Update availability fixture if CheckoutPage state layout changes');
         value = availability;
       }
-      if (slot === 6) {
+      if (slot === 5) {
         assert.equal(initial, null, 'Update quote fixture if CheckoutPage state layout changes');
         value = options.paypalQuote ? { key: paypalQuoteKey(items, 'Grecia', 'normal'), quote: options.paypalQuote } : null;
       }
-      return React.useState(value);
+      const [state, setState] = React.useState(value);
+      checkoutStates[slot] = state;
+      return [state, (next) => {
+        const resolved = typeof next === 'function' ? next(checkoutStates[slot]) : next;
+        checkoutStateUpdates.push({ slot, value: resolved });
+        checkoutStates[slot] = resolved;
+        setState(next);
+      }];
     },
   };
   const confirmationReact = {
@@ -179,12 +200,32 @@ function renderPage(relative, options = {}) {
     const module = { exports: {} };
     cache.set(filename, module);
     const localRequire = (name) => {
+      if (name === 'react' && filename === abs('src/hooks/usePageTitle.js')) return {
+        ...React,
+        useEffect(effect, dependencies) { titleEffects.push(effect); return React.useEffect(effect, dependencies); },
+      };
       if (name === 'react') return filename === abs(CHECKOUT) ? checkoutReact
         : filename === abs(CONFIRMATION) ? confirmationReact : filename === abs(PAYPAL_PANEL) ? paypalReact
           : filename === abs(PRODUCT) ? productReact : React;
+      if (name === 'react/jsx-runtime' && filename === abs(CHECKOUT)) {
+        const runtime = require(name);
+        const capture = (original) => (type, props, ...rest) => {
+          checkoutElements.push({ type, props });
+          return original(type, props, ...rest);
+        };
+        return { ...runtime, jsx: capture(runtime.jsx), jsxs: capture(runtime.jsxs) };
+      }
+      if (name === 'react-router-dom' && filename === abs(CHECKOUT)) return {
+        ...require(name), useNavigate: () => (...args) => navigations.push(args),
+      };
       if (['react/jsx-runtime', 'react-router-dom', 'lucide-react'].includes(name)) return require(name);
-      if (name === 'firebase/firestore') return Object.fromEntries(
-        ['doc', 'getDoc', 'collection', 'getDocs', 'onSnapshot'].map((name) => [name, forbidden(`Firestore ${name}`)]));
+      if (name === 'firebase/firestore') return {
+        ...Object.fromEntries(['doc', 'getDoc', 'collection', 'getDocs', 'onSnapshot'].map((name) => [name, forbidden(`Firestore ${name}`)])),
+        ...(filename === abs(CHECKOUT) && options.allowCheckoutEffects ? {
+          doc: (_db, collection, id) => ({ collection, id }),
+          getDoc: async () => ({ exists: () => Boolean(options.crmData), data: () => options.crmData }),
+        } : {}),
+      };
       assert.ok(name.startsWith('.'), `Unexpected external dependency: ${name}`);
       const target = path.resolve(path.dirname(filename), name);
       const candidates = path.extname(target) ? [target] : [`${target}.js`, `${target}.jsx`];
@@ -211,7 +252,8 @@ function renderPage(relative, options = {}) {
   }, React.createElement(Routes, null, React.createElement(Route, {
     path: routePath, element,
   }))));
-  return { html, paypalTotals, paypalEffects, paypalRefs, paypalStateUpdates };
+  return { html, paypalTotals, paypalEffects, paypalRefs, paypalStateUpdates, paypalProps,
+    checkoutEffects, checkoutStateUpdates, checkoutStates, checkoutElements, titleEffects, navigations };
 }
 
 test('checkout vacío renderiza su estado vacío', () => {
@@ -277,15 +319,15 @@ test('confirmación SINPE recargada calcula el apartado desde el pedido guardado
   assert.ok(!message.includes('25%'));
 });
 
-test('PayPal conserva recomendado y muestra apartado más stock y envío del servidor en el pedido mixto', () => {
+test('PayPal elegido explícitamente muestra apartado más stock y envío del servidor en el pedido mixto', () => {
   const { html, paypalTotals } = renderPage(CHECKOUT, {
     items: [line('stock_propio', 30000), line('bajo_pedido', 10000)], shippingCost: 5000,
     paypalAvailable: true, paymentMethod: 'paypal',
     paypalQuote: serverQuote({ total: 45000, balance: 5000, deposit: 5000, backorder: 10000, shipping: 5000 }),
   });
-  contains(html, 'Recomendado');
+  assert.doesNotMatch(html, /Recomendado/);
   contains(html, 'Pagá con PayPal y comprás protegido');
-  assert.ok(html.indexOf('value="paypal"') < html.indexOf('value="sinpe"'));
+  assert.ok(html.indexOf('value="sinpe"') < html.indexOf('value="paypal"'));
   assert.deepEqual(paypalTotals, [45000]);
   assert.match(html, /data-testid="paypal-panel"/);
   assert.match(html, /data-testid="deposit-summary"/);
@@ -302,12 +344,127 @@ test('seleccionar SINPE o transferencia oculta la promoción y el panel PayPal, 
       items: [line('stock_propio', 30000)], paypalAvailable: true, paymentMethod,
     });
     assert.match(html, /value="paypal"/);
-    contains(html, 'Recomendado');
+    assert.doesNotMatch(html, /Recomendado/);
     assert.doesNotMatch(html, /data-testid="paypal-trust-note"|data-testid="paypal-panel"/);
     assert.doesNotMatch(html, /Pagá con PayPal y comprás protegido/);
     assert.deepEqual(paypalTotals, []);
     assert.match(html, /type="submit"/);
   }
+});
+
+test('cada checkout comienza sin método preseleccionado y sin distintivo recomendado', async () => {
+  const page = renderPage(CHECKOUT, {
+    items: [line('stock_propio', 30000)], paypalAvailable: true, paymentMethod: '',
+    allowCheckoutEffects: true,
+    crmData: { displayName: 'Cliente recurrente', preferredPaymentMethod: 'paypal' },
+  });
+  const paymentInputs = [...page.html.matchAll(/<input\b[^>]*name="payment"[^>]*>/g)].map(([tag]) => tag);
+  assert.equal(paymentInputs.length, 3);
+  assert.ok(paymentInputs.every((tag) => !/\bchecked/.test(tag)));
+  contains(page.html, 'Elegí cómo querés pagar este pedido.');
+  assert.doesNotMatch(page.html, /Recomendado|data-testid="paypal-trust-note"|data-testid="paypal-panel"/);
+  const cleanups = page.checkoutEffects.map((effect) => effect());
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(page.checkoutStates[1].name, 'Cliente recurrente', 'The actual CRM prefill effect ran');
+  assert.equal(page.checkoutStates[4].paypal.available, true, 'The gateway availability effect ran');
+  assert.equal(page.checkoutStates[1].paymentMethod, '', 'Availability and CRM cannot make a payment choice');
+  cleanups.forEach((cleanup) => cleanup?.());
+});
+
+test('el formulario exige elegir un método y el radio registra la decisión explícita', async () => {
+  const page = renderPage(CHECKOUT, { items: [line('stock_propio', 30000)], paymentMethod: '', paypalAvailable: true });
+  await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+  assert.equal(page.checkoutStates[2].paymentMethod, 'Selecciona método de pago');
+  const paypalRadio = page.checkoutElements.find(({ type, props }) => type === 'input' && props.name === 'payment' && props.value === 'paypal');
+  paypalRadio.props.onChange();
+  assert.equal(page.checkoutStates[1].paymentMethod, 'paypal');
+});
+
+test('checkout aplica su título aun con carrito vacío y restaura el anterior al salir', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  globalThis.document = { title: 'Página anterior' };
+  try {
+    for (const items of [[], [line('stock_propio', 30000)]]) {
+      const page = renderPage(CHECKOUT, { items });
+      assert.equal(page.titleEffects.length, 1);
+      const cleanup = page.titleEffects[0]();
+      assert.equal(document.title, 'Checkout | Aquí Pauli');
+      cleanup();
+      assert.equal(document.title, 'Página anterior');
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'document', previous);
+    else delete globalThis.document;
+  }
+});
+
+const validCheckoutForm = {
+  name: 'Ana Prueba', email: 'ana@example.invalid', phone: '88888888',
+  provincia: 'Alajuela', canton: 'Grecia', distrito: 'Grecia', señas: 'Dirección ficticia de prueba', paymentPhone: '88888888',
+};
+
+test('las notas opcionales muestran límite y descripción accesible sin recortar texto por código', () => {
+  const page = renderPage(CHECKOUT, { items: [line('stock_propio', 30000)], form: { customerNotes: 'Llamar antes.' } });
+  contains(page.html, 'Notas del pedido (opcional)');
+  contains(page.html, '13/1000 caracteres');
+  const notes = page.checkoutElements.find(({ type, props }) => type === 'textarea' && props.id === 'checkout-customer-notes');
+  assert.equal(notes.props.maxLength, 1000);
+  assert.ok(!notes.props.required);
+  assert.equal(notes.props['aria-invalid'], false);
+  assert.match(notes.props['aria-describedby'], /checkout-customer-notes-help/);
+  notes.props.onChange({ target: { value: 'a'.repeat(1001) } });
+  assert.equal(page.checkoutStates[1].customerNotes.length, 1001, 'An injected excessive value is kept for validation instead of silently truncated');
+});
+
+test('el envío manual conserva las notas del cliente, incluidas vacías y el límite de 1000', async () => {
+  for (const customerNotes of ['', '   ', '  Llamar antes de entregar.  ', 'a'.repeat(1000)]) {
+    const calls = [];
+    let cleared = 0;
+    const page = renderPage(CHECKOUT, {
+      items: [line('stock_propio', 30000)], paymentMethod: 'sinpe', form: { ...validCheckoutForm, customerNotes },
+      createOrder: async (data) => { calls.push(data); return { orderId: 'notes-test', orderNumber: 'AP-NOTES' }; },
+      clearCart: () => { cleared += 1; },
+    });
+    await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].customerNotes, customerNotes.trim());
+    assert.ok(!Object.hasOwn(calls[0], 'notes'), 'Customer notes stay separate from internal admin notes');
+    assert.equal(cleared, 1);
+    assert.equal(page.navigations[0][0], '/orden-confirmada/notes-test');
+    assert.equal(page.navigations[0][1].state.customerNotes, customerNotes.trim());
+  }
+});
+
+test('notas mayores a 1000 impiden crear el pedido y muestran un error asociado al campo', async () => {
+  const options = { items: [line('stock_propio', 30000)], form: { ...validCheckoutForm, customerNotes: 'a'.repeat(1001) } };
+  const page = renderPage(CHECKOUT, options);
+  await page.checkoutElements.find(({ type }) => type === 'form').props.onSubmit({ preventDefault() {} });
+  assert.equal(page.checkoutStates[2].customerNotes, 'Las notas pueden tener hasta 1000 caracteres.');
+  const invalid = renderPage(CHECKOUT, { ...options, errors: page.checkoutStates[2] });
+  assert.match(invalid.html, /id="checkout-customer-notes-error" role="alert"/);
+  const notes = invalid.checkoutElements.find(({ type, props }) => type === 'textarea' && props.id === 'checkout-customer-notes');
+  assert.equal(notes.props['aria-invalid'], true);
+  assert.match(notes.props['aria-describedby'], /checkout-customer-notes-error/);
+});
+
+test('el pedido pendiente de PayPal recibe las mismas notas opcionales del checkout', async () => {
+  const calls = [];
+  const page = renderPage(CHECKOUT, {
+    items: [line('stock_propio', 30000)], paypalAvailable: true, paymentMethod: 'paypal',
+    paypalQuote: serverQuote({ total: 30000 }), form: { ...validCheckoutForm, customerNotes: '  Envolver para regalo.  ' },
+    paypalClient: { createPaypalPendingOrder: async (data) => { calls.push(data); return { orderId: 'paypal-notes', orderNumber: 'AP-NOTES-PP' }; } },
+    clearCart() {},
+  });
+  assert.equal(page.paypalProps[0].validateForm(), true);
+  await page.paypalProps[0].createPendingOrder('paypal');
+  assert.equal(calls[0].customerNotes, 'Envolver para regalo.');
+  assert.equal(calls[0].paymentMethod, 'paypal');
+  assert.ok(!Object.hasOwn(calls[0], 'notes'));
+  page.paypalProps[0].onPaid({ orderId: 'paypal-notes', orderNumber: 'AP-NOTES-PP', paypalResult: 'captured' });
+  assert.equal(page.navigations[0][1].state.customerNotes, 'Envolver para regalo.');
+  page.paypalProps[0].onPaid({ orderId: 'another-pending-order', orderNumber: 'AP-OTHER', paypalResult: 'captured' });
+  assert.equal(page.navigations[1][1].state.customerNotes, undefined, 'Never show notes from a different pending order');
 });
 
 test('la cédula se presenta como opcional y tiene una etiqueta asociada sin required', () => {
@@ -329,6 +486,8 @@ test('checkout y envíos publican los mismos plazos por zona y la condición de 
       items: [line('stock_propio', 30000)], canton, provincia, realShipping: true,
     }).html;
     contains(checkout, expected);
+    contains(checkout, 'Mensajería local o Correos de Costa Rica, según tu zona.');
+    assert.doesNotMatch(checkout, /Envío Normal \(Correos de Costa Rica\)/);
     contains(policies, expected);
     assert.equal(/value="express"/.test(checkout), express);
     if (express) {
@@ -688,9 +847,9 @@ test('la ficha conserva Agregar al Carrito y espacio inferior seguro sin WhatsAp
     const addButton = [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)]
       .map(([button]) => button).find((button) => text(button).includes('Agregar al Carrito'));
     assert.ok(addButton, 'The purchase button must still render');
-    assert.doesNotMatch(addButton.split('>')[0], /\bdisabled/);
+    assert.doesNotMatch(addButton.split('>')[0], /\sdisabled(?:=|\s|$)/);
     const page = classesIn(html.match(/<div\b[^>]*class="[^"]*max-w-7xl[^"\n]*"[^>]*>/)?.[0]);
-    assert.ok(page.has('pb-[calc(6rem+env(safe-area-inset-bottom,0px))]'));
+    assert.ok(page.has('pb-[calc(10rem+env(safe-area-inset-bottom,0px))]'));
     assert.ok(page.has('lg:pb-8'), 'Desktop keeps the existing bottom spacing');
     if (supplyType === 'bajo_pedido') contains(html, 'Se aparta con el 50% de este producto');
   }

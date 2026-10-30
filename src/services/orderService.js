@@ -2,6 +2,7 @@ import { collection, doc, setDoc, updateDoc, writeBatch, serverTimestamp, getDoc
 import { db } from '../firebase';
 import { generateOrderNumber } from '../utils/formatters';
 import { computeBackorder } from '../utils/backorder';
+import { normalizeCustomerNotes } from '../../functions/lib/customerNotes.mjs';
 
 /**
  * Crea un pedido completo:
@@ -10,6 +11,7 @@ import { computeBackorder } from '../utils/backorder';
  * - Crea/actualiza contacto en crm_contacts/
  */
 export async function createOrder(orderData) {
+  const customerNotes = normalizeCustomerNotes(orderData.customerNotes);
   const orderId = doc(collection(db, 'orders')).id;
   const orderNumber = generateOrderNumber();
   const now = new Date().toISOString();
@@ -54,6 +56,7 @@ export async function createOrder(orderData) {
     backorderDeposit,
     // --- ESTADO ---
     status: 'pendiente_pago',
+    customerNotes,
     notes: '',
     trackingNumber: '',
     trackingUrl: '',

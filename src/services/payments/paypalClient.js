@@ -1,5 +1,6 @@
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../firebase';
+import { normalizeCustomerNotes } from '../../../functions/lib/customerNotes.mjs';
 
 const call = (name) => async (data) => (await httpsCallable(functions, name)(data)).data;
 
@@ -15,6 +16,7 @@ export const createPaypalPendingOrder = (order) => call('createOrderWithReservat
   customerName: order.customerName,
   customerEmail: order.customerEmail,
   customerPhone: order.customerPhone,
+  customerNotes: normalizeCustomerNotes(order.customerNotes),
   shippingAddress: order.shippingAddress,
   shippingType: order.shippingType,
   items: order.items.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),

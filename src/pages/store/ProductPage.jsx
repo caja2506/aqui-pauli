@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { doc, onSnapshot, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -29,6 +29,8 @@ function ProductDetails({ productId }) {
   const [addedToCart, setAddedToCart] = useState(false);
   const [selectedImage, setSelectedImage] = useState(0);
   const [variantError, setVariantError] = useState(false);
+  const variantSectionRef = useRef(null);
+  const addToCartLock = useRef(false);
 
   usePageTitle(product?.name ? `${product.name} | Aquí Pauli` : 'Producto | Aquí Pauli');
 
@@ -76,16 +78,23 @@ function ProductDetails({ productId }) {
   }
 
   const handleAddToCart = () => {
-    if (!isPurchasableVariant(selectedVariant) || currentPrice === null) return;
+    if (addToCartLock.current || !isPurchasableVariant(selectedVariant) || currentPrice === null) return;
+    addToCartLock.current = true;
     addItem(product, { ...selectedVariant, price: currentPrice }, quantity);
     setAddedToCart(true);
-    setTimeout(() => setAddedToCart(false), 2000);
+    setTimeout(() => { addToCartLock.current = false; setAddedToCart(false); }, 2000);
   };
 
   const canBuy = isPurchasableVariant(selectedVariant) && currentPrice !== null;
+  const hasPurchasableOption = !variantError && variants.some(variant =>
+    isPurchasableVariant(variant) && getVariantPrice(product, variant) !== null);
+  const chooseVariant = () => {
+    variantSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    variantSectionRef.current?.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
+  };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:pb-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-[calc(10rem+env(safe-area-inset-bottom,0px))] lg:pb-8">
       <Link to="/catalogo" className="inline-flex items-center gap-1 text-sm font-bold text-rose-600 hover:text-rose-700 mb-6">
         <ArrowLeft className="w-4 h-4" /> Catálogo
       </Link>
@@ -118,7 +127,7 @@ function ProductDetails({ productId }) {
         </div>
 
         {/* Details */}
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
           <div>
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">{product.name}</h1>
             {product.description && (
@@ -151,13 +160,14 @@ function ProductDetails({ productId }) {
 
           {/* Variants */}
           {variants.length > 0 && (
-            <div>
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block">Variante</label>
+            <div ref={variantSectionRef} id="product-variants" className="scroll-mt-24">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 block">Variante</p>
               <div className="flex flex-wrap gap-2">
                 {variants.map(v => (
                   <button
                     key={v.id}
                     onClick={() => { setSelectedVariant(v); setQuantity(1); }}
+                    aria-pressed={selectedVariant?.id === v.id}
                     className={`px-4 py-2.5 rounded-xl border text-sm font-bold transition-all ${selectedVariant?.id === v.id
                       ? 'bg-rose-600 text-white border-rose-600 shadow-md'
                       : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300'
@@ -183,18 +193,28 @@ function ProductDetails({ productId }) {
             </div>
           )}
 
-          {/* Quantity & Add to cart */}
-          {canBuy && (
-            <div className="flex items-center gap-4">
-              <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden">
-                <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-4 py-3 text-slate-500 hover:bg-slate-50 text-lg font-bold">−</button>
-                <span className="px-4 py-3 text-sm font-bold text-slate-900 min-w-[44px] text-center border-x border-slate-200">{quantity}</span>
-                <button onClick={() => setQuantity(q => q + 1)} className="px-4 py-3 text-slate-500 hover:bg-slate-50 text-lg font-bold">+</button>
+          {/* Un solo control de compra: fijo abajo en móvil y dentro de la ficha en escritorio. */}
+          {hasPurchasableOption && (
+            <section aria-label="Compra de este producto" data-testid="product-purchase-bar"
+              className="fixed inset-x-0 bottom-0 z-40 flex flex-col gap-3 border-t border-rose-100 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-[0_-4px_20px_rgba(15,23,42,0.08)] lg:static lg:inset-auto lg:z-auto lg:flex-row lg:items-center lg:gap-4 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+              <div className="flex items-center justify-between gap-3 lg:shrink-0">
+                <p className="min-w-0 text-lg font-black text-rose-600 lg:hidden" data-testid="product-mobile-price">
+                  {currentPrice === null ? 'Precio no disponible' : <>{showFrom && <span className="text-xs">Desde </span>}{formatCRC(currentPrice)}</>}
+                </p>
+                {canBuy && <div className="flex shrink-0 items-center border border-slate-200 rounded-xl overflow-hidden" aria-label="Cantidad">
+                  <button type="button" aria-label="Disminuir cantidad" disabled={quantity <= 1}
+                    onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-3 py-2 lg:px-4 lg:py-3 text-slate-500 hover:bg-slate-50 disabled:opacity-40 text-lg font-bold">−</button>
+                  <span className="px-3 py-2 lg:px-4 lg:py-3 text-sm font-bold text-slate-900 min-w-[40px] text-center border-x border-slate-200" aria-live="polite">{quantity}</span>
+                  <button type="button" aria-label="Aumentar cantidad"
+                    onClick={() => setQuantity(q => q + 1)} className="px-3 py-2 lg:px-4 lg:py-3 text-slate-500 hover:bg-slate-50 text-lg font-bold">+</button>
+                </div>}
               </div>
               <button
-                onClick={handleAddToCart}
-                disabled={addedToCart}
-                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm transition-all shadow-lg active:scale-95 ${
+                type="button"
+                onClick={canBuy ? handleAddToCart : chooseVariant}
+                disabled={addedToCart || (!!selectedVariant && !canBuy)}
+                aria-controls={!selectedVariant ? 'product-variants' : undefined}
+                className={`w-full lg:flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm transition-all shadow-lg active:scale-95 disabled:opacity-70 ${
                   addedToCart
                     ? 'bg-green-500 text-white'
                     : 'bg-rose-600 hover:bg-rose-700 text-white'
@@ -202,11 +222,15 @@ function ProductDetails({ productId }) {
               >
                 {addedToCart ? (
                   <><Check className="w-5 h-5" /> ¡Agregado!</>
+                ) : !selectedVariant ? (
+                  'Elegí una variante'
+                ) : !canBuy ? (
+                  'Opción no disponible'
                 ) : (
                   <><ShoppingCart className="w-5 h-5" /> Agregar al Carrito</>
                 )}
               </button>
-            </div>
+            </section>
           )}
 
           {/* Shipping note */}
