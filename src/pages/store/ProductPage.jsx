@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { doc, onSnapshot, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -10,10 +10,17 @@ import { cleanShippingPromise } from '../../utils/shippingText';
 import StatusBadge from '../../components/ui/StatusBadge';
 import { normalizeCommercialStatus } from '../../utils/constants';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
+import { getVariantPrice, getProductPriceSummary, isActiveVariant, isPurchasableVariant } from '../../utils/productPrice';
+import usePageTitle from '../../hooks/usePageTitle';
 
 export default function ProductPage() {
   const { productId } = useParams();
-  const { addItem, setIsCartOpen } = useCart();
+  // Cambiar de producto reinicia selección, cantidad, fotos y carga de variantes.
+  return <ProductDetails key={productId} productId={productId} />;
+}
+
+function ProductDetails({ productId }) {
+  const { addItem } = useCart();
   const [product, setProduct] = useState(null);
   const [variants, setVariants] = useState([]);
   const [selectedVariant, setSelectedVariant] = useState(null);
@@ -21,29 +28,34 @@ export default function ProductPage() {
   const [loading, setLoading] = useState(true);
   const [addedToCart, setAddedToCart] = useState(false);
   const [selectedImage, setSelectedImage] = useState(0);
+  const [variantError, setVariantError] = useState(false);
+
+  usePageTitle(product?.name ? `${product.name} | Aquí Pauli` : 'Producto | Aquí Pauli');
 
   useEffect(() => {
+    let active = true;
     const unsub = onSnapshot(doc(db, 'products', productId), (snap) => {
-      if (snap.exists()) {
-        setProduct({ id: snap.id, ...snap.data() });
-      }
+      if (active) setProduct(snap.exists() ? { id: snap.id, ...snap.data() } : null);
     });
 
     getDocs(collection(db, 'products', productId, 'variants')).then((snap) => {
+      if (!active) return;
       const vars = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(v => v.active)
+        .filter(isActiveVariant)
         .sort((a, b) => (a.order || 0) - (b.order || 0));
       setVariants(vars);
       // Si solo hay 1 variante, auto-seleccionar; si hay más, el usuario debe elegir
       if (vars.length === 1) setSelectedVariant(vars[0]);
       setLoading(false);
     }).catch((err) => {
+      if (!active) return;
       console.warn('No se pudieron cargar las variantes:', err);
+      setVariantError(true);
       setLoading(false);
     });
 
-    return () => unsub();
+    return () => { active = false; unsub(); };
   }, [productId]);
 
   if (loading) return <LoadingSpinner message="Cargando producto..." />;
@@ -54,20 +66,23 @@ export default function ProductPage() {
     </div>
   );
 
-  const currentPrice = selectedVariant?.price || product.basePrice || 0;
-  const images = product.images || [];
+  const priceSummary = getProductPriceSummary(product, variants);
+  const currentPrice = variantError ? null
+    : selectedVariant ? getVariantPrice(product, selectedVariant) : priceSummary.price;
+  const showFrom = !selectedVariant && priceSummary.isFrom;
+  const images = [...(product.images || [])];
   if (selectedVariant?.imageUrl && !images.includes(selectedVariant.imageUrl)) {
     images.unshift(selectedVariant.imageUrl);
   }
 
   const handleAddToCart = () => {
-    if (!selectedVariant) return;
-    addItem(product, selectedVariant, quantity);
+    if (!isPurchasableVariant(selectedVariant) || currentPrice === null) return;
+    addItem(product, { ...selectedVariant, price: currentPrice }, quantity);
     setAddedToCart(true);
     setTimeout(() => setAddedToCart(false), 2000);
   };
 
-  const canBuy = selectedVariant && (['disponible', 'bajo_pedido'].includes(normalizeCommercialStatus(selectedVariant.commercialStatus)));
+  const canBuy = isPurchasableVariant(selectedVariant) && currentPrice !== null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:pb-8">
@@ -113,14 +128,16 @@ export default function ProductPage() {
 
           {/* Price */}
           <div className="bg-rose-50 rounded-2xl p-5 border border-rose-100">
-            <div className="text-3xl font-black text-rose-600 tracking-tight">{formatCRC(currentPrice)}</div>
-            <p className="text-xs text-rose-400 mt-1">IVA incluido</p>
+            <div className="text-3xl font-black text-rose-600 tracking-tight" aria-live="polite" data-testid="product-price">
+              {currentPrice === null ? 'Precio no disponible' : <>{showFrom && <span className="text-lg">Desde </span>}{formatCRC(currentPrice)}</>}
+            </div>
+            {currentPrice !== null && <p className="text-xs text-rose-400 mt-1">IVA incluido</p>}
           </div>
 
           {/* Sin variantes activas: no hay nada que agregar al carrito */}
           {variants.length === 0 && (
             <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-              <p className="text-sm font-bold text-amber-700">Este producto no tiene tallas/opciones disponibles por el momento.</p>
+              <p className="text-sm font-bold text-amber-700">{variantError ? 'No pudimos cargar las tallas/opciones. Recargá la página para consultar el precio.' : 'Este producto no tiene tallas/opciones disponibles por el momento.'}</p>
               <a
                 href={`https://wa.me/50671613342?text=${encodeURIComponent(`¡Hola! Me interesa ${product.name}. ¿Tienen disponibilidad?`)}`}
                 target="_blank"
@@ -145,7 +162,7 @@ export default function ProductPage() {
                       ? 'bg-rose-600 text-white border-rose-600 shadow-md'
                       : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300'
                     } ${normalizeCommercialStatus(v.commercialStatus) === 'agotado' ? 'opacity-50 line-through' : ''}`}
-                    disabled={normalizeCommercialStatus(v.commercialStatus) === 'agotado'}
+                    disabled={!isPurchasableVariant(v) || getVariantPrice(product, v) === null}
                   >
                     {v.name}
                   </button>
@@ -197,9 +214,9 @@ export default function ProductPage() {
             <Truck className="w-5 h-5 text-slate-400 flex-shrink-0" />
             <div>
               <p className="text-xs font-bold text-slate-700">Envío a todo Costa Rica</p>
-              <p className="text-[10px] text-slate-400">Correos de Costa Rica · Normal y Express (Grecia)</p>
+              <p className="text-[10px] text-slate-400">Envío normal · Express en Grecia, cuando esté disponible</p>
             </div>
-            {!selectedVariant && variants.length > 1 && (
+            {!selectedVariant && priceSummary.price !== null && variants.length > 1 && (
               <p className="text-xs font-bold text-amber-600 mt-2 animate-pulse">⬆️ Seleccioná una variante para agregar al carrito</p>
             )}
           </div>

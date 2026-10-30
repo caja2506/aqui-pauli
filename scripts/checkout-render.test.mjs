@@ -22,13 +22,18 @@ const CONFIRMATION = 'src/pages/store/OrderConfirmation.jsx';
 const PAYPAL_PANEL = 'src/components/payments/PaypalPanel.jsx';
 const PRODUCT = 'src/pages/store/ProductPage.jsx';
 const WHATSAPP = 'src/components/storefront/WhatsAppButton.jsx';
+const SHIPPING = 'src/services/shippingService.js';
+const LEGAL = 'src/pages/store/LegalPages.jsx';
 const realFiles = [
-  CHECKOUT, CART, CONFIRMATION, PAYPAL_PANEL, PRODUCT, WHATSAPP,
+  CHECKOUT, CART, CONFIRMATION, PAYPAL_PANEL, PRODUCT, WHATSAPP, SHIPPING, LEGAL,
   'src/utils/backorder.js', 'src/utils/constants.js', 'src/utils/formatters.js',
   'src/services/payments/registry.js', 'src/data/costaRicaTerritorial.js',
   'src/components/ui/CopyButton.jsx', 'src/components/ui/LoadingSpinner.jsx',
   'src/services/payments/paypalQuote.js',
   'src/components/ui/StatusBadge.jsx', 'src/utils/shippingText.js',
+  'src/utils/shippingDelivery.js', 'src/utils/productPrice.js', 'src/hooks/usePageTitle.js',
+  'functions/lib/catalogPrice.mjs',
+  'src/components/legal/LegalLayout.jsx',
 ];
 
 // Compile unmodified files, including their actual imports. Removing the backorder
@@ -105,6 +110,7 @@ function renderPage(relative, options = {}) {
     } }],
     [abs('src/components/auth/SaveAccountPrompt.js'), { __esModule: true, default: () => null }],
   ]);
+  if (options.realShipping) modules.delete(abs(SHIPPING));
 
   // SSR does not run effects. Seed the form, loaded availability and saved order
   // as initial state, while delegating every hook to the real React dispatcher.
@@ -117,7 +123,7 @@ function renderPage(relative, options = {}) {
       let value = initial;
       if (initial && typeof initial === 'object' && Object.hasOwn(initial, 'paymentMethod')) {
         value = { ...initial, paymentMethod: options.paymentMethod || 'sinpe',
-          provincia: 'Alajuela', canton: 'Grecia', distrito: 'Grecia' };
+          provincia: options.provincia || 'Alajuela', canton: options.canton || 'Grecia', distrito: 'Grecia' };
       }
       if (slot === 5) {
         assert.deepEqual(initial, {}, 'Update availability fixture if CheckoutPage state layout changes');
@@ -191,7 +197,7 @@ function renderPage(relative, options = {}) {
     return module.exports;
   }
 
-  const Component = load(abs(relative)).default;
+  const Component = load(abs(relative))[options.exportName || 'default'];
   const confirmation = relative === CONFIRMATION;
   const product = relative === PRODUCT;
   const defaultPath = confirmation ? '/orden-confirmada/order-render' : product ? '/producto/versace-eros' : '/checkout';
@@ -288,6 +294,61 @@ test('PayPal conserva recomendado y muestra apartado más stock y envío del ser
   contains(html, `Saldo pendiente: ${formatCRC(5000)}`);
   contains(html, 'Cobro de hoy en PayPal: US$ 80.00');
   assert.doesNotMatch(html, /type="submit"/);
+});
+
+test('seleccionar SINPE o transferencia oculta la promoción y el panel PayPal, aunque PayPal siga disponible', () => {
+  for (const paymentMethod of ['sinpe', 'transferencia']) {
+    const { html, paypalTotals } = renderPage(CHECKOUT, {
+      items: [line('stock_propio', 30000)], paypalAvailable: true, paymentMethod,
+    });
+    assert.match(html, /value="paypal"/);
+    contains(html, 'Recomendado');
+    assert.doesNotMatch(html, /data-testid="paypal-trust-note"|data-testid="paypal-panel"/);
+    assert.doesNotMatch(html, /Pagá con PayPal y comprás protegido/);
+    assert.deepEqual(paypalTotals, []);
+    assert.match(html, /type="submit"/);
+  }
+});
+
+test('la cédula se presenta como opcional y tiene una etiqueta asociada sin required', () => {
+  const { html } = renderPage(CHECKOUT, { items: [line('stock_propio', 30000)] });
+  assert.match(html, /<label[^>]*for="checkout-cedula"[^>]*>Cédula \(opcional\)<\/label>/);
+  const input = html.match(/<input\b[^>]*id="checkout-cedula"[^>]*>/)?.[0];
+  assert.ok(input);
+  assert.doesNotMatch(input, /\brequired\b/);
+});
+
+test('checkout y envíos publican los mismos plazos por zona y la condición de express', () => {
+  const policies = renderPage(LEGAL, { exportName: 'EnviosPage', url: '/envios' }).html;
+  for (const [canton, provincia, expected, express] of [
+    ['San José', 'San José', '2-4 días hábiles', false],
+    ['Liberia', 'Guanacaste', '4-7 días hábiles', false],
+    ['Grecia', 'Alajuela', '2-4 días hábiles', true],
+  ]) {
+    const checkout = renderPage(CHECKOUT, {
+      items: [line('stock_propio', 30000)], canton, provincia, realShipping: true,
+    }).html;
+    contains(checkout, expected);
+    contains(policies, expected);
+    assert.equal(/value="express"/.test(checkout), express);
+    if (express) {
+      contains(checkout, '1-2 días hábiles, cuando esté disponible');
+      contains(policies, '1-2 días hábiles, cuando esté disponible');
+    }
+  }
+});
+
+test('las políticas reflejan los medios de pago disponibles y el apartado solo de líneas Bajo pedido', () => {
+  const shipping = renderPage(LEGAL, { exportName: 'EnviosPage', url: '/envios' }).html;
+  const terms = renderPage(LEGAL, { exportName: 'TerminosPage', url: '/terminos' }).html;
+  const returns = renderPage(LEGAL, { exportName: 'DevolucionesPage', url: '/devoluciones' }).html;
+  contains(shipping, 'El pago contra entrega, en efectivo o por SINPE Móvil, no está disponible');
+  contains(terms, 'El pago contra entrega no está disponible');
+  contains(shipping, 'Los productos en stock se pagan completos');
+  contains(shipping, 'el 50% de esas líneas y el importe completo de las líneas en stock');
+  assert.doesNotMatch(text(shipping), /Ofrecemos pago contra entrega|pagas cuando recibes/);
+  assert.doesNotMatch(text(terms), /cuando aceptamos el pago contra entrega/);
+  assert.doesNotMatch(text(returns), /Pago contra entrega: el reembolso/);
 });
 
 test('PayPal Bajo pedido de ₡32.000 cobra y anuncia ₡16.000 ahora con saldo ₡16.000', () => {
@@ -589,29 +650,31 @@ function assertMobileHidden(html) {
   assert.ok(classes.has('lg:block'), 'Desktop retains the floating link; mobile landscape stays protected');
 }
 
-for (const url of ['/producto/versace-eros', '/producto/versace-eros/?variante=100ml#comprar',
+for (const url of ['/', '/?categoria=perfumes', '/catalogo', '/catalogo/?marca=versace',
+  '/producto/versace-eros', '/producto/versace-eros/?variante=100ml#comprar',
   '/checkout', '/checkout/?metodo=paypal', '/carrito', '/carrito/']) {
   test(`WhatsApp se oculta solo en móvil en la ruta de compra ${url}`, () => {
     assertMobileHidden(renderPage(WHATSAPP, { url }).html);
   });
 }
 
-test('WhatsApp sigue visible en inicio, catálogo y rutas que no son una compra', () => {
-  for (const url of ['/', '/catalogo?marca=versace', '/terminos', '/orden-confirmada/AP-1', '/checkout-ayuda']) {
+test('WhatsApp sigue visible en rutas sin tarjetas o controles de compra', () => {
+  for (const url of ['/terminos', '/orden-confirmada/AP-1', '/checkout-ayuda']) {
     const classes = floatingWhatsappClasses(renderPage(WHATSAPP, { url }).html);
     assert.ok(classes.has('block'), `WhatsApp remains visible on ${url}`);
     assert.ok(!classes.has('hidden'), `A non-purchase route must not hide WhatsApp: ${url}`);
   }
 });
 
-test('abrir el carrito desde inicio o catálogo oculta WhatsApp móvil y deja el checkout accesible', () => {
-  for (const url of ['/', '/catalogo']) {
+test('el carrito oculta WhatsApp móvil y al cerrarlo respeta la visibilidad de la ruta', () => {
+  for (const url of ['/', '/catalogo', '/terminos']) {
     const open = renderPage(CART, { url, cartOpen: true, items: [line('stock_propio', 47000)], withWhatsapp: true });
     assertMobileHidden(open.html);
     contains(open.html, 'Proceder al Checkout');
     assert.match(open.html, /href="\/checkout"/);
     const closed = renderPage(CART, { url, cartOpen: false, withWhatsapp: true });
-    assert.ok(!floatingWhatsappClasses(closed.html).has('hidden'), 'Closing the drawer restores normal visibility');
+    if (url === '/terminos') assert.ok(!floatingWhatsappClasses(closed.html).has('hidden'), 'Closing the drawer restores normal visibility');
+    else assertMobileHidden(closed.html);
     assert.ok(!text(closed.html).includes('Mi Carrito'));
   }
 });

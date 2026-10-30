@@ -1,4 +1,5 @@
 import { GAM_CANTONES, EXPRESS_CANTONES } from '../utils/constants';
+import { SHIPPING_DELIVERY_TIMES } from '../utils/shippingDelivery';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -114,7 +115,7 @@ export function getShippingOptions(canton) {
       type: 'normal',
       label: 'Envío Normal (Correos de Costa Rica)',
       price: SHIPPING_INCLUDED ? 0 : (isInGAM(canton) ? prices.normalGAM : prices.normalOutside),
-      estimatedDays: isInGAM(canton) ? '2-4 días hábiles' : '4-7 días hábiles',
+      estimatedDays: isInGAM(canton) ? SHIPPING_DELIVERY_TIMES.normalGAM : SHIPPING_DELIVERY_TIMES.normalOutside,
     },
   ];
 
@@ -123,7 +124,7 @@ export function getShippingOptions(canton) {
       type: 'express',
       label: 'Envío Express (Solo Grecia)',
       price: SHIPPING_INCLUDED ? 0 : prices.expressGrecia,
-      estimatedDays: '1-2 días hábiles',
+      estimatedDays: SHIPPING_DELIVERY_TIMES.expressGrecia,
     });
   }
 

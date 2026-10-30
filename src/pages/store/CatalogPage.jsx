@@ -5,11 +5,13 @@ import ProductCard from '../../components/storefront/ProductCard';
 import EmptyState from '../../components/ui/EmptyState';
 import LoadError from '../../components/ui/LoadError';
 import GiveawayBanner from '../../components/storefront/GiveawayBanner';
+import usePageTitle from '../../hooks/usePageTitle';
 
 // Normaliza: minúsculas y sin tildes/diacríticos
 const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
 export default function CatalogPage() {
+  usePageTitle('Catálogo | Aquí Pauli');
   const { data: products, loading: loadingProducts, error: productsError, retry: retryProducts } = useCollection('products');
   const { data: brands } = useCollection('brands');
   const { data: categories } = useCollection('categories');

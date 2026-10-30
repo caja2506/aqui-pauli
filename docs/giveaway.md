@@ -18,7 +18,7 @@ La selección fija de dos perfumes fue reemplazada por un selector con búsqueda
 - Producto activo, publicado, no borrado y no marcado `unlisted`.
 - Categoría de perfumes, colonias o fragancias, o una subcategoría de estas. Se usan las categorías reales de Firestore y sus relaciones `parentId`, no palabras del nombre del producto.
 - Precio de venta positivo y **estrictamente inferior a ₡50 000**. El banner conserva el texto comercial solicitado «hasta ₡50 000», pero formulario y bases aclaran que ₡50 000 exactos no califican.
-- Se usa el precio de la tarjeta del catálogo: primera variante activa según `order` y, en empate, ID del documento; su `price` con el fallback existente a `basePrice`. No se escoge la variante más barata. Sin variantes activas se usa el precio base mostrado.
+- Se usa el mismo mínimo de precios válidos que muestran la tarjeta del catálogo y la ficha sin variante seleccionada. El helper `functions/lib/catalogPrice.mjs` elige entre variantes activas y no eliminadas, con desempate estable por orden e ID. Un precio de variante ausente hereda `basePrice`; cero o un precio malformado no lo heredan. Si no hay variantes activas, se conserva el precio base válido como referencia sin habilitar una compra sin variante. Si hay variantes activas pero ninguna tiene un precio válido, el producto no califica. La ficha muestra «Desde» cuando hay precios distintos y, al seleccionar una variante, muestra su importe exacto.
 - No se filtra por stock, abastecimiento o estado comercial: también califican productos bajo pedido o sin stock. Un error de lectura de variantes muestra un error y no habilita un precio base potencialmente incorrecto.
 - Como la tienda muestra colones enteros, un precio que se redondea a ₡50 000 también queda excluido.
 

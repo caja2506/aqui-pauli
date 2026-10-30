@@ -3,31 +3,45 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingCart, Eye } from 'lucide-react';
 import { formatCRC } from '../../utils/formatters';
 import { normalizeCommercialStatus } from '../../utils/constants';
+import { getVariantPrice, getProductPriceSummary, isActiveVariant, isPurchasableVariant } from '../../utils/productPrice';
 import StatusBadge from '../ui/StatusBadge';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 export default function ProductCard({ product }) {
+  return <ProductCardDetails key={product.id} product={product} />;
+}
+
+function ProductCardDetails({ product }) {
   const navigate = useNavigate();
-  const [mainVariant, setMainVariant] = useState(null);
+  const [variants, setVariants] = useState([]);
   const [loadingVariant, setLoadingVariant] = useState(true);
+  const [variantError, setVariantError] = useState(false);
 
   useEffect(() => {
-    // Cargar la primera variante activa para mostrar precio y habilitar compra
+    let active = true;
     getDocs(collection(db, 'products', product.id, 'variants')).then((snap) => {
+      if (!active) return;
       const vars = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(v => v.active !== false)
+        .filter(isActiveVariant)
         .sort((a, b) => (a.order || 0) - (b.order || 0));
-      if (vars.length > 0) setMainVariant(vars[0]);
+      setVariants(vars);
+      setLoadingVariant(false);
+    }).catch(() => {
+      if (!active) return;
+      setVariantError(true);
       setLoadingVariant(false);
     });
+    return () => { active = false; };
   }, [product.id]);
 
-  const price = mainVariant?.price || product.basePrice || 0;
+  const { price, isFrom, mainVariant } = getProductPriceSummary(product, variants);
   const imageUrl = (product.images && product.images[0]) || mainVariant?.imageUrl || '';
-  const commercialStatus = normalizeCommercialStatus(mainVariant?.commercialStatus);
-  const canBuy = mainVariant && (commercialStatus === 'disponible' || commercialStatus === 'bajo_pedido');
+  const purchasableVariant = variants.find(variant => isPurchasableVariant(variant)
+    && getVariantPrice(product, variant) !== null);
+  const commercialStatus = normalizeCommercialStatus((purchasableVariant || mainVariant || variants[0])?.commercialStatus);
+  const canBuy = Boolean(purchasableVariant) && !variantError;
 
   const handleViewOptions = (e) => {
     e.preventDefault();
@@ -55,7 +69,7 @@ export default function ProductCard({ product }) {
           </div>
         )}
         {/* Status overlay */}
-        {commercialStatus !== 'disponible' && (
+        {!loadingVariant && variants.length > 0 && commercialStatus !== 'disponible' && (
           <div className="absolute top-3 left-3">
             <StatusBadge status={commercialStatus} type="commercial" />
           </div>
@@ -74,10 +88,13 @@ export default function ProductCard({ product }) {
           {product.name}
         </h3>
         <div className="mt-auto pt-3">
-          <div className="text-xl font-black text-rose-600 tracking-tight">
-            {formatCRC(price)}
+          <div className="text-xl font-black text-rose-600 tracking-tight" aria-live="polite" data-testid="product-price">
+            {loadingVariant ? 'Cargando precio…'
+              : variantError ? 'Precio no disponible'
+                : price === null ? 'Sin opciones disponibles'
+                  : <>{isFrom && <span className="text-sm">Desde </span>}{formatCRC(price)}</>}
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">IVA incluido</p>
+          {!loadingVariant && !variantError && price !== null && <p className="text-[10px] text-slate-400 mt-0.5">IVA incluido</p>}
         </div>
 
         {/* Add to Cart button */}

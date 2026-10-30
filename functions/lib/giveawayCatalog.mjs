@@ -1,5 +1,7 @@
 // Política compartida por el selector web y enterGiveaway. No depende de Auth,
 // Firestore ni inventario: recibe documentos del catálogo ya leídos por cada capa.
+import { getCatalogPriceSummary } from './catalogPrice.mjs';
+
 const DEFAULT_FRAGRANCE_NAMES = ['perfume', 'perfumes', 'colonia', 'colonias', 'perfumeria', 'fragancia', 'fragancias'];
 const normalize = (value) => typeof value === 'string'
   ? value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() : '';
@@ -42,13 +44,9 @@ export function selectGiveawayProduct(product, variants, categories, policy = {}
       || /[\u0000-\u001f\u007f]/.test(product.name)
       || !Array.isArray(variants) || !isFragranceProduct(product, categories, policy)) return null;
 
-  // ProductCard muestra la primera variante activa según order. Firestore devuelve
-  // empates por ID; ordenar primero por ID conserva ese criterio en ambos entornos.
-  const activeVariants = variants.filter((variant) => variant && variant.active !== false)
-    .sort((a, b) => String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0)
-    .sort((a, b) => (a.order || 0) - (b.order || 0));
-  const variant = activeVariants[0];
-  const price = variant?.price || product.basePrice || 0;
+  // Mismo precio mínimo anunciado por tarjeta y ficha sin selección. La elección
+  // del sorteo admite productos sin stock: su disponibilidad no cambia el precio.
+  const { mainVariant: variant, price } = getCatalogPriceSummary(product, variants);
   const limit = policy.priceLimitCRC ?? 50000;
   // La tienda muestra colones enteros. Un precio que redondea a ₡50 000 tampoco
   // debe aparecer elegible. Stock, abastecimiento y commercialStatus no intervienen.

@@ -3,8 +3,9 @@
 // ==============================================
 import { Link } from 'react-router-dom';
 import LegalLayout, { CONTACT, LAST_UPDATED, Section } from '../../components/legal/LegalLayout';
+import { SHIPPING_DELIVERY_TIMES } from '../../utils/shippingDelivery';
 
-const UPDATED = LAST_UPDATED;
+const UPDATED = '30 de octubre de 2026';
 const A = 'font-bold text-rose-600 hover:text-rose-700';
 
 function ContactLine() {
@@ -52,15 +53,15 @@ export function TerminosPage() {
       </Section>
       <Section title="3. Cómo comprar">
         <p>Agregas productos al carrito, completas tus datos de contacto y la dirección de entrega, eliges el método de pago y confirmas el pedido. Recibirás un número de pedido para cualquier consulta.</p>
-        <p>El pedido se confirma cuando recibimos el pago, o cuando aceptamos el pago contra entrega (ver <Link className={A} to="/envios">Envíos y entregas</Link>).</p>
+        <p>El pedido queda registrado al confirmar la compra. El pago se confirma cuando recibimos el importe indicado al finalizar la compra (ver <Link className={A} to="/envios">Envíos y entregas</Link>).</p>
       </Section>
       <Section title="4. Métodos de pago">
         <ul className="list-disc pl-5 space-y-1">
           <li>SINPE Móvil y transferencia bancaria (envías el comprobante por WhatsApp).</li>
           <li>PayPal, cobrado en dólares al tipo de cambio de referencia que se muestra antes de pagar.</li>
-          <li>Pago contra entrega, en efectivo o por SINPE Móvil, en las zonas donde esté disponible (ver <Link className={A} to="/envios">Envíos y entregas</Link>).</li>
           <li>Tarjeta de crédito o débito en colones: próximamente.</li>
         </ul>
+        <p>El pago contra entrega no está disponible para los pedidos realizados en la tienda en línea.</p>
         <p>No vemos ni guardamos los datos de tu tarjeta: los pagos con tarjeta los procesa la pasarela de pago, en su página segura.</p>
       </Section>
       <Section title="5. Envíos, devoluciones y reembolsos">
@@ -112,7 +113,6 @@ export function DevolucionesPage() {
         <ul className="list-disc pl-5 space-y-1">
           <li>SINPE o transferencia: devolvemos a la cuenta o número desde el que pagaste.</li>
           <li>PayPal o tarjeta: se reversa al mismo método; tu banco o PayPal puede tardar días adicionales en reflejarlo.</li>
-          <li>Pago contra entrega: el reembolso se hace por SINPE Móvil.</li>
         </ul>
       </Section>
       <Section title="6. Cancelación antes del envío">
@@ -133,20 +133,16 @@ export function EnviosPage() {
       </Section>
       <Section title="2. Tiempos de entrega">
         <ul className="list-disc pl-5 space-y-1">
-          <li>Gran Área Metropolitana: de 1 a 2 días hábiles.</li>
-          <li>Resto del país: de 2 a 4 días hábiles.</li>
-          <li>Envío express en Grecia, cuando esté disponible: de 1 a 2 días hábiles.</li>
+          <li>Envío normal en la Gran Área Metropolitana: {SHIPPING_DELIVERY_TIMES.normalGAM}.</li>
+          <li>Envío normal en el resto del país: {SHIPPING_DELIVERY_TIMES.normalOutside}.</li>
+          <li>Envío express en Grecia: {SHIPPING_DELIVERY_TIMES.expressGrecia}.</li>
         </ul>
         <p>Los plazos se cuentan en días hábiles desde que se confirma tu pedido o tu pago. Si algún producto necesita más tiempo, te avisamos por WhatsApp antes del despacho.</p>
       </Section>
-      <Section title="3. Pago contra entrega">
-        <p>Ofrecemos pago contra entrega en la mayoría del país: pagas cuando recibes tu pedido, en efectivo o por SINPE Móvil.</p>
-        <p>El pago contra entrega no está disponible en estos casos, en los que el pedido se paga por adelantado:</p>
-        <ul className="list-disc pl-5 space-y-1">
-          <li>Envíos hechos por Correos de Costa Rica.</li>
-          <li>Zonas muy alejadas.</li>
-        </ul>
-        <p>Si tu pedido debe pagarse por adelantado, te lo indicamos por WhatsApp antes de despacharlo. Puedes pagar por SINPE Móvil, transferencia o PayPal.</p>
+      <Section title="3. Pago del pedido">
+        <p>Elegís entre los métodos disponibles al finalizar la compra. El pago contra entrega, en efectivo o por SINPE Móvil, no está disponible para los pedidos realizados en la tienda en línea.</p>
+        <p>Los productos en stock se pagan completos. Si tu pedido incluye productos Bajo pedido, el pago inicial incluye el 50% de esas líneas y el importe completo de las líneas en stock. El resumen de la compra muestra el monto a pagar ahora y el saldo pendiente.</p>
+        <p>El saldo de los productos Bajo pedido se paga cuando el pedido esté listo para entregarse. Te avisamos por WhatsApp antes de despacharlo.</p>
       </Section>
       <Section title="4. Mensajería">
         <p>Enviamos con mensajería local y con Correos de Costa Rica, según tu zona. Te avisamos por WhatsApp cuando tu pedido sale y, si el servicio de envío la genera, te compartimos la guía de seguimiento.</p>
@@ -168,7 +164,7 @@ export function EnviosPage() {
 
 export function PrivacidadPage() {
   return (
-    <LegalLayout title="Política de privacidad" updated={UPDATED}>
+    <LegalLayout title="Política de privacidad" updated={LAST_UPDATED}>
       <Section title="1. Responsable de los datos">
         <p>El responsable de la base de datos es {CONTACT.owner}, cédula de identidad {CONTACT.cedula}, persona física, titular de Aquí Pauli (aquipauli.com), con domicilio en Grecia, Alajuela, Costa Rica.</p>
         <p>

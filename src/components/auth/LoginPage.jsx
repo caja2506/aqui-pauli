@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShoppingBag, Loader2 } from 'lucide-react';
+import { ArrowLeft, ShoppingBag, Loader2 } from 'lucide-react';
 import { useAuth, socialAuthErrorMessage } from '../../contexts/AuthContext';
 import { useAuthFlags } from '../../hooks/useAuthFlags';
+import usePageTitle from '../../hooks/usePageTitle';
 import FacebookIcon from './FacebookIcon';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { requestPasswordReset, passwordResetErrorMessage, PASSWORD_RESET_SUCCESS } from '../../services/passwordReset';
 
 export default function LoginPage() {
@@ -19,6 +20,7 @@ export default function LoginPage() {
   const [name, setName] = useState('');
   const [resetSent, setResetSent] = useState(false);
   const resetPending = useRef(false);
+  usePageTitle(`${mode === 'reset' ? 'Restablecer contraseña' : mode === 'register' ? 'Crear cuenta' : 'Iniciar sesión'} | Aquí Pauli`);
 
   const redirectTo = location.state?.from || '/';
   const displayedError = error || (mode !== 'reset' ? redirectError : null);
@@ -114,6 +116,10 @@ export default function LoginPage() {
       <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-rose-600/15 rounded-full blur-[100px] pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-md">
+        <Link to="/" className="mb-5 inline-flex items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-rose-200 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-rose-300">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Volver a la tienda
+        </Link>
         <div className="bg-slate-900/80 backdrop-blur-2xl rounded-3xl border border-slate-700/50 shadow-2xl shadow-black/50 p-8 sm:p-10">
           {/* Logo */}
           <div className="flex flex-col items-center mb-8">
@@ -271,7 +277,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-[10px] text-slate-600 text-center mt-6">
-          © 2025 Aquí Pauli — Powered by Firebase
+          © {new Date().getFullYear()} Aquí Pauli — Powered by Firebase
         </p>
       </div>
     </div>

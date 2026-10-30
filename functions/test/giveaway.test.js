@@ -185,9 +185,10 @@ test("teléfono acepta los seis inicios válidos y guarda 8 dígitos tras quitar
 
 test("teléfono inválido no se recorta ni consume número y devuelve el mismo error claro", async () => {
   const invalid = [
-    "", "   ", "-", "8888777", "888877777", "8888777777777777",
+    "", "   ", "-", "8888777", "888877777", "8888777711", "5068888777", "8888777777777777",
     ...["0", "1", "3", "9"].map((start) => `${start}1234567`),
     "+506", "506", "+506 8888777", "506 8888777", "+506 888877777", "506 888877777",
+    "+506 8888777711", "506 8888777711",
     "+506 +506 88887777", "+506 506 88887777", "50650688887777",
     "+507 8888-7777", "00506 88887777", "+88887777", "8888+7777",
     "8888a777", "8888a7777", "8888.7777", "(8888)7777", "88887777 ext 1",
@@ -359,12 +360,12 @@ test("errores de Firestore no habilitan inscripción ni dejan escrituras parcial
 });
 
 test("el límite es estrictamente menor a 50000 y usa el precio mostrado con redondeo de colones", async () => {
-  for (const price of [49999, 49999.49, 32000]) {
+  for (const price of [49999, 49999.49, 32000, "32000", "49999.49"]) {
     const h = loadHandler({ "products/rasasi/variants/v1": { price, active: true } });
     const result = await h.enter(request());
-    assert.equal(result.productPrice, price);
+    assert.equal(result.productPrice, Number(price));
   }
-  for (const price of [49999.5, 50000, 50001, 0, -1, "32000", null, NaN, Infinity]) {
+  for (const price of [49999.5, 50000, 50001, 0, -1, "32000x", "32,000", "3.2e4", null, NaN, Infinity]) {
     const h = loadHandler({
       "products/rasasi": { ...catalogSeed()["products/rasasi"], basePrice: price },
       "products/rasasi/variants/v1": { price, active: true },
@@ -408,15 +409,26 @@ test("categorías con ciclos y referencias a otras colecciones no permiten eludi
   await rejectsCode(crossCollection.enter(request()), "failed-precondition");
 });
 
-test("usa la primera variante activa del catálogo, no un basePrice ni una variante barata elegidos por cliente", async () => {
+test("usa el mínimo válido de variantes activas del catálogo, sin aceptar el precio enviado por cliente", async () => {
   const variantOverridesBase = loadHandler({ "products/rasasi": { ...catalogSeed()["products/rasasi"], basePrice: 62000 } });
   assert.equal((await variantOverridesBase.enter(request())).productPrice, 32000);
   for (const variants of [
     { v1: { price: 50000, active: true, order: 0 }, v2: { price: 1000, active: true, order: 1 } },
-    { v1: { price: 1000, active: false, order: 0 }, v2: { price: 50000, active: true, order: 1 } },
     { v1: { price: 50000, active: true, order: 1 }, v2: { price: 1000, active: true, order: 1 } },
   ]) {
     const h = loadHandler(Object.fromEntries(Object.entries(variants).map(([id, value]) => [`products/rasasi/variants/${id}`, value])));
+    await rejectsCode(h.enter(request({ productPrice: 10, variantId: "v1" })), "invalid-argument");
+    assert.deepEqual(h.store, h.initialStore);
+    const result = await h.enter(request());
+    assert.equal(result.productPrice, 1000);
+    assert.equal(result.variantId, "v2");
+    assert.equal(h.get("giveawayEntries/ana").productPrice, 1000);
+  }
+  for (const invalid of [{ active: false }, { deleted: true }, { price: 0 }, { price: "1000x" }]) {
+    const h = loadHandler({
+      "products/rasasi/variants/v1": { price: 1000, active: true, order: 0, ...invalid },
+      "products/rasasi/variants/v2": { price: 50000, active: true, order: 1 },
+    });
     await rejectsCode(h.enter(request()), "failed-precondition");
     assert.deepEqual(h.store, h.initialStore);
   }
@@ -429,8 +441,9 @@ test("usa la primera variante activa del catálogo, no un basePrice ni una varia
   assert.equal(result.variantId, "v2");
 });
 
-test("sin variantes activas usa el basePrice visible, y precio cero de variante tiene el mismo fallback que ProductCard", async () => {
-  for (const variant of [{ price: 99000, active: false }, { price: 0, active: true }, { active: true }]) {
+test("sin variantes activas conserva basePrice y una variante solo lo hereda si falta el precio", async () => {
+  for (const variant of [{ price: 99000, active: false }, { price: 99000, deleted: true },
+    { active: true }, { price: null, active: true }, { price: "", active: true }]) {
     const h = loadHandler({ "products/rasasi/variants/v1": variant });
     assert.equal((await h.enter(request())).productPrice, 32000);
   }
@@ -439,6 +452,14 @@ test("sin variantes activas usa el basePrice visible, y precio cero de variante 
   const result = await h.enter(request());
   assert.equal(result.productPrice, 32000);
   assert.equal(result.variantId, "");
+});
+
+test("cero explícito o precio malformado no hereda basePrice ni habilita una colonia para el sorteo", async () => {
+  for (const price of [0, "0", -1, "1000x", " ", true, 32000.001, Infinity]) {
+    const h = loadHandler({ "products/rasasi/variants/v1": { price, active: true } });
+    await rejectsCode(h.enter(request()), "failed-precondition");
+    assert.deepEqual(h.store, h.initialStore);
+  }
 });
 
 test("stock cero, bajo pedido y no disponible no excluyen una colonia activa con precio elegible", async () => {
@@ -473,17 +494,20 @@ test("un cambio concurrente de precio, publicación o categoría fuerza revalida
   }
 });
 
-test("insertar una nueva variante prioritaria durante el alta también fuerza revalidación", async () => {
+test("insertar una variante de menor precio durante el alta fuerza revalidación del mínimo", async () => {
   const h = loadHandler();
   let changed = false;
   h.db.beforeCommit = async ({ writes }) => {
     if (!changed && writes.length) {
       changed = true;
-      await h.set("products/rasasi/variants/priority", { price: 62000, active: true, order: -1 });
+      await h.set("products/rasasi/variants/priority", { price: 28000, active: true, order: 9 });
     }
   };
-  await rejectsCode(h.enter(request()), "failed-precondition");
-  assert.equal(h.get(COUNTER), undefined);
+  const result = await h.enter(request());
+  assert.equal(result.productPrice, 28000);
+  assert.equal(result.variantId, "priority");
+  assert.equal(h.get("giveawayEntries/ana").productPrice, 28000);
+  assert.equal(h.get(COUNTER).lastNumber, 1);
   assert.equal(h.stats.retries, 1);
 });
 

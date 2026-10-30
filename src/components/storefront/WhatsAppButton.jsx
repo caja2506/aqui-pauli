@@ -12,7 +12,7 @@ export default function WhatsAppButton() {
   const { pathname } = useLocation();
   const { isCartOpen } = useCart();
   // En móvil, los controles de compra tienen prioridad sobre el acceso flotante.
-  const hideOnMobile = isCartOpen || ['/producto/:productId', '/carrito', '/checkout']
+  const hideOnMobile = isCartOpen || ['/', '/catalogo', '/producto/:productId', '/carrito', '/checkout']
     .some((route) => matchPath({ path: route, end: true }, pathname));
   const waLink = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(WA_MESSAGE)}`;
 
