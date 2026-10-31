@@ -936,6 +936,63 @@ function pilotHarness(options = {}) {
   return {h,req};
 }
 
+const checkClosedForm = (uid = 'user1') => ({ auth: { uid }, data: { checkClosedPilotForm: true } });
+async function closedPilot(options) {
+  const { h, req } = pilotHarness(options);
+  const sku = 'zz-tilopay-live-check';
+  await h.set('users_roles/user1', { role: 'admin' });
+  await h.set(`products/${sku}`, { active: true, name: 'Prueba privada', basePrice: 1000 });
+  await h.set(`products/${sku}/variants/v1`, h.get('products/p1/variants/v1'));
+  await h.db.doc(`orders/${ORDER}/items/item_0`).update({ productId: sku });
+  await h.db.doc('_ops/tilopay-live-pilot').update({ productId: sku });
+  await h.service.getConfig(req());
+  await h.service.create(req());
+  await h.db.doc('config/payments').update({ 'tilopay.enabled': false, 'tilopay.pilotSeed': {
+    stage: 'closed', tokenHash: h.get('_ops/tilopay-live-pilot').tokenHash } });
+  return h;
+}
+
+test('el administrador puede comprobar una sola vez su pedido cerrado aunque cambie de pestaña', async () => {
+  const entered = deferred(), reply = deferred();
+  let count = 0;
+  const h = await closedPilot({ onConsult: missingForm, onPay: () => {
+    if (++count === 1) return blockedForm();
+    entered.resolve(); return reply.promise;
+  } });
+  const send = h.service.create(checkClosedForm()); await entered.promise;
+  assert.match((await h.service.create(checkClosedForm())).message, /ya se solicitó/);
+  reply.resolve(response({ type: '100', url: URL }));
+  assert.equal((await send).url, URL);
+  assert.equal((await h.service.create(checkClosedForm())).url, URL);
+  assert.equal(h.calls.pay.length, 2);
+  assert.deepEqual(h.calls.pay[0], h.calls.pay[1]);
+  assert.equal(h.order().tilopay.attemptCount, 1);
+  assert.equal(h.get('config/payments').tilopay.enabled, false);
+  assert.equal(h.att().previousCreationOutcome.reason, 'MERCHANT_TRANSACTION_BLOCK');
+});
+
+test('el segundo 402 se conserva al recargar y no vuelve a generarse otra solicitud', async () => {
+  const h = await closedPilot({ onConsult: missingForm, onPay: blockedForm });
+  for (let i = 0; i < 2; i++) assert.equal((await h.service.create(checkClosedForm())).formReason, 'MERCHANT_TRANSACTION_BLOCK');
+  assert.equal(h.calls.pay.length, 2);
+  assert.equal(h.att().formGeneration, 1);
+});
+
+test('la comprobación cerrada rechaza otro usuario, un comercio cambiado y una consulta ambigua', async () => {
+  for (const scenario of ['otro admin', 'cliente', 'consulta', 'integración', 'abierto', 'contenido', 'formulario previo']) {
+    const h = await closedPilot({ onConsult: scenario === 'consulta' ? () => response({ type: '200', response: [] }) : missingForm,
+      onPay: scenario === 'formulario previo' ? () => response({ type: '100', url: URL }) : blockedForm });
+    if (scenario === 'otro admin') await h.set('users_roles/other', { role: 'admin' });
+    if (scenario === 'cliente') await h.set('users_roles/user1', { role: 'cliente' });
+    if (scenario === 'integración') await h.db.doc('config/payments').update({ 'tilopay.merchantId': '999' });
+    if (scenario === 'abierto') await h.db.doc('config/payments').update({ 'tilopay.pilotSeed.stage': 'open' });
+    if (scenario === 'contenido') await h.db.doc(`orders/${ORDER}`).update({ total: 1 });
+    await assert.rejects(h.service.create(checkClosedForm(scenario === 'otro admin' ? 'other' : 'user1')));
+    assert.equal(h.calls.pay.length, 1, scenario);
+    assert.equal(h.att().closedPilotCheckAt, undefined, scenario);
+  }
+});
+
 test('piloto live: una invitación vinculada a una sesión y un único pedido de ₡1000', async()=>{
   const {h,req}=pilotHarness();
   assert.equal((await h.service.getConfig()).enabled,false);

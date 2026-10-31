@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { doc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { tilopayCreatePayment } from '../../services/payments/tilopayClient';
+import { isValidTilopayPaymentUrl } from '../../services/payments/tilopayUrl';
 
 const SKU = 'zz-tilopay-live-check';
 const OWNER_TOKEN = 'aqp_live_pilot_operator';
@@ -18,6 +20,7 @@ export default function TilopayPilotPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [formCheck, setFormCheck] = useState(null);
   useEffect(() => onSnapshot(settings(), snap => setConfig(snap.data()?.tilopay || {}),
     () => setError('La cuenta necesita acceso al panel Admin.')), []);
   const seedHash = config?.pilotSeed?.tokenHash;
@@ -26,6 +29,21 @@ export default function TilopayPilotPage() {
     return () => { current = false; };
   }, [token, seedHash]);
   const stage = config?.pilotSeed?.stage;
+  async function checkForm() {
+    if (busy) return;
+    setBusy(true); setError(''); setFormCheck(null);
+    try {
+      const result = await tilopayCreatePayment({ checkClosedPilotForm: true });
+      setFormCheck(isValidTilopayPaymentUrl(result.url)
+        ? { url: result.url, message: 'Tilopay generó el formulario de ₡1 000.' }
+        : { message: result.formReason === 'MERCHANT_TRANSACTION_BLOCK'
+          ? 'Tilopay volvió a responder que el comercio tiene un bloqueo (402).'
+          : result.message || 'Tilopay no devolvió un formulario.' });
+    } catch (e) {
+      setError(['functions/permission-denied','functions/failed-precondition','functions/unauthenticated'].includes(e.code)
+        ? e.message : 'No recibimos el resultado. Podés volver a consultarlo en esta misma pantalla.');
+    } finally { setBusy(false); }
+  }
   async function act(action) {
     if (busy) return;
     setBusy(true); setError('');
@@ -67,7 +85,7 @@ export default function TilopayPilotPage() {
   const purchaseUrl = new URL(`/producto/${SKU}#tilopay-pilot=${token}`, window.location.origin).href;
   return <section className="mx-auto my-6 max-w-xl space-y-5 rounded-2xl bg-white p-6 shadow-sm">
     <h1 className="text-2xl font-black">Prueba privada de tarjeta</h1>
-    <p>Una sesión de compra, un pedido y un total de <strong>₡1 000</strong>. La tarjeta se ingresa en el formulario de Tilopay.</p>
+    <p>Una sesión de compra, un pedido y un total de <strong>₡1 000</strong>.</p>
     {!config ? <p>Cargando configuración…</p> : !stage ? <>
       <p>Este paso crea el artículo oculto y pausa el inicio de pagos con tarjeta mientras se cambia el ambiente del portal.</p>
       {button('1. Preparar prueba de ₡1 000','prepare',config.mode==='test' && config.enabled)}
@@ -87,7 +105,17 @@ export default function TilopayPilotPage() {
           catch { setError('Copiá la dirección del enlace «Abrir compra real de ₡1 000».'); }
         }}>{copied ? 'Enlace copiado' : 'Copiar enlace privado'}</button></> : <p>El enlace se entrega desde la pestaña que lo preparó y tiene una vigencia de dos horas.</p>}
       {button('Cerrar el acceso a nuevos formularios','close')}
-    </> : <p>El acceso a formularios nuevos está cerrado.</p>}
+    </> : stage === 'closed' ? <>
+      <p>La tienda está cerrada para nuevas pruebas. Podés comprobar el formulario del mismo pedido de ₡1 000. No necesitás ingresar la tarjeta.</p>
+      <button type="button" disabled={busy} onClick={checkForm}
+        className="block rounded-xl bg-slate-900 px-5 py-3 font-bold text-white disabled:opacity-50">
+        {busy ? 'Consultando Tilopay…' : formCheck ? 'Consultar el resultado' : 'Comprobar formulario de Tilopay'}
+      </button>
+      {formCheck && <p role="status">{formCheck.message}</p>}
+      {formCheck?.url && <a className="block font-bold underline" href={formCheck.url} target="_blank" rel="noopener noreferrer">
+        Abrir formulario de Tilopay
+      </a>}
+    </> : <p>El estado de la prueba no permite abrir un formulario.</p>}
     {error && <p role="alert" className="font-bold text-red-700">{error}</p>}
   </section>;
 }
