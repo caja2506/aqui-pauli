@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 // Los cambios aislados de sorteo, pedidos o pagos manuales publican únicamente
 // sus endpoints y reglas. Los cambios compartidos conservan el alcance general.
 const existingFunctions = [
-  'tilopayGetConfig', 'tilopayCreatePayment', 'tilopayConfirm',
+  'tilopayGetConfig', 'tilopayGetQuote', 'tilopayCreatePayment', 'tilopayConfirm', 'tilopayReconcilePayments',
   'createOrderWithReservation', 'deleteOrder', 'manageCashOnDeliveryOrder', 'submitPaymentProof', 'approvePaymentManually',
   'paypalCreateOrder', 'paypalCaptureOrder', 'paypalGetQuote', 'cleanExpiredReservations',
 ];

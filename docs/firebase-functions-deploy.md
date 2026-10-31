@@ -4,27 +4,31 @@ El workflow `.github/workflows/firebase-functions-deploy.yml` despliega al proye
 
 ## Alcance exacto
 
-El comando usa `--only firestore:rules` junto con estos once selectores de Functions:
+`scripts/firebase-deploy-targets.mjs` selecciona el alcance según el diff. Cambios aislados de sorteo, pedidos o comprobantes usan sus endpoints; cambios compartidos o un historial incompleto usan `firestore:rules` junto con esta lista general de Functions:
 
 ```text
 functions:default:tilopayGetConfig
+functions:default:tilopayGetQuote
 functions:default:tilopayCreatePayment
 functions:default:tilopayConfirm
+functions:default:tilopayReconcilePayments
 functions:default:createOrderWithReservation
 functions:default:deleteOrder
+functions:default:manageCashOnDeliveryOrder
 functions:default:submitPaymentProof
 functions:default:approvePaymentManually
 functions:default:paypalCreateOrder
 functions:default:paypalCaptureOrder
 functions:default:paypalGetQuote
 functions:default:cleanExpiredReservations
+functions:default:enterGiveaway
 ```
 
 `firebase.json` configura el directorio `functions` como codebase `default`. El segmento `default` hace explícita esa selección y evita incluir otro codebase si se agrega, por ejemplo, `functions-metafeed`. Una carpeta suelta no constituye un codebase desplegable: debe estar declarada en `firebase.json`. La [sintaxis oficial del CLI](https://github.com/firebase/firebase-tools/blob/v15.34.2/src/commands/deploy.ts) admite `functions:codebase:función`; Firebase explica la separación entre codebases en [Organize multiple functions](https://firebase.google.com/docs/functions/organize-functions).
 
-`onOrderStatusChange` queda excluida porque aún faltan `GMAIL_SMTP_USER` y `GMAIL_SMTP_APP_PASSWORD`. Publicar este workflow no actualiza el trigger que ya esté desplegado: sus cambios de avisos y caducidad de reintentos requieren un despliegue posterior de esa función cuando sus secretos estén preparados. Tampoco se despliegan Hosting, índices, `paypalGetConfig`, funciones de catálogo/CRM ni otras funciones añadidas al código. Para ampliar la lista hace falta modificar el workflow.
+`onOrderStatusChange` queda excluida porque aún faltan `GMAIL_SMTP_USER` y `GMAIL_SMTP_APP_PASSWORD`. Publicar este workflow no actualiza el trigger que ya esté desplegado: sus cambios de avisos y caducidad de reintentos requieren un despliegue posterior de esa función cuando sus secretos estén preparados. El nuevo flujo Tilopay aplica inventario/CRM desde sus callables y su conciliador, sin depender del trigger ni publicar el estado intermedio `status: pagado` que pudiera activar una versión antigua. Esta actualización no añade avisos externos. Tampoco se despliegan Hosting, índices, `paypalGetConfig`, funciones de catálogo/CRM ni otras funciones añadidas al código. Para ampliar la lista hace falta modificar y probar el selector.
 
-`cleanExpiredReservations` sí se actualiza. Al desplegar una función `onSchedule`, Firebase crea o actualiza su función HTTP y su trabajo de Cloud Scheduler. El cron queda sujeto al horario declarado en `functions/schedulers.js`; no se ejecuta como comando dentro del workflow. Un push de la rama del PR tampoco lo publica ni lo invoca. El workflow no ejecuta la migración `functions/scripts/fix-reserved-stock.js`, no cambia `config/payments.tilopay.mode` y no realiza cobros. Véase [Schedule functions](https://firebase.google.com/docs/functions/schedule-functions).
+`cleanExpiredReservations` sí se actualiza, y se añade `tilopayReconcilePayments` cada cinco minutos. Al desplegar una función `onSchedule`, Firebase crea o actualiza su función HTTP y su trabajo de Cloud Scheduler. Los crons quedan sujetos a sus horarios declarados; no se ejecutan como comandos dentro del workflow. Un push de la rama del PR tampoco los publica ni los invoca. El conciliador consulta exclusivamente intentos live en la cola privada `tilopayReconciliation`, con lease y límite por ejecución; no crea pagos ni captura autorizaciones. El workflow no ejecuta la migración `functions/scripts/fix-reserved-stock.js`, no cambia `config/payments.tilopay.mode` y no realiza cobros. Véase [Schedule functions](https://firebase.google.com/docs/functions/schedule-functions).
 
 ## Credencial, versiones y parámetros
 

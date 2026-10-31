@@ -61,3 +61,17 @@ test('otros cambios del entry point o historial incompleto no se confunden con e
   assert.ok(firebaseDeployTargets([]).includes('functions:default:createOrderWithReservation'));
   assert.ok(firebaseDeployTargets(['firestore.rules']).includes('functions:default:cleanExpiredReservations'));
 });
+
+test('la preparación Tilopay publica la cotización y el cron junto con todos los consumidores compartidos', () => {
+  for (const paths of [[], ['functions/tilopay.js'], ['functions/lib/tilopayService.js'],
+    ['functions/lib/tilopayOrder.js'], ['functions/lib/tilopayReconciliation.js'],
+    ['functions/lib/orderFulfillment.js', 'functions/test/firestore-payments.emulator.test.js']]) {
+    const result = firebaseDeployTargets(paths);
+    for (const name of ['tilopayGetConfig', 'tilopayGetQuote', 'tilopayCreatePayment', 'tilopayConfirm',
+      'tilopayReconcilePayments', 'createOrderWithReservation', 'manageCashOnDeliveryOrder',
+      'submitPaymentProof', 'approvePaymentManually', 'paypalCreateOrder', 'paypalCaptureOrder', 'paypalGetQuote']) {
+      assert.ok(result.includes(`functions:default:${name}`), `${paths}: ${name}`);
+    }
+    assert.equal(result.includes('onOrderStatusChange'), false, 'el trigger de correo conserva su despliegue separado');
+  }
+});

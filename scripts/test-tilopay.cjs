@@ -17,6 +17,7 @@ const files = rules ? ["firestore-payments.emulator.test.js"] : [
   "paymentMoney.test.js", "tilopayApi.test.js", "tilopayUrl.test.js",
   "inventoryStock.test.js", "fix-reserved-stock.test.js", "pricing-security.test.js",
   "order-payment-integration.test.js", "paid-review-email.test.js", "tilopay.test.js",
+  "tilopayAmounts.test.js", "tilopay-processing.test.js",
 ];
 for (const file of files) {
   const result = spawnSync(process.execPath, [path.join(root, "functions", "test", file)], {

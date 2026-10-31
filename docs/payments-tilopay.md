@@ -1,8 +1,8 @@
 # Tilopay: implementación revisada de pagos en CRC
 
-Base de esta entrega: `caja2506/aqui-pauli`, commit `2e8de4ab00ee337bc693ac2f98a3d4175eda95ef`, con las correcciones del PR #2 y su revisión posterior. No se ejecutaron cobros, envíos, migraciones en producción, cambios de configuración ni despliegues durante esta revisión.
+Preparación de producción sobre `caja2506/aqui-pauli`, commit `d5c08ac043ef2dd78788dc813639ba140c72325a`. Conserva las protecciones del PR #2 y añade apartado del 50%, cotización del servidor, procesamiento de inventario/CRM y conciliación programada. Esta actualización de código no cambia automáticamente `config/payments` ni el ambiente de la cuenta Tilopay, y no ejecuta pagos reales.
 
-Esta versión corrige el flujo de inicio, consulta, autorización, inventario y retorno del navegador. **No implementa webhook/OrderHash ni captura separada**, conforme al alcance acordado. Un pago autorizado sin captura permanece en revisión; no habilita entrega.
+**No implementa webhook/OrderHash ni captura separada.** Un pago autorizado sin captura permanece en revisión; no habilita entrega. La conciliación programada consulta pagos existentes y recupera el cierre de la pestaña del comprador; nunca crea o captura otro cobro.
 
 ## 1. Configuración por ambiente
 
@@ -22,15 +22,17 @@ La configuración mínima de prueba es `{ "enabled": true, "mode": "test" }`. No
 
 El modo de la aplicación no cambia el ambiente de Tilopay. Hay que verificar que la integración del proveedor esté en el ambiente correspondiente. El servidor contrasta el ambiente observado con el almacenado al crear el intento.
 
-Se mantienen los nombres de las tres funciones públicas y sus argumentos:
+Se conservan las funciones existentes y se añaden una cotización sin secretos y un trabajo programado privado. La cotización tiene invocador público, pero exige una sesión Firebase (también admite el usuario anónimo del checkout); no requiere rol admin/tester.
 
 | Función | Entrada | Salida relevante |
 |---|---|---|
 | `tilopayGetConfig` | Ninguna | `{ enabled, mode }`, sin secretos. |
-| `tilopayCreatePayment` | `{ orderId }`, sesión Firebase | URL del mismo intento o estado del pedido. Puede devolver otro `orderId` propio si ya existe un checkout equivalente pendiente. |
+| `tilopayGetQuote` | `{ items: [{ productId, variantId, quantity }], canton, shippingType }`, sesión Firebase | Cotización CRC calculada con catálogo: total, pago inicial, apartado y saldo. Solo lee Firestore, sin credenciales ni peticiones a Tilopay. |
+| `tilopayCreatePayment` | `{ orderId, expectedQuote? }`, sesión Firebase | URL del mismo intento o estado del pedido, con su cotización guardada. Puede devolver otro `orderId` propio si ya existe un checkout equivalente pendiente. |
 | `tilopayConfirm` | `{ orderId }`, sesión Firebase | `paid`, `already_paid`, `test_paid`, `pending`, `review` o `declined`. En esta entrega `retry` siempre es `false`. |
+| `tilopayReconcilePayments` | Cloud Scheduler, cada cinco minutos | Consulta intentos live de la cola privada y reintenta el procesamiento de inventario/CRM. No es un callable de clientes. |
 
-El `functions/index.js` y el cliente `tilopayClient` del commit base ya exportan/consumen estas funciones: no requieren reemplazo. No hay nuevas dependencias de producción. Los nuevos helpers usan módulos nativos de Node y dependencias Firebase ya existentes.
+`functions/index.js` exporta el módulo Tilopay mediante spread. El cliente `tilopayClient` incorpora `tilopayGetQuote`. No hay nuevas dependencias de producción.
 
 ## 2. Inicio del pago y monto inmutable
 
@@ -39,6 +41,10 @@ El cliente proporciona el identificador del pedido. El servidor verifica su due�
 Una transacción de Firestore lee el padre, la colección real de items y el catálogo. Valida entre 1 y 50 líneas, cantidades enteras de 1 a 99, identificadores y ausencia de variantes duplicadas. Precio, nombre, imagen y `supplyType` vienen del catálogo. Las operaciones de dinero usan centavos enteros, sin redondear importes inválidos. **Se conserva la política existente de envío incluido**; esta entrega no introduce un cobro de envío.
 
 La transacción escribe siempre los items y el resumen canónicos, aunque el total enviado por el navegador coincida por casualidad. Guarda un snapshot con dueño, productos, cantidades, precios, moneda, total, dirección y contacto. El intento conserva su huella SHA-256, importe, ambiente, comercio, prefijo y huella de la key utilizada.
+
+Los nuevos snapshots usan `version: 2`: `totalMinor` es el total completo y `amountMinor` el cobro inicial. `paymentPlan.version: 1` congela la política del 50% sobre líneas Bajo pedido, con redondeo a colones y reparto por línea concordante con `computeBackorder`. Las líneas en stock se pagan completas; el envío, cuando exista, también se paga completo. El saldo es únicamente la parte no pagada de las líneas Bajo pedido. Una política futura necesita otra versión: no reinterpreta intentos existentes. Los snapshots históricos `version: 1` conservan el cobro completo original, sin convertirlo retroactivamente en apartado.
+
+La cotización pública y las respuestas de inicio/confirmación usan `currency`, `crcTotal`, `crcSubtotal`, `crcShipping`, `crcPayNow`, `crcBalanceDue`, `crcDepositTotal`, `crcBackorderSubtotal` y `hasBackorder`. `crcTotal` nunca significa el apartado. El cliente muestra «Calculando…» hasta obtener una cotización válida y la invalida si cambia carrito o envío. Envía `expectedQuote` para detectar cambios de precio antes de reservar o llamar al proveedor; el servidor vuelve a calcular dentro de la transacción. El argumento es opcional para compatibilidad con el frontend anterior, pero nunca se usa como autoridad financiera.
 
 En live se reserva inventario con un marcador `inventoryReservation` creado por servidor. En test no se reserva inventario real. El snapshot y las reservas quedan protegidos de escrituras del navegador, incluso del administrador.
 
@@ -59,6 +65,7 @@ Colecciones protegidas, solo servidor:
 | `tilopayReferences` | Reserva única de referencia externa y asociación con pedido/intento/dueño. |
 | `tilopayTx` | Asociación única de comercio + ambiente + ID de transacción. En test el comercio se sustituye por una huella estable de la key de integración, porque el ID del comercio no se valida. El ID del documento es un hash, sin eliminar caracteres ni crear colisiones por sanitización. |
 | `tilopayCheckoutLocks` | Bloqueo de compras equivalentes del mismo dueño mientras un intento permanece sin resolver. |
+| `tilopayReconciliation` | Trabajo pendiente por pedido live, fecha de siguiente consulta y lease de ejecución. No admite lecturas ni escrituras desde clientes, ni siquiera administradores. |
 
 El bloqueo del checkout depende de dueño, variantes y cantidades. No cambia al modificar precio, dirección o modo test/live. No pretende impedir compras distintas legítimas. Un pago liquidado permite una compra posterior de los mismos productos; una incertidumbre mantiene el bloqueo.
 
@@ -93,15 +100,17 @@ La evidencia consultada se liga a una huella del contexto del intento. Si ese co
 
 ## 6. Inventario, CRM y avisos
 
-El trigger mantiene `retry: true`, pero descarta eventos con más de una hora desde su `CloudEvent.time` original, o con fecha inválida, antes de producir efectos. Actualizar `updatedAt` del pedido no reinicia ese plazo. Tras agotarlo, un caso pendiente requiere revisión operativa: no se promete reintento ilimitado.
+Tilopay aplica inventario y CRM directamente después de conciliar una captura, tanto en el callable como en el trabajo programado. No depende de que esté desplegado `onOrderStatusChange` ni de sus secretos Gmail. Si la ejecución se interrumpe después de acreditar el dinero, la cola vuelve a intentar los efectos pendientes.
 
-El trigger de pago lee el estado actual, no asume que el evento recibido es el último. Inventario, consumo de reserva, CRM, interacción determinista y marcador `fulfillment.state=applied` se escriben en una sola transacción. Un evento duplicado o concurrente no repite esos efectos. Una cancelación concurrente impide preparar el pedido.
+El procesamiento lee el estado actual. Inventario, consumo de reserva, CRM, interacción determinista y marcador `fulfillment.state=applied` se escriben en una sola transacción. Una invocación duplicada o concurrente no repite esos efectos. Una cancelación concurrente impide preparar el pedido.
+
+Una captura completa escribe inicialmente `paymentStatus: pagado` manteniendo `status: pendiente_pago`, y el procesamiento cambia directamente a `por_preparar`. No se publica el estado intermedio `status: pagado`, para evitar que un trigger antiguo vuelva a descontar inventario. Un apartado escribe `paymentStatus: parcial`, conserva `status: pendiente_pago`, deja `paymentAmount` igual a lo capturado y `remainingTotal` igual al saldo. Consume solo el inventario propio de sus líneas en stock y registra en CRM únicamente el importe recibido, sin sumar el saldo como dinero cobrado. Las reglas impiden despachar un apartado con saldo o acreditar ese saldo desde el navegador. Esta entrega no añade un segundo cobro automático del saldo.
 
 Para Tilopay, los productos y datos de entrega se toman del snapshot live capturado. Se exige concordancia de intento, ID de transacción, importe y huella, sin alertas de revisión. `reservedStock` solo disminuye por una reserva identificada de ese pedido; no consume reservas de otros compradores.
 
 El navegador del administrador no puede marcar pagado ni adelantar `pagado → por_preparar`. Solo puede gestionar `por_preparar → enviado → entregado` después del fulfillment verificado y mientras no haya alertas. Las notas y el tracking sin cambio de estado conservan su permiso.
 
-Un pedido con pago acreditado que pasa a `revision_manual` avisa por Telegram y correo **«Pagado pero requiere revisión»**, aunque `fulfillment.state` no sea `applied`. Para Tilopay se exige evidencia de captura live del intento principal, monto validado e ID asociado al pago; una autorización o un pago test no disparan ese aviso. La alerta incluye motivo y transacción y no prepara ni entrega productos. Sus reclamaciones son independientes de las del aviso normal (`paidEffects.review` y `paidReviewEmail`), para no ocultar una alerta posterior a la venta ni impedir el aviso normal tras resolver la revisión.
+El código de avisos existente pertenece al trigger, cuyo despliegue continúa separado hasta configurar Gmail. Los callables y el conciliador nuevos no envían correo ni Telegram. Por ello esta actualización no promete notificaciones de venta o revisión; la evidencia y el estado sí quedan visibles en el pedido. Si se despliega posteriormente el trigger, habrá que revisar su suscripción al flujo directo y a los apartados antes de afirmar que están notificados.
 
 Correo y Telegram tienen reclamaciones persistentes por canal. No existe una transacción atómica entre Firestore y esos servicios: ante un envío ambiguo se conserva `sending` o `needs_review` sin reenviarlo automáticamente. Puede hacer falta recuperar un aviso manualmente. No se afirma entrega externa «exactamente una vez».
 
@@ -109,7 +118,7 @@ Los callables de comprobantes/aprobación manual y PayPal rechazan pedidos Tilop
 
 ## 7. Inventario histórico, migración y despliegue coordinado
 
-Los intentos del diff anterior no tienen `schemaVersion: 2` ni snapshot completo. Se pueden consultar para diagnóstico, pero quedan en revisión. No se fabrica un snapshot usando el carrito actual para acreditar una transacción histórica. Tampoco se abre otro pago para ocultar el legado.
+Los intentos anteriores al hardening del PR #2 pueden no tener `schemaVersion: 2` ni snapshot completo. Se pueden consultar para diagnóstico, pero quedan en revisión. No se fabrica un snapshot usando el carrito actual para acreditar una transacción histórica. Esto es distinto de un intento `schemaVersion: 2` con snapshot `version: 1`: ese formato íntegro sigue admitiendo su cobro completo original. Tampoco se abre otro pago para ocultar el legado.
 
 El helper compartido normaliza `reservedStock` antes de cotizar, reservar, consumir o liberar: ausente, negativo, no numérico o no finito pasa a cero; una fracción positiva se redondea hacia arriba y el resultado se limita a `stock`. Los valores válidos se conservan. `stock` ausente sigue valiendo cero, pero un stock físico presente inválido se rechaza. Los avisos estructurados indican el contexto y el motivo sin copiar valores crudos ni datos personales. Una cotización solo lee; las operaciones de inventario usan el contador normalizado dentro de su transacción.
 
@@ -129,24 +138,28 @@ El script recorre únicamente `products/{product}/variants/{variant}`, incluidas
 
 Las reservas históricas sin `inventoryReservation` requieren conciliación de inventario. No se supone que los subitems actuales describan una reserva anterior. Un pedido histórico que esté esperando su evento de pago sin snapshot nuevo se detendrá para revisión en el helper nuevo.
 
-El [workflow de Functions y reglas](firebase-functions-deploy.md) automatiza únicamente la lista explícita de once funciones y `firestore:rules` tras un push a main. **Excluye `onOrderStatusChange`**, conforme a la revisión, porque faltan sus secretos Gmail. Sus mejoras de inventario, avisos y reintentos no estarán activas hasta desplegar también ese trigger. Gmail se vincula por nombre y se lee en runtime, de modo que sus secretos ausentes no bloqueen el discovery de otras funciones.
-
-No habilitar live suponiendo que ese despliegue parcial ya actualizó el fulfillment: las nuevas reglas requieren su marcador verificado antes de enviar pedidos. La configuración de los secretos y el despliegue del trigger siguen siendo pasos necesarios para completar la incorporación.
+El [workflow de Functions y reglas](firebase-functions-deploy.md) selecciona endpoints mediante `scripts/firebase-deploy-targets.mjs` y siempre incluye reglas. Los cambios compartidos despliegan la lista general, ahora con `tilopayGetQuote` y `tilopayReconcilePayments`. **Excluye `onOrderStatusChange`**, conforme a la revisión, porque faltan sus secretos Gmail. El fulfillment Tilopay de esta entrega es independiente de ese trigger; sus avisos siguen fuera de este despliegue.
 
 Secuencia de incorporación recomendada:
 
 1. Deshabilitar nuevos inicios de pago durante el reemplazo. Conservar la posibilidad de conciliar los intentos abiertos y registrar cuáles quedan en revisión.
 2. Copiar todos los archivos del paquete respetando sus rutas, incluidos los nuevos helpers. No reemplazar solo `functions/tilopay.js`.
-3. Ejecutar las pruebas. Aplicar las reglas y Functions de forma coordinada, con el inicio de pagos todavía deshabilitado. Las funciones afectadas son `tilopayGetConfig`, `tilopayCreatePayment`, `tilopayConfirm`, `createOrderWithReservation`, `onOrderStatusChange`, `deleteOrder`, `submitPaymentProof`, `approvePaymentManually`, `paypalCreateOrder` y `paypalCaptureOrder`; `paypalGetQuote` usa el pricing compartido actualizado. También se reemplaza el cron `cleanExpiredReservations` para que no expire intentos Tilopay históricos.
+3. Ejecutar las pruebas. Desplegar primero el backend, sus reglas, la cotización y el conciliador, conservando el modo de prueba. Confirmar la finalización del workflow de Functions antes de incorporar el nuevo frontend. La lista general actualiza también los consumidores del helper de fulfillment compartido. No despliega el trigger Gmail.
 4. Incorporar el frontend. Verificar la configuración real de comercio/prefijo y secretos mediante las herramientas del proyecto, sin copiar valores de las pruebas.
-5. Probar test con rol autorizado y comprobar que no hay efectos comerciales. Resolver los intentos heredados antes de reabrir compras equivalentes.
-6. Antes de habilitar live para clientes, confirmar con Tilopay el comportamiento de captura del comercio y validar un pago controlado y su conciliación. Esa prueba real no fue ejecutada en esta revisión.
+5. Verificar cotizaciones de stock, Bajo pedido y carrito mixto sin crear pagos. Resolver los intentos heredados antes de reabrir compras equivalentes. El flag local `test` no asegura que la cuenta del proveedor siga en pruebas; verificar ese ambiente antes de cualquier simulación contra Tilopay.
+6. Antes de habilitar live para clientes, completar el `merchantId` y prefijo reales de esa integración y confirmar el ambiente/captura del comercio. Un ensayo financiero real requiere coordinación expresa y no forma parte de esta actualización. La consulta de configuración al iniciar este trabajo encontró `enabled: true, mode: test`, sin `merchantId` ni `orderPrefix`; el código no inventa ni cambia esos valores.
+
+### Conciliación sin retorno del navegador
+
+Cada reserva live crea atómicamente `tilopayReconciliation/{orderId}` con `nextCheckAt` ISO. El cron consulta las entradas vencidas mediante un índice simple, con un máximo de 25 por ejecución, lease por documento y concurrencia acotada. No recorre el historial completo de pedidos. Un lease vencido vuelve a ser reclamable tras una interrupción. Los resultados pendientes se revisan a los cinco minutos; los errores usan backoff acotado; los pagos acreditados y las revisiones persistentes vuelven a consultarse diariamente para detectar movimientos tardíos. Los plazos son objetivos de programación, no una garantía de tiempo ante una caída del proveedor o una cola acumulada.
+
+Las entradas no se borran automáticamente ni liberan reservas/bloqueos por antigüedad. La consulta diaria del historial tiene un costo operativo creciente; cualquier política futura de retención debe conservar la evidencia financiera y definir cómo detectar devoluciones posteriores. Este cambio no migra automáticamente intentos live anteriores a la cola: el dueño puede usar la confirmación existente, y un operador debe revisar/backfillear los casos heredados con herramientas del servidor si existen. Los intentos test nunca se encolan ni reciben efectos comerciales.
 
 ## 8. Webhook, OrderHash y captura separada
 
 El retorno del navegador no aporta evidencia financiera confiable. `code`, `auth`, `order`, `returnData` u otros parámetros de URL no deciden el pago. Solicitar `hashVersion: V2` no equivale a verificar `OrderHash`.
 
-No se añadió un webhook con un algoritmo supuesto. Hace falta el contrato de `processPayment` y la especificación de firma/OrderHash de Tilopay. Sin webhook ni un conciliador programado, si el comprador paga y cierra la pestaña, el pedido puede permanecer pendiente hasta que alguien vuelva a consultar con la misma sesión. Las devoluciones posteriores tampoco se detectan espontáneamente.
+No se añadió un webhook con un algoritmo supuesto. Hace falta el contrato de `processPayment` y la especificación de firma/OrderHash de Tilopay. Para los nuevos intentos live, el conciliador programado recupera pagos sin retorno del navegador y revisa movimientos posteriores mediante `consult`. Esto no equivale a haber implementado o validado un webhook.
 
 La documentación de HPP define `capture: "1"` como autorización y captura. Por eso no corresponde añadir una segunda captura indiscriminada en producción. Si `consult` informa `Authorize`, la evidencia observada todavía no es una captura. Puede depender de la configuración o del procesamiento del comercio; la causa real requiere contrastar el ID con Tilopay. Esta entrega conserva el pago pendiente y no llama a `processModification`.
 
@@ -158,7 +171,7 @@ Desde la raíz del repositorio:
 node scripts/test-tilopay.cjs
 ```
 
-El runner ejecuta nueve suites de seguridad: servicio, parser, URLs, dinero, inventario, migración, pricing, integración de pedidos y correo de revisión. No necesita credenciales ni hace llamadas reales a Tilopay, PayPal, SMTP o Telegram. El doble de Firestore implementa versiones, consultas, reintentos y commits atómicos para las pruebas de carreras; no sustituye al emulador.
+El runner ejecuta suites de seguridad del servicio, parser, URLs, dinero, inventario, migración, pricing, integración de pedidos, apartados, conciliación y correo de revisión. No necesita credenciales ni hace llamadas reales a Tilopay, PayPal, SMTP o Telegram. El doble de Firestore implementa versiones, consultas, reintentos y commits atómicos para las pruebas de carreras; no sustituye al emulador.
 
 Pruebas de reglas, con Firebase CLI y las dependencias de desarrollo `@firebase/rules-unit-testing` y `firebase` disponibles en la resolución de módulos:
 
@@ -175,7 +188,7 @@ npm ci --prefix functions
 npm --prefix functions test
 ```
 
-Se aprobaron las **121 pruebas de lógica y compatibilidad** de esta revisión: 110 del runner y 11 originales de PayPal, Meta y correo. También pasó `npm --prefix functions test` con el script corregido `node --test test/*.test.js`. Sin `FIRESTORE_EMULATOR_HOST`, la suite de reglas se omite explícitamente; un `npm test` sin emulador no demuestra haber validado reglas. Las reglas no se modificaron en esta segunda revisión; su ejecución anterior en emulador aprobó las 11 pruebas. También se comprueba sintaxis JavaScript, se compilan los dos componentes JSX y se valida estáticamente el workflow. Esto no equivale a un build completo de Vite, una prueba de navegador de extremo a extremo, una validación del IAM real ni una captura del comercio real.
+Los resultados de cada entrega deben consultarse en su PR y ejecución de CI; las cifras de la revisión inicial no representan el conjunto actual. Sin `FIRESTORE_EMULATOR_HOST`, la suite de reglas se omite explícitamente: un `npm test` sin emulador no demuestra haber validado reglas. El gate `npm run test:checkout` incluye las pruebas de cotización/retorno Tilopay y se ejecuta junto con `npm run build` antes de publicar Hosting. Las pruebas usan proveedores simulados y no acreditan haber validado la captura del comercio real.
 
 ## Fuentes de contrato
 
@@ -184,5 +197,6 @@ Se aprobaron las **121 pruebas de lógica y compatibilidad** de esta revisión: 
 - [Reintentos y unicidad de orderNumber](https://tilopay.com/developers/reintentos-seguros).
 - [Autenticación y expires_in](https://tilopay.com/developers/api/autenticacion).
 - [Webhooks](https://tilopay.com/developers/api/webhooks).
+- [Ambientes de prueba y producción](https://tilopay.com/developers/entornos).
 - [Firestore: eventos, orden e idempotencia](https://firebase.google.com/docs/functions/firestore-events).
 - [Firestore: reglas sobre campos y SDK de servidor](https://firebase.google.com/docs/firestore/security/rules-fields).
