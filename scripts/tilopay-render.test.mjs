@@ -405,3 +405,36 @@ test('producto desactivado explica el rechazo y mantiene el pago bloqueado', asy
   assert.equal(counts(app, 'createPendingOrder').length, 0);
   assert.equal(counts(app, 'tilopayCreatePayment').length, 0);
 });
+
+test('creación sin formulario conserva pedido y muestra el error antes del retorno', async () => {
+  const app = await ready({tilopayCreatePayment:async () => ({...quote, result:'review', formUnavailable:true,
+    formReason:'PROVIDER_REJECTED', orderId:'order-one', message:'No se pudo abrir el formulario de Tilopay.'})});
+  await payButton(app).onClick(); app.render();
+  assert.deepEqual(app.navigations, []); assert.deepEqual(app.redirects, []);
+  assert.equal(app.saved().orderId, 'order-one'); assert.match(app.html(), /No se pudo abrir el formulario/);
+});
+
+test('retomar un pedido conserva su cotización aunque el catálogo haya cambiado', async () => {
+  const app = await ready({pending, tilopayGetQuote:async () => {throw Error('catalog unavailable')}});
+  assert.equal(counts(app, 'tilopayGetQuote').length, 0);
+  assert.match(app.html(), /Continuar el pedido pendiente/);
+  await payButton(app).onClick(); app.render();
+  assert.equal(counts(app, 'createPendingOrder').length, 0); assert.deepEqual(app.redirects, [safeUrl]);
+});
+
+test('retorno de un pedido sin formulario identifica el fallo de creación y conserva el intento', async () => {
+  const app = await ready({ file: RETURN, pending, tilopayConfirm: async () => ({...quote, result:'review',
+    formUnavailable:true, retry:false, message:'No se pudo abrir el formulario de Tilopay.'}) });
+  assert.match(app.html(), /El formulario de Tilopay no se abrió/);
+  assert.doesNotMatch(app.html(), /Tu pago sigue en verificación|Reintentar el mismo pedido/);
+  assert.equal(app.saved().orderId, 'order-one'); assert.equal(counts(app,'tilopayCreatePayment').length, 0);
+});
+
+test('solo un clic explícito reabre el formulario sandbox del mismo pedido con la cotización confirmada', async () => {
+  const app=await ready({file:RETURN,pending,tilopayConfirm:async()=>({...quote,formUnavailable:true,result:'review',testFormGeneration:0}),
+    tilopayCreatePayment:async()=>({...quote,orderId:'order-one',url:safeUrl})});
+  assert.equal(counts(app,'tilopayCreatePayment').length,0);
+  await app.button(/Solicitar formulario de prueba/).onClick();
+  assert.deepEqual(counts(app,'tilopayCreatePayment')[0].args,[{orderId:'order-one',retryMissingTestFormGeneration:0}]);
+  assert.deepEqual(app.redirects,[safeUrl]);
+});

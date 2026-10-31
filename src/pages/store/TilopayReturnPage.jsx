@@ -5,7 +5,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { isValidTilopayPaymentUrl as safePaymentUrl } from '../../services/payments/tilopayUrl';
 import { useCart } from '../../contexts/CartContext';
 import { tilopayConfirm, tilopayCreatePayment } from '../../services/payments/tilopayClient';
-import { tilopayQuoteAmounts } from '../../services/payments/tilopayQuote';
+import { sameTilopayQuote, tilopayQuoteAmounts } from '../../services/payments/tilopayQuote';
+import { formatCRC } from '../../utils/formatters';
 
 const STORAGE_KEY = 'aqp_tilopay_pending';
 const cartKey = (items) => JSON.stringify((Array.isArray(items) ? items : []).map((item) => [
@@ -67,6 +68,10 @@ export default function TilopayReturnPage() {
       if (res?.result === 'test_paid') {
         removePending(uid, orderId);
         setState({ key, status: 'test', retry: false, message: res.message || 'Pago de prueba confirmado. El pedido no se marcó como pagado para entrega.' });
+      } else if (res?.formUnavailable === true) {
+        setState({ key, status: 'no_form', retry: false, message: res.message,
+          generation: Number.isSafeInteger(res.testFormGeneration) ? res.testFormGeneration : null,
+          quote: tilopayQuoteAmounts(res) });
       } else if (res?.result === 'declined') {
         setState({ key, status: 'declined', retry: res.retry === true, message: res.message || 'El banco no aprobó este intento.' });
       } else {
@@ -84,12 +89,13 @@ export default function TilopayReturnPage() {
   }, [authLoading, uid, orderId, refresh, navigate]);
 
   const retryPayment = async () => {
-    if (retryGuard.current || !uid || state.status !== 'declined' || !state.retry) return;
+    const sandboxForm = state.status === 'no_form' && Number.isSafeInteger(state.generation) && state.quote;
+    if (retryGuard.current || !uid || (!sandboxForm && (state.status !== 'declined' || !state.retry))) return;
     retryGuard.current = true;
     setRetryBusy(true);
     try {
       // This action is exposed only when the server explicitly permits it, and keeps the same order.
-      const res = await tilopayCreatePayment({ orderId });
+      const res = await tilopayCreatePayment({ orderId, ...(sandboxForm ? { retryMissingTestFormGeneration: state.generation } : {}) });
       if (latest.current.uid !== uid || latest.current.orderId !== orderId) return;
       const actualId = typeof res?.orderId === 'string' && res.orderId ? res.orderId : orderId;
       const oldPending = readPending(uid, orderId);
@@ -97,7 +103,9 @@ export default function TilopayReturnPage() {
       const confirmedQuote = tilopayQuoteAmounts(res);
       if (confirmedQuote) { record.quote = confirmedQuote; record.total = confirmedQuote.crcTotal; }
       try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(record)); } catch { /* Server lock remains authoritative. */ }
-      if (safePaymentUrl(res?.url)) { window.location.assign(res.url); return; }
+      if (safePaymentUrl(res?.url) && (!sandboxForm || (actualId === orderId && sameTilopayQuote(confirmedQuote, state.quote)))) {
+        window.location.assign(res.url); return;
+      }
       if (actualId !== orderId) navigate(`/tilopay/retorno/${encodeURIComponent(actualId)}`, { replace: true });
       else setRefresh((value) => value + 1);
     } catch (error) {
@@ -122,7 +130,8 @@ export default function TilopayReturnPage() {
     </div>
   );
   const heading = view.status === 'test' ? 'Pago de prueba confirmado'
-    : view.status === 'declined' ? 'El banco no aprobó este intento'
+    : view.status === 'no_form' ? 'El formulario de Tilopay no se abrió'
+      : view.status === 'declined' ? 'El banco no aprobó este intento'
       : view.status === 'session' ? 'Verificá tu sesión' : 'Tu pago sigue en verificación';
   return (
     <div className="max-w-md mx-auto px-4 py-24 text-center">
@@ -136,6 +145,13 @@ export default function TilopayReturnPage() {
           className="px-6 py-3 bg-white text-slate-900 text-sm font-bold rounded-2xl border border-slate-200 disabled:opacity-50">
           {retryBusy ? 'Verificando…' : 'Reintentar el mismo pedido'}
         </button>}
+        {view.status === 'no_form' && Number.isSafeInteger(view.generation) && view.quote && <>
+          <p className="w-full text-sm text-slate-600">Cuando Tilopay habilite el comercio, podés continuar con este mismo pedido de prueba.</p>
+          <button type="button" disabled={retryBusy} onClick={retryPayment}
+            className="px-6 py-3 bg-rose-600 text-white font-bold rounded-2xl disabled:opacity-50">
+            {retryBusy ? 'Verificando…' : `Solicitar formulario de prueba por ${formatCRC(view.quote.crcPayNow)}`}
+          </button>
+        </>}
         <a href="https://wa.me/50671613342" target="_blank" rel="noopener noreferrer"
           className="px-6 py-3 bg-white text-slate-900 text-sm font-bold rounded-2xl border border-slate-200">Escribir por WhatsApp</a>
       </div>

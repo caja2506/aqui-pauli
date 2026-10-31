@@ -188,3 +188,10 @@ test("test admite comercio ausente/distinto y prefijo alfanumérico; live sigue 
   assert.equal(interpret([row({ merchantId: "OTHER" })]).state, "mismatch");
   assert.equal(interpret([row({ orderNumber: `PFC777-${REF}` })]).state, "pending_reconciliation");
 });
+
+test('ausencia explícita de consult se acepta solo sin filas y sin errores adicionales', () => {
+  const absent={type:'200',message:'Does not exist',response:[]};
+  assert.equal(tp.looksNotFound(absent), true);
+  for(const override of [{type:'400'},{response:[{}]},{message:'Does not exist other error'},
+    {message:'Error'},{error:'denied'},{result:'failure'}]) assert.equal(tp.looksNotFound({...absent,...override}), false);
+});

@@ -156,9 +156,15 @@ function validConsultEnvelope(data) {
   return isObject(data) && (data.type === 200 || data.type === "200")
     && Array.isArray(data.response) && !hasErrorPayload(data);
 }
+function explicitMissingOrder(data) {
+  return isObject(data) && (data.type === 200 || data.type === "200")
+    && Array.isArray(data.response) && data.response.length === 0
+    && typeof data.message === "string" && /^does not exist[.!]?$/i.test(data.message.trim())
+    && !hasErrorPayload({ ...data, message: "" });
+}
 /** Absence at query time does not prove that a previously issued hosted URL cannot be paid later. */
 function looksNotFound(data) {
-  return validConsultEnvelope(data) && data.response.length === 0;
+  return explicitMissingOrder(data) || (validConsultEnvelope(data) && data.response.length === 0);
 }
 
 function isValidPaymentUrl(value) {
@@ -172,6 +178,27 @@ function isValidPaymentUrl(value) {
       && host.length <= 253 && labels.length > 0
       && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
   } catch { return false; }
+}
+
+// Retain only bounded diagnostic metadata. The provider can echo integration
+// keys, addresses or the hosted form URL in its message.
+function processPaymentOutcome(response, error, sent) {
+  const http = Number.isInteger(response?.status) ? response.status : null;
+  const type = /^[0-9]{3}$/.test(String(response?.data?.type)) ? String(response.data.type) : null;
+  const message = typeof response?.data?.message === "string" ? response.data.message : "";
+  const field = message.match(/\b(redirect|key|amount|currency|orderNumber|capture|subscription|platform|hashVersion|token_version|(?:billTo|shipTo)(?:FirstName|LastName|Address2?|City|State|ZipPostCode|Country|Telephone|Email))\b/i)?.[1];
+  let reason;
+  if (!sent) reason = "REQUEST_BUILD_FAILED";
+  else if (error || !response) reason = "TRANSPORT_UNKNOWN";
+  else if (response.jsonValid === false) reason = "INVALID_RESPONSE";
+  else if (http >= 500) reason = "PROVIDER_UNAVAILABLE";
+  else if (http === 402 && type === "402" && /^the commerce has a transaction block[.!]?$/i.test(message.trim())) reason = "MERCHANT_TRANSACTION_BLOCK";
+  else if (!response.ok || ["300", "400", "402", "403"].includes(type)) reason = "PROVIDER_REJECTED";
+  else if (type !== "100") reason = "UNEXPECTED_RESPONSE";
+  else if (!response.data.url) reason = "FORM_URL_MISSING";
+  else if (!isValidPaymentUrl(response.data.url)) reason = "FORM_URL_INVALID";
+  else reason = "FORM_READY";
+  return { reason, http, type, ...(field ? { field } : {}) };
 }
 
 /**
@@ -197,8 +224,9 @@ function interpretConsult(data, {
     formatMinorCRC(expectedMinor);
     if (expectedMinor <= 0) throw new Error("zero");
   } catch { return pending("El monto original del intento es inválido."); }
-  if (!validConsultEnvelope(data)) return pending("Respuesta de consult ilegible, incompleta o con error.");
+  if (explicitMissingOrder(data)) return { state: "not_found", explicitMissing: true };
   if (looksNotFound(data)) return { state: "not_found" };
+  if (!validConsultEnvelope(data)) return pending("Respuesta de consult ilegible, incompleta o con error.");
   if (data.response.some((row) => !isObject(row))) return pending("consult contiene filas malformadas.");
   const mine = data.response.filter((row) => matchesOrderNumber(row.orderNumber, orderNumber, orderPrefix, mode));
   if (!mine.length) return pending("Las filas de consult no coinciden con la referencia y el prefijo esperados.");
@@ -241,6 +269,6 @@ function interpretConsult(data, {
 module.exports = {
   TILOPAY_BASE, PROVINCE_ISO, tpFetch, getToken, clearTokenCache, formatAmountCRC, splitName,
   tilopayReference, orderVersion, classifyEnvironment, normalizeTransactionId, matchesOrderNumber,
-  looksNotFound, isValidPaymentUrl, buildProcessPayload, interpretConsult,
+  looksNotFound, isValidPaymentUrl, processPaymentOutcome, buildProcessPayload, interpretConsult,
   parseMinorCRC, minorToCRC, formatMinorCRC,
 };

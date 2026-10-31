@@ -162,6 +162,20 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       message: extra.partial ? "Apartado recibido y verificado. Queda un saldo pendiente." : "Pago recibido y verificado." };
     if (order.paymentStatus === "test_paid") return { ...extra, result: "test_paid", paid: false,
       message: "Transacción de prueba verificada. Este pedido no habilita una entrega real." };
+    // An unavailable hosted form is a creation problem. Never present it as a
+    // card authorization or grant a retry from an inconclusive consult.
+    if (list.length === 1 && attempt.status === "pending_reconciliation" && attempt.creationCheckedAt
+      && !attempt.url && !attempt.idTilopay && !attempt.reconciliationNeedsReview) {
+      const reason = attempt.creationOutcome?.reason || "FORM_UNCONFIRMED";
+      const canRequestTestForm = order.tilopay.mode === "test" && attempt.mode === "test" && attempt.schemaVersion === 2
+        && !attempt.formInFlight && attempt.providerOrderAbsent === true && PAYABLE_STATUSES.has(order.status)
+        && (reason === "MERCHANT_TRANSACTION_BLOCK" || reason === "FORM_UNCONFIRMED");
+      return { ...extra, result: "review", paid: false, code: "pending_reconciliation", formUnavailable: true,
+        formReason: reason, ...(canRequestTestForm ? { testFormGeneration: attempt.formGeneration || 0 } : {}),
+        message: reason === "MERCHANT_TRANSACTION_BLOCK"
+          ? "Tilopay bloqueó los formularios de pago de este comercio. Conservá este pedido."
+          : "No se pudo abrir el formulario de Tilopay. Conservá este pedido para consultar el intento." };
+    }
     if (list.some((a) => REVIEW_STATES.has(a.status))) return { ...extra, result: "review", paid: false,
       code: list.find((a) => REVIEW_STATES.has(a.status)).status,
       message: "El pago requiere verificación. Puedes consultar nuevamente este mismo pedido." };
@@ -276,7 +290,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     });
   }
 
-  async function recordCreation(ctx, attempt, response, error) {
+  async function recordCreation(ctx, attempt, response, outcome) {
     return db.runTransaction(async (t) => {
       const snap = await t.get(ctx.ref);
       if (!snap.exists) return { result: "review", retry: false, orderId: ctx.id, message: "Conserva el número de pedido y solicita revisión." };
@@ -284,16 +298,16 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       assertOwner(order, ctx.uid);
       const itemSnap = await t.get(itemsQuery(ctx.ref));
       const current = order.tilopay?.attemptsById?.[attempt.key];
-      if (!current || current.orderNumber !== attempt.orderNumber) {
+      if (!current || current.orderNumber !== attempt.orderNumber || (current.formGeneration || 0) !== (attempt.formGeneration || 0)) {
         fail("failed-precondition", "La referencia del pago cambió y requiere revisión.");
       }
-      const success = !error && response?.ok && response.jsonValid !== false
-        && String(response.data?.type) === "100" && api.isValidPaymentUrl(response.data?.url);
+      const success = outcome.reason === "FORM_READY";
       const tpd = { ...order.tilopay, attemptsById: { ...order.tilopay.attemptsById } };
       const safeToReturn = success && ["reserved", "open"].includes(current.status)
         && !isPaidOrder(order) && order.paymentStatus !== "test_paid"
         && PAYABLE_STATUSES.has(order.status) && snapshotMatches(order, itemSnap.docs, current);
-      const patch = { creationCheckedAt: now() };
+      const patch = { creationCheckedAt: now(), formInFlight: false, creationOutcome: success && !safeToReturn
+        ? { ...outcome, reason: "ORDER_CHANGED" } : outcome };
       if (success) patch.url = response.data.url;
       if (!FINAL_ATTEMPT_STATES.has(current.status)) {
         patch.status = safeToReturn ? "open" : "pending_reconciliation";
@@ -426,7 +440,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
           tpd.legacyLastCheckedAt = now();
           continue;
         }
-        const a = { ...attempt, lastCheckedAt: now(), lastObservedState: r.state,
+        const a = { ...attempt, lastCheckedAt: now(), lastObservedState: r.state, providerOrderAbsent: r.explicitMissing === true,
           lastObservationTransient: r.transient === true };
         tpd.attemptsById[key] = a;
         if (attempt.orderNumber !== observation.original || attemptContext(attempt) !== observation.contextHash) {
@@ -649,6 +663,9 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     const cfg = await readConfig();
     if (!cfg.enabled) fail("failed-precondition", "Tilopay está deshabilitado o falta configurar el comercio.");
     if (cfg.mode === "test") await requireTester(ctx.uid);
+    if (request.data?.retryMissingTestFormGeneration !== undefined) {
+      return requestMissingTestForm(ctx, cfg, request.data.retryMissingTestFormGeneration);
+    }
     if (ctx.order.tilopay) return resume(request, cfg);
     if (isPaidOrder(ctx.order)) return summarize(ctx.order, ctx.id);
     if (request.data?.expectedQuote !== undefined) {
@@ -666,8 +683,44 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       message: "Ya hay un pago pendiente para estos productos. Verifica el pedido original." };
     if (reservation.existing) return resume(request, cfg);
     if (reservation.settled) return summarize((await ctx.ref.get()).data(), ctx.id);
-    const { attempt, order } = reservation;
-    let response; let error;
+    return issueForm(ctx, c, token, reservation);
+  }
+
+  // An explicit operator action for sandbox only. Preserve the original
+  // reference and amount and serialize a new form request on the same order.
+  async function requestMissingTestForm(ctx, cfg, generation) {
+    if (cfg.mode !== "test" || ctx.order.tilopay?.mode !== "test") fail("failed-precondition", "Solo disponible en pruebas.");
+    if (!Number.isSafeInteger(generation) || generation < 0) fail("invalid-argument", "Solicitud de formulario inválida.");
+    const observed = await verifyAndApply(ctx);
+    if (observed.testFormGeneration !== generation) return observed;
+    const c = configuredCredentials();
+    const token = await tokenFor(c);
+    const claim = await db.runTransaction(async (t) => {
+      const order = (await t.get(ctx.ref)).data();
+      assertOwner(order, ctx.uid);
+      const result = summarize(order, ctx.id);
+      if (result.testFormGeneration !== generation) return { result };
+      const a = attemptsOf(order)[0];
+      const settings = (await t.get(db.collection("config").doc("payments"))).data()?.tilopay;
+      const items = await t.get(itemsQuery(ctx.ref));
+      const lock = (await t.get(db.collection("tilopayCheckoutLocks").doc(order.tilopay.checkoutLockId))).data();
+      const ref = (await t.get(refDoc(a.orderNumber))).data();
+      if (settings?.enabled !== true || settings.mode !== "test" || settings.merchantId !== a.merchantId
+        || settings.orderPrefix !== a.orderPrefix || a.keyFingerprint !== snapshotFingerprint({ key: c.key })
+        || lock?.orderId !== ctx.id || lock.ownerUid !== ctx.uid || lock.mode !== "test" || lock.attemptKey !== a.key || SETTLED_LOCKS.has(lock.state)
+        || ref?.orderId !== ctx.id || ref.ownerUid !== ctx.uid || ref.mode !== "test" || ref.attemptKey !== a.key || ref.orderNumber !== a.orderNumber
+        || !snapshotMatches(order, items.docs, a)) fail("failed-precondition", "El contexto del pedido cambió. Requiere revisión.");
+      const attempt = { ...a, formGeneration: generation + 1, formInFlight: true, providerOrderAbsent: false,
+        formRequestedAgainAt: now(), status: "reserved" };
+      t.update(ctx.ref, { tilopay: { ...order.tilopay, status: "reserved",
+        attemptsById: { ...order.tilopay.attemptsById, [a.key]: attempt } }, updatedAt: now() });
+      return { order, attempt };
+    });
+    return claim.result || issueForm(ctx, c, token, claim);
+  }
+
+  async function issueForm(ctx, c, token, { attempt, order }) {
+    let response; let error; let sent = false;
     try {
       const base = String(returnBase()).replace(/\/+$/, "");
       const url = new URL(base);
@@ -675,9 +728,12 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       const payload = api.buildProcessPayload({ key: c.key,
         redirect: `${base}/tilopay/retorno/${encodeURIComponent(ctx.id)}`, orderId: ctx.id,
         order, orderNumber: attempt.orderNumber, amountMinor: attempt.amountMinor });
+      sent = true;
       response = await api.tpFetch("/api/v1/processPayment", { token, body: payload });
     } catch (e) { error = e; }
-    return recordCreation(ctx, attempt, response, error);
+    const outcome = defaultApi.processPaymentOutcome(response, error, sent);
+    console.info(JSON.stringify({ event: "tilopay_process_payment", orderId: ctx.id, mode: attempt.mode, ...outcome }));
+    return recordCreation(ctx, attempt, response, outcome);
   }
 
   async function getQuote(request) {
