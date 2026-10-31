@@ -1,0 +1,30 @@
+name: Tilopay production activation preflight
+on:
+  push:
+    branches: ['chatgpt/tilopay-production-activation']
+    paths:
+      - 'ops/tilopay-preflight.cjs'
+      - '.github/workflows/tilopay-activation-preflight.yml'
+permissions:
+  contents: read
+concurrency:
+  group: tilopay-production-activation
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'caja2506/aqui-pauli' && github.ref == 'refs/heads/chatgpt/tilopay-production-activation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - run: npm ci --prefix functions --ignore-scripts --no-audit --no-fund
+      - run: node --check ops/tilopay-preflight.cjs
+      - name: Verify existing deployed credentials without exposing values or changing payments
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI }}
+        run: node ops/tilopay-preflight.cjs
