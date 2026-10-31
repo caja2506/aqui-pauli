@@ -98,6 +98,8 @@ Se vuelven a consultar todos los intentos históricos disponibles (hasta 100, co
 
 La evidencia consultada se liga a una huella del contexto del intento. Si ese contexto cambia durante la consulta, no se acredita la respuesta anterior. Una autorización/rechazo tardío no reemplaza el ID ni la captura de un pago ya acreditado. Una transacción adicional conserva el pago original y activa revisión. Las contradicciones de integridad, duplicidad o legado no se borran automáticamente por una consulta posterior limpia.
 
+Un timeout, fallo HTTP sin movimientos o JSON ilegible no aporta evidencia financiera nueva: se registra como consulta transitoria y el conciliador aplica backoff. Conserva una captura previamente verificada y comprueba que su snapshot siga intacto, sin fijar una alerta permanente por la caída del proveedor. Un pedido todavía sin captura permanece sin acreditar hasta una consulta completa válida. Las respuestas con movimientos contradictorios, problemas de integridad o alertas anteriores siguen requiriendo revisión; una recuperación de red no las borra.
+
 ## 6. Inventario, CRM y avisos
 
 Tilopay aplica inventario y CRM directamente después de conciliar una captura, tanto en el callable como en el trabajo programado. No depende de que esté desplegado `onOrderStatusChange` ni de sus secretos Gmail. Si la ejecución se interrumpe después de acreditar el dinero, la cola vuelve a intentar los efectos pendientes.

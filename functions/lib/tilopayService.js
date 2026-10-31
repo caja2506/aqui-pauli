@@ -331,28 +331,47 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       const contextHash = attemptContext(attempt);
       if (deadline !== undefined && clock() + 25000 > deadline) {
         return { key: attempt.key, original: attempt.orderNumber, contextHash,
-          r: { state: "pending_reconciliation", reason: "La consulta continuará en la próxima conciliación programada." } };
+          r: { state: "pending_reconciliation", transient: true,
+            reason: "La consulta continuará en la próxima conciliación programada." } };
       }
       if (typeof attempt.orderNumber !== "string" || !attempt.orderNumber
         || (!legacy && attempt.keyFingerprint !== snapshotFingerprint({ key: c.key }))) {
         return { key: attempt.key, original: attempt.orderNumber, contextHash, r: { state: "pending_reconciliation", reason: "Contexto de la integración cambió o falta la referencia." } };
       }
+      const merchantId = attempt.merchantId || (legacy ? cfg.merchantId : "");
+      let response;
       try {
-        const merchantId = attempt.merchantId || (legacy ? cfg.merchantId : "");
-        const response = await api.tpFetch("/api/v1/consult", { token,
+        response = await api.tpFetch("/api/v1/consult", { token,
           body: { key: c.key, orderNumber: attempt.orderNumber,
             ...(attempt.mode === "live" ? { merchantId } : {}) } });
-        let r = !response.ok || response.jsonValid === false
-          ? { state: "pending_reconciliation", reason: "Tilopay no devolvió una consulta válida." }
-          : api.interpretConsult(response.data, { orderNumber: attempt.orderNumber,
-            amountMinor: attempt.amountMinor, amount: attempt.amount, mode: attempt.mode,
-            merchantId, orderPrefix: attempt.orderPrefix || "" });
-        if (legacy) r = { ...r, state: "legacy_review", reason: "Intento anterior sin snapshot verificable; revisar el movimiento antes de acreditar." };
-        return { key: attempt.key, original: attempt.orderNumber, contextHash, r };
       } catch {
         return { key: attempt.key, original: attempt.orderNumber, contextHash,
-          r: { state: "pending_reconciliation", reason: "Consulta interrumpida; el resultado del pago sigue siendo desconocido." } };
+          r: { state: "pending_reconciliation", transient: true,
+            reason: "Consulta interrumpida; se reintentará sin alterar la evidencia de pago guardada." } };
       }
+      let r;
+      if (!response?.ok || response.jsonValid === false) {
+        // A failed transport/parse provides no new financial evidence. However,
+        // a readable error response containing movements may contain a refund
+        // or contradiction and must remain subject to the conservative review.
+        const hasMovements = response?.jsonValid !== false
+          && Array.isArray(response?.data?.response) && response.data.response.length > 0;
+        r = { state: "pending_reconciliation", transient: !hasMovements,
+          reason: hasMovements ? "La consulta falló y contiene movimientos que requieren revisión."
+            : "Tilopay no devolvió una consulta válida. Se volverá a consultar." };
+      } else {
+        try {
+          r = api.interpretConsult(response.data, { orderNumber: attempt.orderNumber,
+            amountMinor: attempt.amountMinor, amount: attempt.amount, mode: attempt.mode,
+            merchantId, orderPrefix: attempt.orderPrefix || "" });
+        } catch {
+          // Validation errors are not labelled as transient transport failures.
+          r = { state: "pending_reconciliation", reason: "No se pudo validar el contenido de consult." };
+        }
+      }
+      if (legacy) r = { ...r, state: "legacy_review", transient: false,
+        reason: "Intento anterior sin snapshot verificable; revisar el movimiento antes de acreditar." };
+      return { key: attempt.key, original: attempt.orderNumber, contextHash, r };
     });
   }
 
@@ -397,6 +416,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       // A later clean response must not silently clear an earlier contradictory movement.
       if (Object.values(tpd.attemptsById).some((a) => a.reconciliationNeedsReview)) tpd.reconciliationNeedsReview = true;
       let needsReview = Boolean(tpd.reconciliationNeedsReview || tpd.duplicatePaymentNeedsReview || tpd.legacyNeedsReview);
+      let transientConsult = false;
       for (const observation of observations) {
         const { key, r } = observation;
         const attempt = tpd.attemptsById[key];
@@ -405,12 +425,30 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
           tpd.legacyLastCheckedAt = now();
           continue;
         }
-        const a = { ...attempt, lastCheckedAt: now(), lastObservedState: r.state };
+        const a = { ...attempt, lastCheckedAt: now(), lastObservedState: r.state,
+          lastObservationTransient: r.transient === true };
         tpd.attemptsById[key] = a;
         if (attempt.orderNumber !== observation.original || attemptContext(attempt) !== observation.contextHash) {
           if (!FINAL_ATTEMPT_STATES.has(a.status)) a.status = "pending_reconciliation";
           a.reconciliationNeedsReview = true; a.reason = "El contexto del intento cambió mientras se consultaba.";
           tpd.reconciliationNeedsReview = true; needsReview = true; continue;
+        }
+        if (r.state === "pending_reconciliation" && r.transient === true) {
+          transientConsult = true;
+          a.lastObservationReason = r.reason || "La consulta se reintentará.";
+          if (FINAL_ATTEMPT_STATES.has(attempt.status)) {
+            // Preserve an already verified capture across a bank outage. Local
+            // integrity is still checked, and any earlier alert remains sticky.
+            if (!snapshotMatches(order, itemSnap.docs, attempt)) {
+              a.reconciliationNeedsReview = true; tpd.reconciliationNeedsReview = true; needsReview = true;
+              a.reason = "El contenido o los datos del pedido cambiaron después de cotizar el pago.";
+            }
+          } else {
+            a.status = "pending_reconciliation";
+            a.reason = a.lastObservationReason;
+            needsReview = true;
+          }
+          continue;
         }
         // A rejection, absence or incomplete response cannot erase a verified capture.
         if (FINAL_ATTEMPT_STATES.has(attempt.status) && !["approved", "pending_capture"].includes(r.state)) {
@@ -505,7 +543,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       }
       let justPaid = false;
       let paidItems = [];
-      if (!paidAlready && order.paymentStatus !== "test_paid" && !needsReview && candidates.length === 1) {
+      if (!paidAlready && order.paymentStatus !== "test_paid" && !needsReview && !transientConsult && candidates.length === 1) {
         const { key, attempt, tx } = candidates[0];
         const amounts = validateSnapshotAmounts(attempt.snapshot);
         const partial = amounts.remainingMinor > 0;
@@ -521,7 +559,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
         Object.assign(tpd, { status: "approved", paidAttemptKey: key, tilopayId: attempt.idTilopay,
           orderNumber: attempt.orderNumber, confirmedAt: now(), reconciliationNeedsReview: false });
         justPaid = true;
-      } else if (!paidAlready && !needsReview && approved.length === 1 && approved[0].attempt.mode === "test") {
+      } else if (!paidAlready && !needsReview && !transientConsult && approved.length === 1 && approved[0].attempt.mode === "test") {
         update.paymentStatus = "test_paid"; tpd.status = "test_paid";
       } else if (!paidAlready && order.paymentStatus !== "test_paid" && needsReview) {
         tpd.status = "pending_reconciliation";
@@ -538,7 +576,13 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       }
       update.tilopay = tpd;
       t.update(ctx.ref, update);
-      return summarize({ ...order, ...update }, ctx.id, justPaid);
+      const result = summarize({ ...order, ...update }, ctx.id, justPaid);
+      if (transientConsult && !tpd.reconciliationNeedsReview && !tpd.duplicatePaymentNeedsReview && !tpd.legacyNeedsReview) {
+        return { ...result, result: "review", code: "pending_reconciliation", transient: true,
+          message: paidAlready ? "El pago recibido sigue acreditado. Tilopay no respondió a la consulta más reciente; volveremos a verificarlo. No vuelvas a pagar."
+            : "No pudimos consultar Tilopay en este momento. Volveremos a verificar este mismo pedido; no inicies otro cobro." };
+      }
+      return result;
     });
   }
 

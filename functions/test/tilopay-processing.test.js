@@ -93,8 +93,8 @@ function liveHarness({ kind = "stock", mode = "live" } = {}) {
   if (kind !== "backorder") seed[`${ORDER}/items/item_0`] = { productId: "p1", variantId: "v1", quantity: 2, price: 1 };
   if (kind !== "stock") seed[`${ORDER}/items/item_1`] = { productId: "p2", variantId: "v2", quantity: 1, price: 1 };
   const memory = queueQueries(createMemoryFirestore(seed));
-  const calls = { pay: 0, consult: 0, credentials: 0, statuses: [], reconcile: [] };
-  let now = START; let nonce = 0;
+  const calls = { pay: 0, consult: 0, credentials: 0, statuses: [], reconcile: [], reconcileResults: [] };
+  let now = START; let nonce = 0; let consultFailure = null;
   const bank = new Map();
   const service = createTilopayService({ db: memory.db, HttpsError, clock: () => now,
     randomId: () => String(++nonce).padStart(32, "0"), returnBase: () => "https://aquipauli.com",
@@ -106,11 +106,19 @@ function liveHarness({ kind = "stock", mode = "live" } = {}) {
       }
       assert.ok(route.endsWith("consult"), `Forbidden provider operation: ${route}`);
       calls.consult++;
+      if (consultFailure === "timeout") throw new Error("fixture-consult-timeout");
+      if (consultFailure === "http") return { ok: false, status: 503, data: {}, jsonValid: true };
+      if (consultFailure === "json") return { ok: true, status: 200, data: null, jsonValid: false };
       return response({ type: "200", response: bank.get(options.body.orderNumber) || [] });
     } },
   });
   const reconciler = createTilopayReconciler({ db: memory.db, clock: () => now,
-    reconcile: async (...args) => { calls.reconcile.push(args); return service.reconcile(...args); } });
+    reconcile: async (...args) => {
+      calls.reconcile.push(args);
+      const result = await service.reconcile(...args);
+      calls.reconcileResults.push(result);
+      return result;
+    } });
   const endpoints = loadEndpoints(memory.db, service);
   const order = () => memory.get(ORDER);
   const attempt = () => order().tilopay.attemptsById.a1;
@@ -124,6 +132,7 @@ function liveHarness({ kind = "stock", mode = "live" } = {}) {
     for (const [, key, data] of writes) if (key === ORDER && data?.status) calls.statuses.push(data.status);
   };
   return { ...memory, calls, service, endpoints, reconciler, order, attempt, capture,
+    setConsultFailure: (failure) => { consultFailure = failure; },
     clock: () => now, advance: (ms) => { now += ms; } };
 }
 
@@ -222,6 +231,87 @@ test("fallo después de acreditar se repara por cron sin nuevo cobro ni estado p
   assert.equal(h.get("crm_contacts/user1").totalOrders, 1);
   assert.equal(h.calls.pay, 1);
   assert.equal(h.calls.statuses.includes("pagado"), false);
+});
+
+function capturedEffects(h) {
+  const order = h.order();
+  const attempt = h.attempt();
+  return { status: order.status, paymentStatus: order.paymentStatus, paymentAmount: order.paymentAmount,
+    paymentDate: order.paymentDate, paymentTransactionId: order.paymentTransactionId,
+    total: order.total, remainingTotal: order.remainingTotal, fulfillment: order.fulfillment,
+    inventoryReservation: order.inventoryReservation,
+    attemptStatus: attempt.status, financialEvidence: attempt.financialEvidence,
+    validatedAmountMinor: attempt.validatedAmountMinor, idTilopay: attempt.idTilopay,
+    stock: h.get(VARIANT), backorderStock: h.get(BAG), crm: h.get("crm_contacts/user1"),
+    interaction: h.get(`crm_contacts/user1/interactions/order_${ORDER_ID}_paid`) };
+}
+
+for (const kind of ["stock", "mixed"]) for (const failure of ["timeout", "http", "json"]) {
+  test(`consulta diaria ${kind}: ${failure} temporal mantiene captura y efectos; recuperación sin duplicarlos`, async () => {
+    const h = liveHarness({ kind });
+    await h.endpoints.tilopayCreatePayment(request()); h.capture();
+    assert.equal((await h.reconciler.run()).checked, 1);
+    const original = capturedEffects(h);
+    assert.equal(original.fulfillment.state, "applied");
+    assert.equal(h.get(QUEUED_ORDER).nextCheckAt, iso(START + DAY));
+
+    h.advance(DAY); h.setConsultFailure(failure);
+    for (const [errors, delay] of [[1, 5 * MINUTE], [2, 10 * MINUTE]]) {
+      const run = await h.reconciler.run();
+      assert.equal(run.checked, 1);
+      assert.equal(run.failed, 0);
+      const result = h.calls.reconcileResults.at(-1);
+      assert.equal(result.result, "review");
+      assert.equal(result.code, "pending_reconciliation");
+      assert.equal(result.transient, true);
+      assert.equal(result.paid, true);
+      assert.equal(result.partial, kind === "mixed");
+      assert.deepEqual(capturedEffects(h), original);
+      assert.notEqual(h.order().tilopay.reconciliationNeedsReview, true);
+      assert.notEqual(h.attempt().reconciliationNeedsReview, true);
+      assert.notEqual(h.order().tilopay.duplicatePaymentNeedsReview, true);
+      assert.equal(h.get(QUEUED_ORDER).consecutiveErrors, errors);
+      assert.equal(h.get(QUEUED_ORDER).lastCode, "pending_reconciliation");
+      assert.equal(h.get(QUEUED_ORDER).nextCheckAt, iso(h.clock() + delay));
+      h.advance(delay);
+    }
+
+    h.setConsultFailure(null);
+    assert.equal((await h.reconciler.run()).checked, 1);
+    assert.equal(h.calls.reconcileResults.at(-1).result, "already_paid");
+    assert.notEqual(h.calls.reconcileResults.at(-1).transient, true);
+    assert.deepEqual(capturedEffects(h), original);
+    assert.equal(h.get(QUEUED_ORDER).consecutiveErrors, 0);
+    assert.equal(h.get(QUEUED_ORDER).nextCheckAt, iso(h.clock() + DAY));
+    assert.notEqual(h.order().tilopay.reconciliationNeedsReview, true);
+    assert.notEqual(h.attempt().reconciliationNeedsReview, true);
+    assert.equal(h.calls.pay, 1);
+  });
+}
+
+test("una recuperación de consult nunca borra una alerta real anterior ni reaplica inventario/CRM", async () => {
+  const h = liveHarness({ kind: "mixed" });
+  await h.endpoints.tilopayCreatePayment(request()); h.capture(); await h.reconciler.run();
+  const flagged = h.order();
+  flagged.status = "revision_manual";
+  flagged.tilopay.reconciliationNeedsReview = true;
+  flagged.tilopay.attemptsById.a1.reconciliationNeedsReview = true;
+  flagged.tilopay.attemptsById.a1.reason = "Importe de un movimiento anterior inconsistente.";
+  await h.set(ORDER, flagged);
+  const original = capturedEffects(h);
+  h.advance(DAY); h.setConsultFailure("timeout");
+  await h.reconciler.run();
+  assert.equal(h.calls.reconcileResults.at(-1).result, "review");
+  assert.notEqual(h.calls.reconcileResults.at(-1).transient, true);
+  assert.deepEqual(capturedEffects(h), original);
+  h.advance(Date.parse(h.get(QUEUED_ORDER).nextCheckAt) - h.clock());
+  h.setConsultFailure(null); await h.reconciler.run();
+  assert.equal(h.calls.reconcileResults.at(-1).result, "review");
+  assert.equal(h.order().tilopay.reconciliationNeedsReview, true);
+  assert.equal(h.attempt().reconciliationNeedsReview, true);
+  assert.equal(h.attempt().reason, "Importe de un movimiento anterior inconsistente.");
+  assert.deepEqual(capturedEffects(h), original);
+  assert.equal(h.calls.pay, 1);
 });
 
 test("cron sólo consulta: Authorize y monto incorrecto no aplican inventario o CRM", async () => {
