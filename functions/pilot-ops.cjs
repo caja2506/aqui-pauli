@@ -1,6 +1,10 @@
 'use strict';
-const {initializeApp,cert}=require('firebase-admin/app');const {getFirestore}=require('firebase-admin/firestore');
-(async()=>{const a=JSON.parse(process.env.PILOT_SA);delete process.env.PILOT_SA;if(a.project_id!=='aqui-pauli')throw Error('project mismatch');
-initializeApp({credential:cert(a)});const db=getFirestore();const [cfg,p,gate]=await Promise.all([db.doc('config/payments').get(),db.doc('products/zz-tilopay-live-check').get(),db.doc('_ops/tilopay-live-pilot').get()]);const c=cfg.get('tilopay')||{};
-console.log('PILOT_STATUS',JSON.stringify({mode:c.mode,enabled:c.enabled,access:c.access||'normal',stage:c.pilotSeed?.stage||'not_prepared',productExists:p.exists,privateSlotExists:gate.exists}));
-})().catch(e=>{console.error('PILOT_STATUS_FAILED',e.name);process.exitCode=1;});
+const {initializeApp,cert}=require('firebase-admin/app');const {getFirestore}=require('firebase-admin/firestore');const crypto=require('node:crypto');
+(async()=>{const a=JSON.parse(process.env.PILOT_SA);delete process.env.PILOT_SA;if(a.project_id!=='aqui-pauli')throw Error('project mismatch');initializeApp({credential:cert(a)});const db=getFirestore();
+const cfg=(await db.doc('config/payments').get()).get('tilopay')||{},gate=(await db.doc('_ops/tilopay-live-pilot').get()).data()||{};
+const out={mode:cfg.mode,stage:cfg.pilotSeed?.stage,open:cfg.enabled===true&&cfg.access==='private-pilot',claimed:!!gate.ownerUid,expiresAt:gate.expiresAt,order:null};
+if(gate.orderId){const o=(await db.doc('orders/'+gate.orderId).get()).data()||{};const t=o.tilopay||{},att=t.attemptsById?.[t.currentAttempt]||{};
+out.order={number:o.orderNumber,total:o.total,createdAt:o.createdAt,status:o.status,paymentStatus:o.paymentStatus,mode:att.mode,amount:att.amount,requestAt:att.requestSentAt,checkedAt:att.creationCheckedAt,creation:att.creationOutcome||null,hasUrl:!!att.url,observation:att.lastObservedState||null,providerOrderAbsent:att.providerOrderAbsent===true,confirmedAt:att.lastCheckedAt||null,captured:att.financialEvidence==='captured',txSeen:!!att.idTilopay};}
+const key=crypto.randomBytes(32),iv=crypto.randomBytes(12),c=crypto.createCipheriv('aes-256-gcm',key,iv);const ct=Buffer.concat([c.update(JSON.stringify(out),'utf8'),c.final()]);const ek=crypto.publicEncrypt({key:"-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArgBOFc1PvS2IQ2WcRruJ\nV4COW0Edq5WfQOO//h6LWSNbxUh1CTZDOYd8j13XPa0cMUQOSymYyqgxj86VB8Lk\nP4stSKkc5FicBgAekv1YXYUT5wXLaDp8gQ2UquTOySa/fEg/8q9bGLq62t0LlOZ8\nXtaIbDMCQzNackwGknu4ah5MO9cHpfW5cL5b0W9r/rcCy7c69wXWDbp4iq5PtuyG\nbFwERaLvj5fDhLNJZlXyTmDSfiDKBOLNzxHBUQmrlO68gv3tSwtE6v7Zdt+7LqC1\ngIz/THfxeDT7X5EMXyAi2I8EKBW1MiCOYvaAw66fCtsVvpDsC7ywLNAjMSN/lJfY\n+wIDAQAB\n-----END PUBLIC KEY-----",oaepHash:'sha256'},key);
+console.log('PILOT_RECEIPT_ENCRYPTED', Buffer.concat([ek,iv,c.getAuthTag(),ct]).toString('base64'));
+})().catch(e=>{console.error('PILOT_READ_FAILED',e.name);process.exitCode=1;});
