@@ -1,34 +1,11 @@
 'use strict';
-const {createHash}=require('node:crypto');
-const {initializeApp,cert}=require('firebase-admin/app');
-const {getFirestore}=require('firebase-admin/firestore');
-const {currentSnapshot,snapshotFingerprint}=require('./lib/tilopayOrder');
-const {computeTotalsCRC}=require('./lib/pricing');
-(async()=>{
- const project='aqui-pauli';const account=JSON.parse(process.env.DIAGNOSTIC_SA);delete process.env.DIAGNOSTIC_SA;
- if(account.project_id!==project) throw new Error('project mismatch');
- const credential=cert(account);initializeApp({credential});const db=getFirestore();
- const targetHash='46a9439a3d41ec2616316adb12bd73ca43a3cb0cccf61a75238e80ab72f7c4c4';
- const recent=await db.collection('orders').where('createdAt','>=','2026-10-31T04:10:00').where('createdAt','<','2026-10-31T04:30:00').select().get();
- const match=recent.docs.find(s=>createHash('sha256').update(s.id).digest('hex')===targetHash);
- const cfg=(await db.doc('config/payments').get()).get('tilopay');console.log('CONFIG',JSON.stringify({enabled:cfg.enabled,mode:cfg.mode}));if(cfg.mode!=='test') throw Error('not test');
- if(match) {
- const ref=match.ref;const order=(await ref.get()).data();const docs=(await ref.collection('items').get()).docs;
- const code=v=>typeof v==='string'&&/^[a-z_0-9-]{1,64}$/.test(v)?v:null;
- const t=order.tilopay||{}; console.log('ORDER',JSON.stringify({status:code(order.status),method:code(order.paymentMethod),paymentStatus:code(order.paymentStatus),amount:order.total,createdAt:order.createdAt,updatedAt:order.updatedAt,mode:code(t.mode),attemptCount:t.attemptCount,lines:docs.length,hasLock:!!t.checkoutLockId}));
- for(const a of Object.values(t.attemptsById||{})) {
- let integrity;try{integrity=snapshotFingerprint(currentSnapshot(order,docs,a.snapshot))===a.orderVersion}catch{integrity=false}
- console.log('ATTEMPT',JSON.stringify({status:code(a.status),amount:a.amount,mode:code(a.mode),requestAt:a.requestSentAt,creationCheckedAt:a.creationCheckedAt,hasUrl:!!a.url,hostAccepted:require('./lib/tilopayApi').isValidPaymentUrl(a.url),lastObservation:code(a.lastObservedState),transient:a.lastObservationTransient,checkedAt:a.lastCheckedAt,reasonClass:['No se confirmó una página','La consulta','Respuesta de consult','El contenido','Tilopay no devolvió','Las filas','Contexto de la','Faltan campos'].find(p=>(a.reason||'').startsWith(p))||'other',snapshotMatches:integrity,referenceLength:a.orderNumber?.length,hasProviderTransaction:!!a.idTilopay}));
+const {initializeApp,cert}=require('firebase-admin/app');const {getFirestore}=require('firebase-admin/firestore');
+(async()=>{const a=JSON.parse(process.env.DIAGNOSTIC_SA);delete process.env.DIAGNOSTIC_SA;if(a.project_id!=='aqui-pauli')throw Error('project');const c=cert(a);initializeApp({credential:c});const tok=await c.getAccessToken();
+ const headers={Authorization:'Bearer '+tok.access_token};const u=new URL('https://monitoring.googleapis.com/v3/projects/aqui-pauli/timeSeries');u.searchParams.set('filter','metric.type = "run.googleapis.com/request_count" AND resource.type = "cloud_run_revision" AND resource.labels.service_name = "tilopaygetquote" AND metric.labels.response_code = "400"');u.searchParams.set('interval.startTime','2026-10-30T22:00:00Z');u.searchParams.set('interval.endTime','2026-10-31T04:25:00Z'); const rows=await fetch(u,{headers});const b=await rows.json();console.log('HTTP400_ACCESS',rows.status,'PAGINATED',!!b.nextPageToken);for(const ts of b.timeSeries||[])for(const p of ts.points||[])if(Number(p.value.int64Value)>0)console.log('HTTP400_MINUTE_END',p.interval.endTime,'COUNT',p.value.int64Value);
+ const db=getFirestore();let s=await db.doc('_ops/tilopay-hosted-smoke-20261031-v1').get();
+ if(!s.exists){const f=await fetch('https://cloudfunctions.googleapis.com/v2/projects/aqui-pauli/locations/us-central1/functions/tilopayReconcilePayments',{headers}); const fn=await f.json(); if(fn.state==='ACTIVE'&&fn.updateTime>='2026-10-31T05:12:00Z'){
+ const url='https://cloudscheduler.googleapis.com/v1/projects/aqui-pauli/locations/us-central1/jobs/firebase-schedule-tilopayReconcilePayments-us-central1:run';const t=await fetch(url,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:'{}'});console.log('SCHEDULE_TRIGGER',t.status);}
  }
- try{const totals=await computeTotalsCRC(db,docs.map(d=>d.data()),{canton:order.shippingAddress?.canton,shippingType:order.shippingType});console.log('QUOTE_REPLAY',JSON.stringify({amount:totals.total,lines:totals.lines.length}));}catch(e){console.log('QUOTE_REPLAY',JSON.stringify({reason:e.reason||'internal',line:e.lineIndex}));}
- }else console.log('ORDER_NOT_IN_WINDOW');
- const variant=await db.doc('products/zz-tilopay-test/variants/v1').get();const p=await db.doc('products/zz-tilopay-test').get(); console.log('FIXTURE',JSON.stringify({productActive:p.get('active'),variantActive:variant.get('active'),stock:variant.get('stock'),reserved:variant.get('reservedStock'),price:variant.get('price')}));
- const token=await credential.getAccessToken();
- const query=new URL('https://monitoring.googleapis.com/v3/projects/'+project+'/timeSeries');
- query.searchParams.set('filter','metric.type = "run.googleapis.com/request_count" AND resource.type = "cloud_run_revision" AND resource.labels.service_name = "tilopaygetquote"');
- query.searchParams.set('interval.startTime','2026-10-31T04:10:00Z');query.searchParams.set('interval.endTime','2026-10-31T04:25:00Z');
- const metrics=await fetch(query,{headers:{Authorization:'Bearer '+token.access_token},signal:AbortSignal.timeout(20000)});console.log('METRICS_ACCESS',metrics.status);
- if(metrics.ok){for(const s of (await metrics.json()).timeSeries||[]){for(const p of s.points||[]){console.log('QUOTE_HTTP',s.metric?.labels?.response_code,s.metric?.labels?.response_code_class,p.interval.endTime,p.value.int64Value);}}}
- const q=await fetch('https://logging.googleapis.com/v2/entries:list',{method:'POST',headers:{Authorization:'Bearer '+token.access_token,'Content-Type':'application/json'},body:JSON.stringify({resourceNames:['projects/'+project],filter:'timestamp >= "2026-10-31T04:14:00Z" AND timestamp <= "2026-10-31T04:24:00Z" AND resource.type="cloud_run_revision" AND (resource.labels.service_name="tilopaygetquote" OR resource.labels.service_name="tilopaycreatepayment" OR resource.labels.service_name="tilopayconfirm")',pageSize:200})});
- console.log('LOG_ACCESS',q.status);if(q.ok){const j=await q.json();for(const e of j.entries||[]){console.log('CALL_LOG',JSON.stringify({at:e.timestamp,service:e.resource?.labels?.service_name,http:e.httpRequest?.status,reason:/^[A-Z_]+$/.test(e.jsonPayload?.reason||'')?e.jsonPayload.reason:null}));}}
-})().catch(e=>{console.error('DIAG_ERROR',e.name,typeof e.code==='number'?e.code:'');process.exitCode=1});
+ for(let i=0;i<13;i++){s=await db.doc('_ops/tilopay-hosted-smoke-20261031-v1').get();const d=s.data();if(d&&['complete','error'].includes(d.status)){console.log('SMOKE',JSON.stringify({status:d.status,forms:d.forms,consult:d.originalConsult}));return;}await new Promise(r=>setTimeout(r,4500));}
+ console.log('SMOKE_PENDING');
+})().catch(e=>{console.error('diagnostic failed',e.name);process.exitCode=1});
