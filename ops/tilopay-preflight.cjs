@@ -11,6 +11,7 @@ async function main() {
   const account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
   delete process.env.FIREBASE_SERVICE_ACCOUNT;
   if (account.type !== 'service_account' || account.project_id !== PROJECT) throw new Error('Wrong or missing project credential');
+  console.log('PREFLIGHT_DEPLOY_IDENTITY', account.client_email);
   const credential = cert(account);
   const app = initializeApp({credential, projectId:PROJECT});
   const db = getFirestore(app);
