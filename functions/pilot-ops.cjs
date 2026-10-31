@@ -18,6 +18,8 @@ const inspect={
  cityDistrictAddressPresent:[address.canton,address.distrito,address.señas].every(v=>typeof v==='string'&&!!v.trim()),
  phoneFromOrder:/\d{8}$/.test(String(o.customerPhone||'').replace(/\D/g,'')),
  emailPresent:/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(o.customerEmail||'').trim()),
+ oldPostal: String(address.codigoPostal || '10101').replace(/\D/g, '').slice(0,5) || '10101',
+ correctedPostal:request.billToZipPostCode, consistentPostal:request.shipToZipPostCode===request.billToZipPostCode,
  referenceMatches:request.orderNumber===att.orderNumber,
  merchantMatches:att.merchantId===cfg.merchantId,
 };
