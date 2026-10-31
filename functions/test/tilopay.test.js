@@ -648,3 +648,131 @@ test("reconcile no aplica un resultado si la historia cambia de LIVE a TEST dura
   assert.notEqual(h.order().paymentStatus, "pagado");
   assert.equal(Object.keys(h.store).filter((path) => path.startsWith("tilopayTx/")).length, 0);
 });
+
+const transientConsultFailures = [
+  { name: "timeout", reply: () => { throw new Error("consult timeout"); } },
+  { name: "HTTP 503", reply: () => response({ type: "503", message: "Servicio temporalmente no disponible" }, false, 503) },
+  { name: "JSON inválido", reply: () => ({ ok: true, status: 200, data: null, jsonValid: false }) },
+];
+const verifyVia = (h, caller) => caller === "confirm" ? h.service.confirm(request()) : h.service.reconcile(ORDER);
+const financialEvidence = (a) => Object.fromEntries([
+  "status", "idTilopay", "financialEvidence", "capture", "validatedAmount", "validatedAmountMinor",
+  "orderNumber", "returnedOrderNumber", "environment", "confirmedAt", "orderVersion", "snapshot",
+].map((key) => [key, a[key]]));
+
+test("captura confirmada sobrevive timeout/HTTP/JSON en confirm y reconcile y se recupera sin revisión permanente", async () => {
+  for (const caller of ["confirm", "reconcile"]) for (const failure of transientConsultFailures) {
+    for (const partial of [false, true]) {
+      let row; let outage = false;
+      const h = harness({ extra: partial ? backorderFixture() : {},
+        onConsult: async () => outage ? failure.reply() : response({ type: "200", response: [row] }) });
+      await h.service.create(request()); row = h.payment();
+      assert.equal((await verifyVia(h, caller)).result, "paid");
+      if (!partial) await h.db.doc(`orders/${ORDER}`).update({ status: "por_preparar" });
+      const before = h.order(); const evidence = financialEvidence(h.att());
+      const ledgerPaths = Object.keys(h.store).filter((path) => path.startsWith("tilopayTx/"));
+      const ledgerBefore = ledgerPaths.map((path) => h.get(path));
+      outage = true; h.advance(86400000);
+      const unavailable = await verifyVia(h, caller);
+      assert.equal(unavailable.result, "review", failure.name);
+      assert.equal(unavailable.code, "pending_reconciliation"); assert.equal(unavailable.transient, true);
+      assert.equal(unavailable.paid, true); assert.equal(unavailable.partial, partial);
+      for (const key of ["status", "paymentStatus", "paymentAmount", "paymentTransactionId", "paymentDate", "remainingTotal", "depositStatus"]) {
+        assert.deepEqual(h.order()[key], before[key], `${failure.name}: ${key}`);
+      }
+      assert.deepEqual(financialEvidence(h.att()), evidence);
+      assert.deepEqual(ledgerPaths.map((path) => h.get(path)), ledgerBefore);
+      assert.notEqual(h.order().tilopay.reconciliationNeedsReview, true);
+      assert.notEqual(h.att().reconciliationNeedsReview, true);
+      assert.equal(h.att().lastObservationTransient, true);
+      assert.equal(h.get(`tilopayCheckoutLocks/${h.order().tilopay.checkoutLockId}`).state, "paid");
+      outage = false; h.advance(60000);
+      const recovered = await verifyVia(h, caller);
+      assert.equal(recovered.result, "already_paid"); assert.equal(recovered.transient, undefined);
+      assert.notEqual(h.order().tilopay.reconciliationNeedsReview, true);
+      assert.equal(h.att().lastObservationTransient, false);
+      assert.equal(h.calls.pay.length, 1);
+    }
+  }
+});
+
+test("una consulta transitoria nunca acredita un intento pendiente ni abre un segundo cobro", async () => {
+  for (const caller of ["confirm", "reconcile"]) for (const failure of transientConsultFailures) {
+    let row; let outage = true;
+    const h = harness({ onConsult: async () => outage ? failure.reply() : response({ type: "200", response: [row] }) });
+    await h.service.create(request()); row = h.payment();
+    const result = await verifyVia(h, caller);
+    assert.equal(result.result, "review"); assert.equal(result.code, "pending_reconciliation");
+    assert.equal(result.transient, true); assert.equal(result.paid, false);
+    assert.notEqual(h.order().paymentStatus, "pagado"); assert.notEqual(h.order().paymentStatus, "parcial");
+    assert.equal(h.att().financialEvidence, undefined);
+    assert.equal(Object.keys(h.store).filter((path) => path.startsWith("tilopayTx/")).length, 0);
+    assert.equal((await h.service.create(request())).result, "review");
+    assert.equal(h.calls.pay.length, 1);
+    outage = false;
+    assert.equal((await verifyVia(h, caller)).result, "paid");
+    assert.notEqual(h.order().tilopay.reconciliationNeedsReview, true);
+  }
+});
+
+test("reembolso, mismatch y movimientos dentro de error HTTP conservan alertas reales tras una caída y recuperación", async () => {
+  for (const corruptResponse of [
+    (row) => response({ type: "200", response: [{ ...row, type: "Refund" }] }),
+    (row) => response({ type: "200", response: [{ ...row, amount: "1.00" }] }),
+    (row) => response({ type: "200", response: [{ ...row, merchantId: "otro-comercio" }] }),
+    (row) => response({ type: "200", response: [{ ...row, type: "Refund" }] }, false, 503),
+  ]) {
+    let row; let reply;
+    const h = harness({ onConsult: async () => reply ? reply() : response({ type: "200", response: [row] }) });
+    await h.service.create(request()); row = h.payment(); await h.service.confirm(request());
+    const evidence = financialEvidence(h.att());
+    reply = () => corruptResponse(row);
+    const review = await h.service.reconcile(ORDER);
+    assert.equal(review.result, "review"); assert.notEqual(review.transient, true);
+    assert.equal(h.order().tilopay.reconciliationNeedsReview, true);
+    assert.equal(h.att().reconciliationNeedsReview, true);
+    reply = transientConsultFailures[0].reply;
+    const unavailable = await h.service.confirm(request());
+    assert.equal(unavailable.result, "review"); assert.notEqual(unavailable.transient, true);
+    assert.equal(h.order().tilopay.reconciliationNeedsReview, true);
+    assert.equal(h.att().reconciliationNeedsReview, true);
+    assert.deepEqual(financialEvidence(h.att()), evidence);
+    reply = null;
+    assert.equal((await h.service.reconcile(ORDER)).result, "review");
+    assert.equal(h.order().tilopay.reconciliationNeedsReview, true);
+    assert.equal(h.calls.pay.length, 1);
+  }
+});
+
+test("una caída no oculta una mutación local del snapshot ya acreditado", async () => {
+  let row; let outage = false;
+  const h = harness({ onConsult: async () => outage ? transientConsultFailures[0].reply()
+    : response({ type: "200", response: [row] }) });
+  await h.service.create(request()); row = h.payment(); await h.service.confirm(request());
+  const item = h.get(`orders/${ORDER}/items/item_0`);
+  await h.db.doc(`orders/${ORDER}/items/item_0`).update({ quantity: 3 });
+  outage = true;
+  const review = await h.service.reconcile(ORDER);
+  assert.equal(review.result, "review"); assert.notEqual(review.transient, true);
+  assert.equal(h.order().tilopay.reconciliationNeedsReview, true);
+  await h.set(`orders/${ORDER}/items/item_0`, item); outage = false;
+  assert.equal((await h.service.confirm(request())).result, "review");
+  assert.equal(h.order().tilopay.reconciliationNeedsReview, true);
+});
+
+test("flags previos duplicate/legacy/reconciliation no se borran ni se disfrazan como transitorios", async () => {
+  for (const flag of ["duplicatePaymentNeedsReview", "legacyNeedsReview", "reconciliationNeedsReview"]) {
+    let row; let outage = false;
+    const h = harness({ onConsult: async () => outage ? transientConsultFailures[1].reply()
+      : response({ type: "200", response: [row] }) });
+    await h.service.create(request()); row = h.payment(); await h.service.confirm(request());
+    await h.db.doc(`orders/${ORDER}`).update({ [`tilopay.${flag}`]: true });
+    outage = true;
+    const result = await h.service.reconcile(ORDER);
+    assert.equal(result.result, "review"); assert.notEqual(result.transient, true);
+    assert.equal(h.order().tilopay[flag], true);
+    outage = false;
+    assert.equal((await h.service.confirm(request())).result, "review");
+    assert.equal(h.order().tilopay[flag], true);
+  }
+});

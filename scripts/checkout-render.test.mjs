@@ -13,6 +13,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { transformWithEsbuild } from 'vite';
 import { formatCRC } from '../src/utils/formatters.js';
 import { paypalQuoteKey, isPayablePaypalQuote, samePaypalQuote } from '../src/services/payments/paypalQuote.js';
+import { tilopayQuoteKey } from '../src/services/payments/tilopayQuote.js';
 import { GIVEAWAY_PHONE_ERROR } from '../functions/lib/giveawayPhone.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -30,7 +31,7 @@ const realFiles = [
   'src/utils/backorder.js', 'src/utils/constants.js', 'src/utils/formatters.js',
   'src/services/payments/registry.js', 'src/data/costaRicaTerritorial.js',
   'src/components/ui/CopyButton.jsx', 'src/components/ui/LoadingSpinner.jsx',
-  'src/services/payments/paypalQuote.js',
+  'src/services/payments/paypalQuote.js', 'src/services/payments/tilopayQuote.js',
   'src/components/ui/StatusBadge.jsx', 'src/utils/shippingText.js',
   'src/utils/shippingDelivery.js', 'src/utils/productPrice.js', 'src/hooks/usePageTitle.js',
   'functions/lib/catalogPrice.mjs',
@@ -70,7 +71,8 @@ function renderPage(relative, options = {}) {
   const items = options.items || [];
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const shippingCost = options.shippingCost || 0;
-  const availability = options.paypalAvailable ? { paypal: { available: true } } : {};
+  const availability = { ...(options.paypalAvailable ? { paypal: { available: true } } : {}),
+    ...(options.tilopayAvailable ? { tilopay: { available: true } } : {}) };
   const paypalTotals = [];
   const paypalEffects = [];
   const paypalRefs = [];
@@ -120,7 +122,8 @@ function renderPage(relative, options = {}) {
     [abs('src/services/payments/paypalProvider.js'), { paypalProvider }],
     [abs('src/services/payments/tilopayProvider.js'), { tilopayProvider: {
       id: 'tilopay', kind: 'online', label: 'Tarjeta',
-      getAvailability: options.allowCheckoutEffects ? async () => ({ available: false }) : forbidden('Tilopay availability'), Panel: forbidden('Tilopay panel'),
+      getAvailability: options.allowCheckoutEffects ? async () => ({ available: Boolean(options.tilopayAvailable) }) : forbidden('Tilopay availability'),
+      Panel: () => React.createElement('div', { 'data-testid': 'tilopay-panel' }),
     } }],
     [abs('src/components/auth/SaveAccountPrompt.js'), { __esModule: true, default: () => null }],
   ]);
@@ -152,6 +155,11 @@ function renderPage(relative, options = {}) {
       if (slot === 5) {
         assert.equal(initial, null, 'Update quote fixture if CheckoutPage state layout changes');
         value = options.paypalQuote ? { key: paypalQuoteKey(items, 'Grecia', 'normal'), quote: options.paypalQuote } : null;
+      }
+      if (slot === 6) {
+        assert.equal(initial, null, 'Update Tilopay quote fixture if CheckoutPage state layout changes');
+        value = options.tilopayQuote ? { uid: user?.uid, key: tilopayQuoteKey(items, 'Grecia', 'normal'),
+          quote: options.tilopayQuote, ...options.tilopayQuotedRecord } : null;
       }
       const [state, setState] = React.useState(value);
       checkoutStates[slot] = state;
@@ -272,6 +280,51 @@ test('checkout de stock cobra el total y no presenta apartado', () => {
   const { html } = renderPage(CHECKOUT, { items: [line('stock_propio', 30000)] });
   contains(html, `Confirmar Pedido · ${formatCRC(30000)}`);
   assert.doesNotMatch(html, /data-testid="deposit-summary"/);
+});
+
+test('Tilopay espera la cotización del servidor y no presenta un importe local como cobro', () => {
+  const { html } = renderPage(CHECKOUT, { items: [line('bajo_pedido', 32000)],
+    tilopayAvailable: true, paymentMethod: 'tilopay' });
+  assert.match(html, /data-testid="tilopay-panel"/);
+  contains(html, 'Calculando…');
+  contains(html, 'El servidor confirmará el monto a pagar ahora y el saldo antes de habilitar el pago con tarjeta.');
+  assert.doesNotMatch(html, /data-testid="deposit-summary"|type="submit"/);
+  assert.ok(!text(html).includes(`Pagás ahora ${formatCRC(16000)}`));
+});
+
+test('Tilopay resume el total y el apartado del servidor para stock, Bajo pedido y mixto', () => {
+  for (const scenario of [
+    { items: [line('stock_propio', 31000)], total: 35000, balance: 0, deposit: 0, backorder: 0 },
+    { items: [line('bajo_pedido', 31000)], total: 35000, balance: 16000, deposit: 16000, backorder: 32000 },
+    { items: [line('stock_propio', 29000), line('bajo_pedido', 31000)], total: 65000, balance: 16000, deposit: 16000, backorder: 32000 },
+  ]) {
+    const quote = { ...serverQuote({ ...scenario, shipping: 3000 }), currency: 'CRC' };
+    const { html } = renderPage(CHECKOUT, { items: scenario.items, shippingCost: 3000,
+      tilopayAvailable: true, paymentMethod: 'tilopay', tilopayQuote: quote });
+    contains(html, `Pagás ahora ${formatCRC(quote.crcPayNow)}${scenario.balance ? ' (apartado 50%)' : ''}`);
+    contains(html, formatCRC(quote.crcTotal));
+    if (scenario.balance) contains(html, `Saldo restante ${formatCRC(scenario.balance)}`);
+    else assert.doesNotMatch(html, /data-testid="deposit-summary"/);
+    assert.doesNotMatch(html, /type="submit"/);
+  }
+});
+
+test('Tilopay oculta cotizaciones de otro carrito, envío o usuario incluso antes del efecto de recarga', () => {
+  const items = [line('bajo_pedido', 32000)];
+  const quote = { ...serverQuote({ total: 35000, shipping: 3000, balance: 16000, deposit: 16000, backorder: 32000 }), currency: 'CRC' };
+  for (const tilopayQuotedRecord of [
+    { key: tilopayQuoteKey([line('bajo_pedido', 32000, 'otro')], 'Grecia', 'normal') },
+    { key: tilopayQuoteKey(items, 'San José', 'normal') },
+    { key: tilopayQuoteKey(items, 'Grecia', 'express') },
+    { uid: 'otro-usuario' },
+    { quote: { ...quote, crcPayNow: 1 } },
+  ]) {
+    const { html } = renderPage(CHECKOUT, { items, tilopayAvailable: true, paymentMethod: 'tilopay',
+      tilopayQuote: quote, tilopayQuotedRecord });
+    contains(html, 'Calculando…');
+    assert.doesNotMatch(html, /data-testid="deposit-summary"/);
+    assert.ok(!text(html).includes(`Pagás ahora ${formatCRC(19000)}`));
+  }
 });
 
 test('Bajo pedido de ₡47.000 renderiza SINPE, apartado ₡23.500 y saldo ₡23.500', () => {

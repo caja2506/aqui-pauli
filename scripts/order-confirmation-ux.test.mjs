@@ -20,7 +20,7 @@ const TITLE = 'src/hooks/usePageTitle.js';
 const compiled = new Map(await Promise.all([
   CONFIRMATION, PROMPT, TITLE, 'src/components/auth/FacebookIcon.jsx',
   'src/components/ui/CopyButton.jsx', 'src/utils/formatters.js',
-  'src/utils/constants.js', 'src/utils/backorder.js', 'src/services/payments/paypalQuote.js',
+  'src/utils/constants.js', 'src/utils/backorder.js', 'src/services/payments/paypalQuote.js', 'src/services/payments/tilopayQuote.js',
 ].map(async relative => {
   const filename = abs(relative);
   const { code } = await transformWithEsbuild(await readFile(filename, 'utf8'), filename,
@@ -204,4 +204,54 @@ test('el método guardado de una orden PayPal prevalece sobre un estado anterior
     state: { paymentMethod: 'contra_entrega', total: 1 } });
   assert.match(page.html, /Pago recibido con PayPal/);
   assert.ok(!page.html.includes('data-testid="cash-on-delivery-confirmation"'));
+});
+
+const cardQuote = { currency: 'CRC', crcSubtotal: 62000, crcShipping: 3000, crcTotal: 65000,
+  crcPayNow: 49000, crcBalanceDue: 16000, crcBackorderSubtotal: 32000, crcDepositTotal: 16000, hasBackorder: true };
+
+test('retorno Tilopay parcial muestra apartado, total completo y saldo antes de cargar el pedido', () => {
+  const page = render({ state: { orderNumber: 'AP-TARJETA', total: 65000, paymentMethod: 'tilopay',
+    online: true, paid: true, partial: true, tilopayQuote: cardQuote } });
+  assert.match(page.html, /Apartado recibido con tarjeta/);
+  assert.match(page.html, /Monto recibido: <strong>₡49\s000<\/strong>/);
+  assert.match(page.html, /Total del pedido: <strong>₡65\s000<\/strong>/);
+  assert.match(page.html, /Saldo pendiente: <strong>₡16\s000<\/strong>/);
+  assert.match(page.html, /50% de los productos Bajo pedido/);
+  assert.doesNotMatch(page.html, /Pago recibido con tarjeta|está en revisión|Enviar Comprobante/);
+});
+
+test('Tilopay recargado usa pago parcial, importes y método guardados por el servidor', () => {
+  const page = render({ savedOrder: { orderNumber: 'AP-TARJETA-GUARDADO', total: 65000,
+    paymentMethod: 'tilopay', paymentStatus: 'parcial', paymentAmount: 49000, remainingTotal: 16000,
+    tilopay: cardQuote }, state: { paymentMethod: 'paypal', total: 1, paid: false, partial: false } });
+  assert.match(page.html, /Apartado recibido con tarjeta/);
+  assert.match(page.html, /Monto recibido: <strong>₡49\s000<\/strong>/);
+  assert.match(page.html, /Saldo pendiente: <strong>₡16\s000<\/strong>/);
+  assert.doesNotMatch(page.html, /Pago recibido con tarjeta|está en revisión|Tu pago con PayPal/);
+});
+
+test('Tilopay pendiente no confirma un apartado por datos viejos de navegación', () => {
+  const page = render({ savedOrder: { orderNumber: 'AP-TARJETA-PENDIENTE', total: 65000,
+    paymentMethod: 'tilopay', paymentStatus: 'pendiente', tilopay: cardQuote },
+  state: { paid: true, partial: true } });
+  assert.match(page.html, /Tu pago con tarjeta está en revisión/);
+  assert.match(page.html, /Monto del pago en revisión: <strong>₡49\s000<\/strong>/);
+  assert.doesNotMatch(page.html, /Apartado recibido|Pago recibido|Monto recibido/);
+});
+
+test('Tilopay histórico o ya cancelado completo conserva pago total y saldo cero', () => {
+  for (const options of [
+    { state: { orderNumber: 'AP-LEGACY', total: 65000, paymentMethod: 'tilopay', online: true, paid: true } },
+    { savedOrder: { orderNumber: 'AP-LEGACY', total: 65000, paymentMethod: 'tilopay', paymentStatus: 'pagado',
+      paymentAmount: 65000, remainingTotal: 0, tilopay: { crcTotal: 65000, currency: 'CRC' },
+      itemsSummary: [{ supplyType: 'bajo_pedido', price: 62000, quantity: 1 }], shippingCost: 3000, depositTotal: 31000 } },
+    { savedOrder: { orderNumber: 'AP-SALDADO', total: 65000, paymentMethod: 'tilopay', paymentStatus: 'verificado',
+      paymentAmount: 65000, remainingTotal: 0, tilopay: cardQuote } },
+  ]) {
+    const page = render(options);
+    assert.match(page.html, /Pago recibido con tarjeta/);
+    assert.match(page.html, /Monto recibido: <strong>₡65\s000<\/strong>/);
+    assert.match(page.html, /Saldo pendiente: <strong>₡0<\/strong>/);
+    assert.doesNotMatch(page.html, /Apartado recibido|apartado 50%|Tu apartado/);
+  }
 });
