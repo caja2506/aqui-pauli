@@ -297,9 +297,40 @@ describe("reglas de pagos (Firestore Emulator)", { skip: !process.env.FIRESTORE_
     }
   });
 
-  test("ledger, referencias y locks son exclusivamente del servidor", async () => {
-    for (const uid of ["owner", "admin"]) for (const collection of ["tilopayTx", "tilopayReferences", "tilopayCheckoutLocks"]) {
-      await assertFails(sdk.setDoc(sdk.doc(db(uid), collection, "attempt1"), { orderId: "o1" }));
+  test("apartado Tilopay conserva saldo y no permite despachar ni acreditar el resto desde el navegador", async () => {
+    const fields = { ...paidFields(), paymentStatus: "parcial", status: "pendiente_pago",
+      hasBackorder: true, paymentAmount: 50, remainingTotal: 50, depositStatus: "pagado", remainingStatus: "pendiente" };
+    await seed(fields);
+    for (const uid of ["owner", "admin"]) {
+      const ref = sdk.doc(db(uid), "orders/o1");
+      await assertSucceeds(sdk.getDoc(ref));
+      for (const patch of [{ status: "por_preparar" }, { status: "enviado" }, { status: "entregado" },
+        { status: "cancelado" }, { paymentStatus: "pagado" }, { paymentAmount: 100 }, { remainingTotal: 0 },
+        { remainingStatus: "pagado" }, { backorderRemainingPaid: true }]) {
+        await assertFails(sdk.updateDoc(ref, patch));
+      }
+      await assertFails(sdk.updateDoc(sdk.doc(db(uid), "orders/o1/items/item_0"), { quantity: 2 }));
+      await assertFails(sdk.deleteDoc(ref));
+    }
+    await assertSucceeds(sdk.updateDoc(sdk.doc(db("admin"), "orders/o1"), { notes: "Apartado recibido; saldo pendiente" }));
+  });
+
+  test("ledger, referencias, locks y cola de reconciliación son exclusivamente del servidor", async () => {
+    const collections = ["tilopayTx", "tilopayReferences", "tilopayCheckoutLocks", "tilopayReconciliation"];
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      for (const collection of collections) {
+        await sdk.setDoc(sdk.doc(ctx.firestore(), collection, "attempt1"), { orderId: "o1", nextCheckAt: "2026-10-31T00:00:00.000Z" });
+      }
+    });
+    for (const d of [db("owner"), db("admin"), env.unauthenticatedContext().firestore()]) {
+      for (const collection of collections) {
+        const ref = sdk.doc(d, collection, "attempt1");
+        await assertFails(sdk.getDoc(ref));
+        await assertFails(sdk.getDocs(sdk.collection(d, collection)));
+        await assertFails(sdk.setDoc(sdk.doc(d, collection, "forged"), { orderId: "o1" }));
+        await assertFails(sdk.updateDoc(ref, { nextCheckAt: "2020-01-01T00:00:00.000Z" }));
+        await assertFails(sdk.deleteDoc(ref));
+      }
     }
   });
 

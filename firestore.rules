@@ -210,6 +210,7 @@ service cloud.firestore {
     match /tilopayTx/{id} { allow read, write: if false; }
     match /tilopayReferences/{id} { allow read, write: if false; }
     match /tilopayCheckoutLocks/{id} { allow read, write: if false; }
+    match /tilopayReconciliation/{id} { allow read, write: if false; }
 
     // --- CRM (admin lee todo, usuario puede crear/actualizar su propio contacto) ---
     match /crm_contacts/{contactId} {

@@ -1,7 +1,7 @@
 // Inventario y CRM del pedido: una única transacción con evidencia persistente.
 // Los avisos externos se reclaman por separado; un envío ambiguo requiere revisión,
 // porque Telegram/SMTP no ofrecen una transacción atómica con Firestore.
-const { snapshotFingerprint } = require("./tilopayOrder");
+const { snapshotFingerprint, validateSnapshotAmounts } = require("./tilopayOrder");
 const { parseMinorCRC } = require("./paymentMoney");
 const { normalizeInventoryStock } = require("./inventoryStock");
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
@@ -78,7 +78,7 @@ function paidTilopaySnapshot(order) {
   const snapshot = attempt?.snapshot;
   if (!attempt || attempt.schemaVersion !== 2 || attempt.mode !== "live" || attempt.status !== "approved"
       || attempt.financialEvidence !== "captured" || attempt.reconciliationNeedsReview
-      || !snapshot || snapshot.version !== 1 || typeof attempt.orderVersion !== "string" || !attempt.orderVersion) {
+      || !snapshot || ![1, 2].includes(snapshot.version) || typeof attempt.orderVersion !== "string" || !attempt.orderVersion) {
     throw new Error("Pago Tilopay sin snapshot live verificado; no se prepara automáticamente");
   }
   if (snapshotFingerprint(snapshot) !== attempt.orderVersion) throw new Error("La huella del snapshot no coincide con el intento acreditado");
@@ -92,20 +92,29 @@ function paidTilopaySnapshot(order) {
       || String(order.paymentTransactionId) !== String(attempt.idTilopay)) {
     throw new Error("El identificador del pago no coincide con el intento acreditado");
   }
-  if (![snapshot.amountMinor, snapshot.subtotalMinor, snapshot.shippingMinor].every(Number.isSafeInteger)
-      || snapshot.amountMinor <= 0 || snapshot.subtotalMinor < 0 || snapshot.shippingMinor < 0
-      || snapshot.amountMinor !== snapshot.subtotalMinor + snapshot.shippingMinor
-      || snapshot.currency !== "CRC" || snapshot.amountMinor !== attempt.validatedAmountMinor
-      || snapshot.amountMinor !== moneyMinor(order.paymentAmount)) {
+  const amounts = validateSnapshotAmounts(snapshot);
+  if (snapshot.currency !== "CRC" || amounts.amountMinor !== attempt.validatedAmountMinor
+      || amounts.amountMinor !== moneyMinor(order.paymentAmount)) {
     throw new Error("El importe acreditado no coincide con el snapshot");
+  }
+  const partial = amounts.remainingMinor > 0;
+  if (partial && (order.paymentStatus !== "parcial" || order.status !== "pendiente_pago"
+      || moneyMinor(order.remainingTotal) !== amounts.remainingMinor)) {
+    throw new Error("El apartado o saldo pendiente no coincide con el snapshot");
+  }
+  if (!partial && (!["pagado", "verificado"].includes(order.paymentStatus)
+      || (snapshot.version === 2 && order.remainingTotal !== undefined && moneyMinor(order.remainingTotal) !== 0))) {
+    throw new Error("El pago completo conserva un saldo o estado inconsistente");
   }
   const lines = normalizeLines(snapshot.lines, { priced: true });
   if (lines.reduce((sum, line) => sum + moneyMinor(line.lineTotal), 0) !== snapshot.subtotalMinor) {
     throw new Error("El subtotal no coincide con las líneas cobradas");
   }
   return {
-    lines, paidAttemptKey: key,
-    order: { ...order, customerUid: owner, uid: owner, total: snapshot.amountMinor / 100,
+    lines, paidAttemptKey: key, partial, receivedAmount: amounts.amountMinor / 100,
+    order: { ...order, customerUid: owner, uid: owner, total: amounts.totalMinor / 100,
+      remainingTotal: amounts.remainingMinor / 100, depositTotal: amounts.depositMinor / 100,
+      hasBackorder: amounts.hasBackorder, backorderSubtotal: amounts.backorderSubtotalMinor / 100,
       customerName: snapshot.customer?.name || order.customerName || "",
       customerEmail: snapshot.customer?.email || order.customerEmail || "",
       customerPhone: snapshot.customer?.phone || order.customerPhone || "",
@@ -132,7 +141,11 @@ async function applyPaidOrder({ db, orderId, crmDefaults = {} }) {
     const orderSnap = await transaction.get(orderRef);
     if (!orderSnap.exists) return { kind: "missing" };
     const order = orderSnap.data();
-    if (order.status !== "pagado" || isTerminalOrder(order)) return { kind: "noop" };
+    const tilopayPartial = hasTilopay(order) && order.status === "pendiente_pago" && order.paymentStatus === "parcial";
+    // Tilopay pasa directamente de pendiente_pago a por_preparar: no emite el
+    // estado intermedio pagado que podría activar un trigger legado de inventario.
+    const tilopayCaptured = hasTilopay(order) && order.status === "pendiente_pago" && order.paymentStatus === "pagado";
+    if ((order.status !== "pagado" && !tilopayPartial && !tilopayCaptured) || isTerminalOrder(order)) return { kind: "noop" };
     if (order.fulfillment?.state === "applied") return { kind: "already_applied" };
     const now = new Date().toISOString();
     const review = (reason) => {
@@ -140,7 +153,7 @@ async function applyPaidOrder({ db, orderId, crmDefaults = {} }) {
         fulfillment: { version: 1, state: "needs_review", reason, checkedAt: now } });
       return { kind: "review", reason };
     };
-    if (!["pagado", "verificado"].includes(order.paymentStatus)) return review("Falta un pago acreditado por el servidor");
+    if (!["pagado", "verificado"].includes(order.paymentStatus) && !tilopayPartial) return review("Falta un pago acreditado por el servidor");
 
     let paid;
     let stockLines;
@@ -152,7 +165,8 @@ async function applyPaidOrder({ db, orderId, crmDefaults = {} }) {
       } else {
         const items = await transaction.get(orderRef.collection("items"));
         const lines = normalizeLines(items.docs.map((doc) => doc.data()));
-        paid = { lines, order: { ...order, total: moneyMinor(order.total) / 100, customerUid: order.customerUid || order.uid } };
+        paid = { lines, receivedAmount: moneyMinor(order.total) / 100,
+          order: { ...order, total: moneyMinor(order.total) / 100, customerUid: order.customerUid || order.uid } };
       }
       stockLines = paid.lines.filter((line) => line.supplyType === "stock_propio");
       reservedLines = reservationLines(order);
@@ -190,7 +204,7 @@ async function applyPaidOrder({ db, orderId, crmDefaults = {} }) {
     if (owner) {
       const old = crmSnap.exists ? crmSnap.data() : {};
       const count = (Number.isSafeInteger(old.totalOrders) && old.totalOrders >= 0 ? old.totalOrders : 0) + 1;
-      const spent = (Number.isFinite(old.totalSpent) && old.totalSpent >= 0 ? old.totalSpent : 0) + paid.order.total;
+      const spent = (Number.isFinite(old.totalSpent) && old.totalSpent >= 0 ? old.totalSpent : 0) + paid.receivedAmount;
       const channels = [...new Set([...(Array.isArray(old.sourceChannels) ? old.sourceChannels : []), "web"])];
       const data = {
         ...(crmSnap.exists ? {} : crmDefaults), uid: owner,
@@ -202,14 +216,16 @@ async function applyPaidOrder({ db, orderId, crmDefaults = {} }) {
       };
       transaction.set(crmRef, data, { merge: true });
       transaction.set(interactionRef, {
-        type: "compra", channel: "web", orderId, amount: paid.order.total, createdAt: now,
-        description: `Pedido ${paid.order.orderNumber || orderId} pagado — ₡${paid.order.total}`,
+        type: "compra", channel: "web", orderId, amount: paid.receivedAmount, createdAt: now,
+        description: `Pedido ${paid.order.orderNumber || orderId} ${paid.partial ? "apartado recibido" : "pagado"} — ₡${paid.receivedAmount}`,
         metadata: { orderNumber: paid.order.orderNumber || orderId, paymentMethod: paid.order.paymentMethod || "",
-          hasBackorderItems: paid.lines.some((line) => line.supplyType === "bajo_pedido") },
+          hasBackorderItems: paid.lines.some((line) => line.supplyType === "bajo_pedido"),
+          ...(hasTilopay(order) ? { total: paid.order.total, remainingTotal: paid.order.remainingTotal } : {}) },
       });
     }
     const update = {
-      status: "por_preparar", updatedAt: now,
+      // El apartado reserva/prepara la compra en CRM, pero no autoriza su entrega.
+      status: paid.partial ? "pendiente_pago" : "por_preparar", updatedAt: now,
       fulfillment: { version: 1, state: "applied", inventoryAppliedAt: now, crmAppliedAt: now,
         paymentTransactionId: String(order.paymentTransactionId || ""),
         ...(paid.paidAttemptKey ? { paidAttemptKey: paid.paidAttemptKey } : {}) },
@@ -217,6 +233,8 @@ async function applyPaidOrder({ db, orderId, crmDefaults = {} }) {
     if (hasTilopay(order)) Object.assign(update, {
       shippingAddress: paid.order.shippingAddress, shippingType: paid.order.shippingType,
       total: paid.order.total, subtotal: paid.order.subtotal, shippingCost: paid.order.shippingCost,
+      remainingTotal: paid.order.remainingTotal, depositTotal: paid.order.depositTotal,
+      hasBackorder: paid.order.hasBackorder, backorderSubtotal: paid.order.backorderSubtotal,
     });
     if (order.inventoryReservation) update.inventoryReservation = { ...order.inventoryReservation, state: "consumed", consumedAt: now };
     transaction.update(orderRef, update);
