@@ -79,7 +79,9 @@ export default function TilopayPanel({ validateForm, createPendingOrder, canton,
     let cancelled = false;
     setQuoted(null);
     setQuoteError(null);
-    if (!uid || !canton || items.length === 0) return undefined;
+    // The pending order owns its server-priced snapshot. The current cart is
+    // irrelevant to resuming it, including after catalog/stock changes.
+    if (!uid || !canton || items.length === 0 || visiblePending || readPending(uid)) return undefined;
     tilopayGetQuote({
       items: items.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),
       canton, shippingType,
@@ -98,7 +100,7 @@ export default function TilopayPanel({ validateForm, createPendingOrder, canton,
     return () => { cancelled = true; };
     // The key includes all product ids, variants, quantities and shipping choices.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, quoteKey, quoteRefresh]);
+  }, [uid, quoteKey, quoteRefresh, visiblePending?.orderId]);
 
   useEffect(() => {
     latest.current.onQuote?.({ uid, key: quoteKey, quote: displayedQuote });
@@ -167,6 +169,10 @@ export default function TilopayPanel({ validateForm, createPendingOrder, canton,
       // A server checkout lock can redirect us to the user's original equivalent order.
       remember(pending);
       if (!mounted.current || latest.current.quoteKey !== quoteKey) return;
+      if (res?.formUnavailable === true) {
+        setMessage(res.message || 'No se pudo abrir el formulario de Tilopay. Conservá este pedido para consultarlo.');
+        return;
+      }
       if (safePaymentUrl(res?.url)) {
         if (!isPayableTilopayQuote(res)) {
           navigate(`/tilopay/retorno/${encodeURIComponent(actualId)}`);

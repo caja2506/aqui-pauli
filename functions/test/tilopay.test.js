@@ -828,3 +828,73 @@ test("fallo de infraestructura no se atribuye al cliente ni expone su mensaje", 
   await assert.rejects(service.getQuote(quoteRequest()), { code: "internal", details: { reason: "QUOTE_INTERNAL_ERROR" } });
   assert.deepEqual(events, [{ severity: "ERROR", event: "tilopay_quote_rejected", reason: "QUOTE_INTERNAL_ERROR", itemCount: 1 }]);
 });
+
+test("respuesta processPayment con error conserva el pedido y diagnóstico acotado antes del retorno", async () => {
+  const h = harness({mode: 'test', onPay: () => response({type: '400', message: 'orderNumber is invalid: secret-customer-value'}, false, 400)});
+  const result = await h.service.create(request());
+  assert.equal(result.result, 'review'); assert.equal(result.formUnavailable, true);
+  assert.equal(result.formReason, 'PROVIDER_REJECTED'); assert.equal(result.retry, false);
+  assert.equal(result.url, undefined);
+  assert.deepEqual(h.att().creationOutcome, {reason:'PROVIDER_REJECTED', http:400, type:'400', field:'orderNumber'});
+  assert.doesNotMatch(JSON.stringify(h.att()), /secret-customer-value/);
+  assert.equal((await h.service.create(request())).formUnavailable, true);
+  assert.equal(h.calls.pay.length, 1); assert.equal(h.order().paymentStatus, 'pendiente');
+});
+
+test('distingue respuesta ilegible, origen inválido, timeout y tipo 100 válido', async () => {
+  for (const [onPay, reason] of [
+    [() => ({ok:true,status:200,jsonValid:false,data:null}), 'INVALID_RESPONSE'],
+    [() => response({type:100,url:'https://invalid.example/'}), 'FORM_URL_INVALID'],
+    [() => { throw new Error('private timeout detail'); }, 'TRANSPORT_UNKNOWN'],
+    [() => response({type:100,url:URL}), 'FORM_READY'],
+  ]) {
+    const h = harness({mode:'test', onPay}); const v=await h.service.create(request());
+    assert.equal(h.att().creationOutcome.reason, reason);
+    assert.equal(v.url === URL, reason === 'FORM_READY');
+    assert.equal(h.calls.pay.length, 1);
+  }
+});
+
+const blockedForm = () => response({type:'402',message:'The commerce has a transaction block'}, false, 402);
+const missingForm = () => response({type:'200',message:'Does not exist',response:[]});
+const requestForm = (generation=0) => ({...request(),data:{orderId:ORDER,retryMissingTestFormGeneration:generation}});
+
+test('desbloqueo sandbox: dos clics explícitos solicitan una sola página para el mismo pedido y referencia', async () => {
+  let sent=0; const entered=deferred(); const reply=deferred();
+  const h=harness({mode:'test',onConsult:missingForm,onPay:()=>{
+    if(++sent===1) return blockedForm(); entered.resolve(); return reply.promise;
+  }});
+  const first=await h.service.create(request());
+  assert.equal(first.formReason,'MERCHANT_TRANSACTION_BLOCK'); assert.equal(first.testFormGeneration,undefined);
+  assert.equal((await h.service.confirm(request())).testFormGeneration,0);
+  assert.equal((await h.service.create(request())).testFormGeneration,0); assert.equal(h.calls.pay.length,1);
+  const retry=h.service.create(requestForm()); await entered.promise;
+  const duplicate=await h.service.create(requestForm()); assert.equal(duplicate.url,undefined);
+  reply.resolve(response({type:'100',url:URL})); assert.equal((await retry).url,URL);
+  await h.service.create(requestForm());
+  assert.equal(h.calls.pay.length,2); assert.equal(h.calls.pay[0].orderNumber,h.calls.pay[1].orderNumber);
+  assert.equal(h.calls.pay[0].amount,h.calls.pay[1].amount); assert.equal(h.att().status,'open');
+  assert.equal(h.order().tilopay.attemptCount,1); assert.equal(h.order().paymentStatus,'pendiente');
+});
+
+test('datos históricos sin URL permiten solicitar formulario de prueba solo con ausencia explícita de Tilopay', async () => {
+  const h=harness({mode:'test',onPay:blockedForm,onConsult:missingForm});await h.service.create(request());
+  const o=h.order(); delete o.tilopay.attemptsById.a1.creationOutcome;
+  await h.db.doc(`orders/${ORDER}`).update({tilopay:o.tilopay});
+  const result=await h.service.confirm(request()); assert.equal(result.testFormGeneration,0);
+  assert.equal(result.formReason,'FORM_UNCONFIRMED');
+});
+
+test('consulta ambigua, fallo de red, cambio de integración o live impiden repetir processPayment', async () => {
+  for(const variant of ['empty','transport','consult_error','changed','live','snapshot']) {
+    const h=harness({mode:variant==='live'?'live':'test',onPay:variant==='transport'?()=>{throw Error('network')}:blockedForm,
+      onConsult:variant==='empty'?()=>response({type:'200',message:'',response:[]}):
+        variant==='consult_error'?()=>response({type:'400',message:'error',response:[]}):missingForm});
+    await h.service.create(request());
+    if(variant==='changed') await h.db.doc('config/payments').update({tilopay:{enabled:true,mode:'test',merchantId:'other',orderPrefix:PREFIX}});
+    if(variant==='snapshot') await h.db.doc(`orders/${ORDER}`).update({total:1});
+    if(['changed','live','snapshot'].includes(variant)) await assert.rejects(h.service.create(requestForm()),{code:'failed-precondition'});
+    else assert.equal((await h.service.create(requestForm())).url,undefined);
+    assert.equal(h.calls.pay.length,1,variant);
+  }
+});
