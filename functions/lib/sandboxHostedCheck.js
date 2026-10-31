@@ -1,7 +1,7 @@
 "use strict";
 const { randomUUID, createHash } = require("node:crypto");
 const api = require("./tilopayApi");
-const reportPath = "_ops/tilopay-hosted-smoke-20261031-v1";
+const reportPath = "_ops/tilopay-hosted-smoke-20261031-v2";
 const vocabulary=new Set(("the a an in on of to for not no is was can be has been does this your please must maximum minimum max min valid invalid required missing too long length characters alphanumeric numeric " +
 "el la un una los las de del no es en a con se debe ser para por favor tiene puede tener mayor menor máximo maxima máximo minima mínimo longitud caracteres válido válida inválido inválida obligatorio obligatoria falta " +
 "error campo field format formato reference referencia order orden number número numero ordernumber transaction transacción transaccion payment pago payer customer comercio merchant integration integración integracion platform plataforma api general apigeneral incorrect incorrecta incorrecto " +
@@ -9,6 +9,10 @@ const vocabulary=new Set(("the a an in on of to for not no is was can be has bee
 "url urls redirect retorno domain dominio sitio website address dirección direccion postal postcode email correo telephone teléfono telefono billtostate billtoemail billtofirstname billtolastname " +
 "duplicate duplicada duplicado found encuentra existe encontrado encontrada data datos response respuesta server internal unsupported exceed exceeded exceeded exceeding exceeds between more than than invalidado" ).split(/\s+/));
 function safeMessage(v) {
+ if(typeof v==="string" && /^the [a-z ]{1,32} has a transaction [a-z ]{1,60}[.!]?$/i.test(v.trim())) {
+   return v.trim().toLowerCase().split(/\s+/).map(w=>/^[a-z]{1,16}[.!]?$/.test(w)?w:"…").join(" ");
+ }
+ if(typeof v==="string" && /^does not exist[.!]?$/i.test(v.trim())) return "does not exist";
  if(typeof v!=="string") return null;
  return v.toLowerCase().replace(/https?:\/\/\S+|\S+@\S+|[0-9-]{5,}/g," [omitted] ").match(/[\p{L}]+|\d+|\?/gu)
    ?.slice(0,40).map(w=>vocabulary.has(w)||/^\d{1,2}$/.test(w)?w:"…").join(" ").replace(/(?:… ){2,}/g,"… ")||null;
@@ -35,7 +39,7 @@ async function run(db, credentials) {
  if(original){const o=(await original.ref.get()).data();const a=o.tilopay?.attemptsById?.a1;
  if(a?.mode==="test"&&typeof a.orderNumber==="string"){const consult=await api.tpFetch("/api/v1/consult",{token,body:{key:c.key,orderNumber:a.orderNumber}});await report.update({originalConsult:shape(consult)});}}
  const dummy={customerName:"Cliente Prueba",customerPhone:"88888888",customerEmail:"prueba@example.com",shippingAddress:{provincia:"Alajuela",canton:"Grecia",distrito:"Grecia",señas:"Direccion de prueba",codigoPostal:"20301"}};
- for(const variant of ["store","api-platform","short-api"]){
+ for(const variant of ["store"]){
    if(!await test()) throw Error("mode changed");
    const id=randomUUID().replace(/-/g,"");const number=variant==="short-api"?"AP"+id.slice(0,14):api.tilopayReference(id,1);
    const payload=api.buildProcessPayload({key:c.key,order:dummy,orderId:"SandboxFormCheck",amountMinor:100000,orderNumber:number,redirect:"https://aquipauli.com/tilopay/retorno/SandboxFormCheck"});
