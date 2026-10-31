@@ -28,7 +28,7 @@ const expected=(c)=>c.merchantId==='88802749'&&c.orderPrefix==='PFC031932';
    const refs=p.orderNumbers;
    const expectedLegacyRefs=p.status==='approved'?['TPTEST-A-T1','TPTEST-A-T2']:p.status==='declined'?['TPTEST-R-T1']:[];
    const safeLegacy=!list.length && expectedLegacyRefs.length && Array.isArray(refs) && refs.length===expectedLegacyRefs.length
-      && expectedLegacyRefs.every(n=>refs.includes(n)) && !/https?:\\/\\//i.test(JSON.stringify(p)) && !p.reconciliationNeedsReview;
+      && expectedLegacyRefs.every(n=>refs.includes(n)) && !JSON.stringify(p).toLowerCase().includes('://') && !p.reconciliationNeedsReview;
    if(!safeLegacy && !safePrior && (!list.length||list.some(v=>v.mode!=='test'||!['test_paid','approved'].includes(v.status))))blocked++;
   }
   console.log('PILOT_TEST_ATTEMPTS',JSON.stringify({orders:orders.size,blocking:blocked}));return blocked;
