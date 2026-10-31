@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const { parseMinorCRC, minorToCRC } = require("./paymentMoney");
+const { makePaymentPlan, validateSnapshotAmounts, quoteFromSnapshot } = require("./tilopayAmounts");
 
 const PAYABLE_STATUSES = new Set(["pendiente_pago", "revision_manual"]);
 const PAID_STATUSES = new Set(["pagado", "por_preparar", "enviado", "entregado"]);
@@ -18,7 +19,9 @@ function orderOwnerUid(order) {
 }
 
 function isPaidOrder(order) {
-  return ["pagado", "verificado"].includes(order?.paymentStatus) || PAID_STATUSES.has(order?.status);
+  // For payment idempotency a received deposit is already settled. This does
+  // not mean the remaining balance was paid or that fulfillment may ship it.
+  return ["pagado", "verificado", "parcial"].includes(order?.paymentStatus) || PAID_STATUSES.has(order?.status);
 }
 
 function stable(value) {
@@ -56,22 +59,24 @@ function canonicalLine(line) {
   };
 }
 
-function makeSnapshot(order, inputLines, totals) {
+function makeSnapshot(order, inputLines, totals, { version = 2, paymentPlan } = {}) {
+  if (![1, 2].includes(version)) throw new Error("Versión de snapshot inválida.");
   if (!Array.isArray(inputLines) || inputLines.length < 1 || inputLines.length > 50) throw new Error("Items inválidos.");
   const lines = inputLines.map(canonicalLine).sort((a, b) => a.itemId.localeCompare(b.itemId));
   const identities = new Set(lines.map((line) => JSON.stringify([line.productId, line.variantId])));
   if (identities.size !== lines.length) throw new Error("Variantes duplicadas en el pedido.");
   const subtotalMinor = parseMinorCRC(totals.subtotal);
   const shippingMinor = parseMinorCRC(totals.shippingCost, { allowZero: true });
-  const amountMinor = parseMinorCRC(totals.total);
+  const totalMinor = parseMinorCRC(totals.total);
   const sum = lines.reduce((value, line) => value + line.lineTotalMinor, 0);
-  if (!Number.isSafeInteger(sum) || sum !== subtotalMinor || subtotalMinor + shippingMinor !== amountMinor) {
+  if (!Number.isSafeInteger(sum) || sum !== subtotalMinor || subtotalMinor + shippingMinor !== totalMinor) {
     throw new Error("Totales inconsistentes.");
   }
   if (!["normal", "express"].includes(order.shippingType)) throw new Error("Tipo de envío inválido.");
   const address = order.shippingAddress || {};
-  return {
-    version: 1, ownerUid: orderOwnerUid(order), currency: "CRC", amountMinor, subtotalMinor, shippingMinor,
+  const plan = version === 2 ? paymentPlan || makePaymentPlan(lines, totalMinor, shippingMinor) : null;
+  const snapshot = {
+    version, ownerUid: orderOwnerUid(order), currency: "CRC", amountMinor: plan ? plan.amountMinor : totalMinor, subtotalMinor, shippingMinor,
     shippingType: order.shippingType,
     shippingAddress: {
       provincia: cleanText(address.provincia, 100), canton: cleanText(address.canton, 100),
@@ -84,12 +89,15 @@ function makeSnapshot(order, inputLines, totals) {
     },
     lines,
   };
+  if (version === 2) { snapshot.totalMinor = totalMinor; snapshot.paymentPlan = plan; }
+  validateSnapshotAmounts(snapshot);
+  return snapshot;
 }
 
-function currentSnapshot(order, itemDocs) {
+function currentSnapshot(order, itemDocs, originalSnapshot) {
   return makeSnapshot(order, itemDocs.map((doc) => ({ ...doc.data(), itemId: doc.id })), {
     subtotal: order.subtotal, shippingCost: order.shippingCost, total: order.total,
-  });
+  }, originalSnapshot ? { version: originalSnapshot.version, paymentPlan: originalSnapshot.paymentPlan } : undefined);
 }
 
 function canonicalItem(line) {
@@ -118,4 +126,5 @@ function checkoutLockId(snapshot) {
 module.exports = {
   PAYABLE_STATUSES, validDocumentId, orderOwnerUid, isPaidOrder, snapshotFingerprint,
   makeSnapshot, currentSnapshot, canonicalItem, attemptsOf, checkoutLockId,
+  validateSnapshotAmounts, snapshotAmounts: validateSnapshotAmounts, quoteFromSnapshot,
 };

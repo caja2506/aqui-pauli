@@ -4,10 +4,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const tp = require("../lib/tilopayApi");
 const { createTilopayService } = require("../lib/tilopayService");
-const { snapshotFingerprint } = require("../lib/tilopayOrder");
+const { snapshotFingerprint, makeSnapshot, validateSnapshotAmounts, quoteFromSnapshot } = require("../lib/tilopayOrder");
+const { computeBackorder } = require("../lib/backorderDeposit");
 const { createMemoryFirestore } = require("./helpers/memoryFirestore");
 
-class HttpsError extends Error { constructor(code, message) { super(message); this.code = code; } }
+class HttpsError extends Error { constructor(code, message, details) { super(message); this.code = code; this.details = details; } }
 const ORDER = "OrderOne12345678";
 const KEY = "test-key-not-a-credential";
 const MERCHANT = "88803956";
@@ -33,13 +34,13 @@ const seed = (mode = "live") => ({
     supplyType: "bajo_pedido", productName: "Client name" },
 });
 
-function harness({ mode = "live", extra = {}, onPay, onConsult } = {}) {
+function harness({ mode = "live", extra = {}, onPay, onConsult, credentials } = {}) {
   const mem = createMemoryFirestore({ ...seed(mode), ...extra });
-  const calls = { pay: [], consult: [] };
+  const calls = { pay: [], consult: [], credentials: 0, token: 0 };
   let nonce = 0;
   let time = Date.UTC(2026, 9, 29, 10);
   const bank = new Map();
-  const api = { ...tp, getToken: async () => "TOKEN",
+  const api = { ...tp, getToken: async () => { calls.token++; return "TOKEN"; },
     tpFetch: async (path, options) => {
       if (path.endsWith("processPayment")) {
         calls.pay.push(options.body);
@@ -53,7 +54,8 @@ function harness({ mode = "live", extra = {}, onPay, onConsult } = {}) {
     },
   };
   const service = createTilopayService({ db: mem.db, api, HttpsError,
-    credentials: () => ({ apiUser: "u", password: "p", key: KEY }), returnBase: () => "https://aquipauli.com",
+    credentials: () => { calls.credentials++; return credentials ? credentials() : { apiUser: "u", password: "p", key: KEY }; },
+    returnBase: () => "https://aquipauli.com",
     clock: () => time, randomId: () => String(++nonce).padStart(32, "0") });
   const order = (id = ORDER) => mem.get(`orders/${id}`);
   const att = (id = ORDER, key = "a1") => order(id).tilopay.attemptsById[key];
@@ -420,4 +422,229 @@ test("reserva live normaliza reservedStock negativo histórico y conserva stock 
   assert.equal(h.calls.pay.length, 1);
   assert.equal(h.get("products/p1/variants/v1").reservedStock, 2);
   assert.equal(h.get("products/p1/variants/v1").stock, 100);
+});
+
+const quoteRequest = (items = [{ productId: "p1", variantId: "v1", quantity: 2 }]) => ({
+  auth: { uid: "user1" }, data: { items, canton: "Grecia", shippingType: "normal" },
+});
+const backorderFixture = () => ({
+  "products/p1/variants/v1": { price: 32000, stock: 0, reservedStock: 0, supplyType: "bajo_pedido" },
+  [`orders/${ORDER}/items/item_0`]: { productId: "p1", variantId: "v1", quantity: 1, price: 1, supplyType: "stock_propio" },
+});
+
+test("cotización solo lee catálogo: sin rol tester, credenciales, reserva ni creación externa", async () => {
+  const h = harness({ extra: { "config/payments": { tilopay: { enabled: false, mode: "test" } },
+    "users_roles/user1": { role: "cliente" } },
+    credentials: () => { throw new Error("No leer secretos al cotizar"); } });
+  const before = structuredClone(h.store);
+  const quote = await h.service.getQuote(quoteRequest());
+  assert.deepEqual(quote, { currency: "CRC", crcTotal: 90000, crcSubtotal: 90000, crcShipping: 0,
+    crcPayNow: 90000, crcBalanceDue: 0, crcDepositTotal: 0, crcBackorderSubtotal: 0, hasBackorder: false });
+  assert.deepEqual(h.store, before);
+  assert.equal(h.calls.credentials, 0); assert.equal(h.calls.token, 0);
+  assert.equal(h.calls.pay.length, 0); assert.equal(h.calls.consult.length, 0);
+  await assert.rejects(h.service.getQuote({ data: quoteRequest().data }), { code: "unauthenticated" });
+});
+
+test("cotización y cobro coinciden con apartado SINPE/PayPal para stock, Bajo pedido y mixto", async () => {
+  for (const scenario of [
+    { bo: false, mixed: false, total: 32000, payNow: 32000, balance: 0 },
+    { bo: true, mixed: false, total: 32000, payNow: 16000, balance: 16000 },
+    { bo: true, mixed: true, total: 42000, payNow: 26000, balance: 16000 },
+  ]) {
+    const fixture = backorderFixture();
+    fixture["products/p1/variants/v1"].supplyType = scenario.bo ? "bajo_pedido" : "stock_propio";
+    fixture["products/p1/variants/v1"].stock = scenario.bo ? 0 : 20;
+    const items = [{ productId: "p1", variantId: "v1", quantity: 1, price: 1, supplyType: "bajo_pedido" }];
+    if (scenario.mixed) {
+      fixture["products/p2"] = { active: true, name: "Disponible", basePrice: 10000 };
+      fixture["products/p2/variants/v2"] = { price: 10000, stock: 5, reservedStock: 0, supplyType: "stock_propio" };
+      fixture[`orders/${ORDER}/items/item_1`] = { productId: "p2", variantId: "v2", quantity: 1 };
+      items.push({ productId: "p2", variantId: "v2", quantity: 1 });
+    }
+    const h = harness({ extra: fixture });
+    const quote = await h.service.getQuote(quoteRequest(items));
+    const created = await h.service.create({ ...request(), data: { orderId: ORDER, expectedQuote: quote } });
+    assert.equal(quote.crcTotal, scenario.total);
+    assert.equal(quote.crcPayNow, scenario.payNow);
+    assert.equal(quote.crcBalanceDue, scenario.balance);
+    assert.equal(created.crcTotal, scenario.total);
+    assert.equal(created.crcPayNow, scenario.payNow);
+    assert.equal(created.partial, scenario.balance > 0);
+    assert.equal(h.calls.pay[0].amount, `${scenario.payNow}.00`);
+    assert.equal(h.calls.pay[0].capture, "1");
+    assert.equal(h.order().total, scenario.total);
+    assert.equal(h.att().snapshot.version, 2);
+    assert.equal(h.att().snapshot.paymentPlan.version, 1);
+    assert.equal(h.att().snapshot.paymentPlan.depositPercent, 50);
+    const shared = computeBackorder(h.att().snapshot.lines, 0);
+    assert.equal(shared.payNowTotal, quote.crcPayNow);
+    assert.equal(shared.balanceDue, quote.crcBalanceDue);
+    assert.equal(shared.depositTotal, quote.crcDepositTotal);
+  }
+});
+
+test("capture de apartado conserva total/saldo, marca las líneas y no permite otro cobro", async () => {
+  const h = harness({ extra: { ...backorderFixture(),
+    "products/p2": { active: true, name: "Perfume en stock", basePrice: 10000 },
+    "products/p2/variants/v2": { price: 10000, stock: 5, reservedStock: 0, supplyType: "stock_propio" },
+    [`orders/${ORDER}/items/item_1`]: { productId: "p2", variantId: "v2", quantity: 1 },
+  } });
+  await h.service.create(request());
+  assert.equal(h.get("products/p2/variants/v2").reservedStock, 1);
+  assert.equal(h.get("products/p1/variants/v1").reservedStock, 0);
+  h.bank.set(h.att().orderNumber, [h.payment()]);
+  const result = await h.service.confirm(request());
+  assert.equal(result.result, "paid"); assert.equal(result.partial, true);
+  assert.equal(result.crcTotal, 42000); assert.equal(result.crcPayNow, 26000); assert.equal(result.crcBalanceDue, 16000);
+  assert.equal(h.order().paymentStatus, "parcial"); assert.equal(h.order().status, "pendiente_pago");
+  assert.equal(h.order().paymentAmount, 26000); assert.equal(h.order().total, 42000);
+  assert.equal(h.order().remainingTotal, 16000); assert.equal(h.order().depositStatus, "pagado");
+  assert.equal(h.order().remainingStatus, "pendiente"); assert.equal(h.order().backorderDepositPaid, true);
+  const bo = h.get(`orders/${ORDER}/items/item_0`); const stock = h.get(`orders/${ORDER}/items/item_1`);
+  assert.equal(bo.depositAmount, 16000); assert.equal(bo.depositPaid, true); assert.equal(bo.remainingPaid, false);
+  assert.equal(stock.depositAmount, 0); assert.equal(stock.depositPaid, false); assert.equal(stock.remainingPaid, true);
+  const before = h.order().paymentDate;
+  const results = await Promise.all([h.service.create(request()), h.service.confirm(request()), h.service.reconcile(ORDER)]);
+  assert.ok(results.every((value) => value.result === "already_paid" && value.partial === true));
+  assert.equal(h.calls.pay.length, 1); assert.equal(h.order().paymentDate, before);
+  assert.equal(h.order().remainingTotal, 16000);
+  assert.equal(Object.keys(h.store).filter((path) => path.startsWith("tilopayTx/")).length, 1);
+});
+
+test("expectedQuote alterado o incompleto se rechaza antes de token, reserva o cobro", async () => {
+  for (const patch of [{ crcPayNow: 1 }, { crcTotal: 16000 }, { crcBalanceDue: 0 },
+    { hasBackorder: false }, { crcShipping: "0 USD" }, { currency: "USD" }, { crcDepositTotal: undefined }]) {
+    const h = harness({ extra: backorderFixture() });
+    const quote = await h.service.getQuote(quoteRequest([{ productId: "p1", variantId: "v1", quantity: 1 }]));
+    await assert.rejects(h.service.create({ ...request(), data: { orderId: ORDER, expectedQuote: { ...quote, ...patch } } }),
+      { code: "failed-precondition" });
+    assert.equal(h.calls.token, 0); assert.equal(h.calls.credentials, 0); assert.equal(h.calls.pay.length, 0);
+    assert.equal(h.order().tilopay, undefined); assert.equal(h.get(`tilopayReconciliation/${ORDER}`), undefined);
+  }
+});
+
+test("cambio de catálogo durante reserve invalida la cotización y aborta atómicamente", async () => {
+  const h = harness();
+  const quote = await h.service.getQuote(quoteRequest());
+  let changed = false;
+  h.db.beforeCommit = async ({ queryReads }) => {
+    if (!changed && queryReads.has(`orders/${ORDER}/items`)) {
+      changed = true;
+      await h.db.doc("products/p1/variants/v1").update({ price: 46000 });
+    }
+  };
+  await assert.rejects(h.service.create({ ...request(), data: { orderId: ORDER, expectedQuote: quote } }),
+    { code: "failed-precondition", details: { quote: { ...quote, crcTotal: 92000, crcSubtotal: 92000, crcPayNow: 92000 } } });
+  assert.ok(h.stats.retries >= 1); assert.equal(h.calls.pay.length, 0);
+  assert.equal(h.order().tilopay, undefined); assert.equal(h.get("products/p1/variants/v1").reservedStock, 0);
+  assert.equal(h.get(`tilopayReconciliation/${ORDER}`), undefined);
+});
+
+test("resume devuelve el plan fijado aunque después cambie el catálogo", async () => {
+  const h = harness({ extra: backorderFixture() });
+  await h.service.create(request());
+  await h.db.doc("products/p1/variants/v1").update({ price: 100000, supplyType: "stock_propio", stock: 3 });
+  const resumed = await h.service.create({ ...request(), data: { orderId: ORDER, expectedQuote: { crcPayNow: 100000 } } });
+  assert.equal(resumed.reused, true); assert.equal(resumed.crcTotal, 32000);
+  assert.equal(resumed.crcPayNow, 16000); assert.equal(resumed.crcBalanceDue, 16000);
+  assert.equal(h.calls.pay.length, 1);
+});
+
+test("snapshot histórico v1 mantiene cobro completo de Bajo pedido sin recalcular 50%", async () => {
+  const h = harness({ extra: backorderFixture() });
+  await h.service.create(request());
+  const order = h.order();
+  const snapshot = makeSnapshot(order, h.att().snapshot.lines,
+    { total: order.total, subtotal: order.subtotal, shippingCost: order.shippingCost }, { version: 1 });
+  const attempt = { ...h.att(), snapshot, orderVersion: snapshotFingerprint(snapshot),
+    amountMinor: snapshot.amountMinor, amount: snapshot.amountMinor / 100 };
+  await h.db.doc(`orders/${ORDER}`).update({ tilopay: { ...order.tilopay, attemptsById: { a1: attempt } } });
+  const resumed = await h.service.create(request());
+  assert.equal(resumed.crcTotal, 32000); assert.equal(resumed.crcPayNow, 32000);
+  assert.equal(resumed.crcBalanceDue, 0); assert.equal(resumed.partial, false);
+  h.bank.set(attempt.orderNumber, [h.payment()]);
+  const captured = await h.service.confirm(request());
+  assert.equal(captured.result, "paid"); assert.equal(captured.partial, false);
+  assert.equal(h.order().paymentStatus, "pagado"); assert.equal(h.order().paymentAmount, 32000);
+  assert.equal(h.order().remainingTotal, 0); assert.equal(h.att().snapshot.version, 1);
+  assert.equal(h.att().snapshot.paymentPlan, undefined);
+});
+
+test("plan v2 alterado no acredita aunque los totales falsos tengan una nueva huella", async () => {
+  const h = harness({ extra: backorderFixture() });
+  await h.service.create(request());
+  const a = h.att();
+  a.snapshot.paymentPlan.remainingMinor = 0;
+  a.snapshot.paymentPlan.depositMinor = 3200000;
+  a.snapshot.paymentPlan.amountMinor = 3200000;
+  a.snapshot.amountMinor = a.amountMinor = 3200000; a.amount = 32000;
+  a.orderVersion = snapshotFingerprint(a.snapshot);
+  await h.db.doc(`orders/${ORDER}`).update({ "tilopay.attemptsById.a1": a });
+  h.bank.set(a.orderNumber, [h.payment()]);
+  assert.equal((await h.service.confirm(request())).result, "review");
+  assert.notEqual(h.order().paymentStatus, "pagado"); assert.notEqual(h.order().paymentStatus, "parcial");
+});
+
+test("la cola LIVE y reconcile concilian captura sin retorno del navegador", async () => {
+  const h = harness({ extra: backorderFixture() });
+  await h.service.create(request());
+  const queue = h.get(`tilopayReconciliation/${ORDER}`);
+  assert.equal(queue.orderId, ORDER); assert.equal(queue.nextCheckAt, h.att().createdAt);
+  // The caller never invokes confirm. Trusted reconciliation loads the owner
+  // from the persisted order and remains valid while new checkouts are disabled.
+  await h.db.doc("config/payments").update({ tilopay: { enabled: false, mode: "live" } });
+  h.bank.set(h.att().orderNumber, [h.payment()]);
+  const result = await h.service.reconcile(ORDER);
+  assert.equal(result.result, "paid"); assert.equal(result.partial, true);
+  assert.equal(h.order().paymentStatus, "parcial"); assert.equal(h.calls.pay.length, 1);
+  assert.equal((await h.service.reconcile(ORDER)).result, "already_paid");
+});
+
+test("reconcile ignora TEST o pedidos sin intento sin leer credenciales", async () => {
+  const empty = harness({ credentials: () => { throw new Error("No debe pedir credenciales"); } });
+  assert.equal((await empty.service.reconcile(ORDER)).reason, "not_live");
+  assert.equal((await empty.service.reconcile("MissingOrder")).reason, "not_live");
+  assert.equal(empty.calls.credentials, 0);
+  const h = harness({ mode: "test", extra: backorderFixture() });
+  await h.service.create(request());
+  assert.equal(h.get(`tilopayReconciliation/${ORDER}`), undefined);
+  const before = h.calls.credentials;
+  h.bank.set(h.att().orderNumber, [h.payment()]);
+  assert.equal((await h.service.reconcile(ORDER)).result, "skipped");
+  assert.equal(h.calls.credentials, before); assert.equal(h.calls.consult.length, 0);
+  assert.notEqual(h.order().paymentStatus, "parcial");
+});
+
+test("reconcile con Authorize conserva saldo pendiente y nunca captura automáticamente", async () => {
+  const h = harness({ extra: backorderFixture() }); await h.service.create(request());
+  h.bank.set(h.att().orderNumber, [h.payment(ORDER, { capture: "Authorize" })]);
+  const result = await h.service.reconcile(ORDER);
+  assert.equal(result.result, "review"); assert.equal(result.code, "pending_capture");
+  assert.equal(h.order().depositStatus, "pendiente"); assert.notEqual(h.order().paymentStatus, "parcial");
+  assert.equal(h.calls.pay.length, 1); assert.equal(h.calls.consult.length, 1);
+});
+
+test("deadline de conciliación no lanza consult tardíos ni acredita intentos omitidos", async () => {
+  const h = harness(); await h.service.create(request());
+  h.bank.set(h.att().orderNumber, [h.payment()]);
+  const result = await h.service.reconcile(ORDER, { deadline: Date.UTC(2026, 9, 29, 10) + 10000 });
+  assert.equal(result.result, "review"); assert.equal(h.calls.consult.length, 0);
+  assert.notEqual(h.order().paymentStatus, "pagado");
+  assert.equal((await h.service.reconcile(ORDER)).result, "paid");
+});
+
+test("reconcile no aplica un resultado si la historia cambia de LIVE a TEST durante consult", async () => {
+  let row;
+  const h = harness({ onConsult: async (_body, mem) => {
+    const order = mem.get(`orders/${ORDER}`);
+    await mem.db.doc(`orders/${ORDER}`).update({ tilopay: { ...order.tilopay, mode: "test",
+      attemptsById: { a1: { ...order.tilopay.attemptsById.a1, mode: "test" } } } });
+    return response({ type: "200", response: [row] });
+  } });
+  await h.service.create(request()); row = h.payment();
+  const result = await h.service.reconcile(ORDER);
+  assert.equal(result.result, "skipped"); assert.equal(result.reason, "not_live");
+  assert.notEqual(h.order().paymentStatus, "pagado");
+  assert.equal(Object.keys(h.store).filter((path) => path.startsWith("tilopayTx/")).length, 0);
 });
