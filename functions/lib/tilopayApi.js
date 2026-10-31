@@ -15,7 +15,7 @@ let cachedToken = null;
 
 async function tpFetch(path, { token, body, fetchFn = fetch } = {}) {
   if (typeof path !== "string" || !/^\/api\/v1\/[A-Za-z]+$/.test(path)) throw new Error("Ruta Tilopay inválida.");
-  const headers = { "Content-Type": "application/json" };
+  const headers = { Accept: "application/json", "Content-Type": "application/json" };
   if (token) headers.Authorization = `bearer ${token}`;
   const res = await fetchFn(`${TILOPAY_BASE}${path}`, {
     method: "POST", headers, body: JSON.stringify(body || {}), signal: AbortSignal.timeout(20000),
@@ -100,8 +100,8 @@ function buildProcessPayload({ key, redirect, orderId, order, orderNumber, amoun
     Country: "CR", Telephone: String(order.customerPhone || "").replace(/\D/g, "").slice(-8) || "00000000",
   };
   const payload = {
-    redirect, key, amount, currency: "CRC", orderNumber, capture: "1", subscription: "0", platform: "aquipauli",
-    returnData: Buffer.from(orderId).toString("base64"), hashVersion: "V2", token_version: "v2",
+    redirect, key, amount, currency: "CRC", orderNumber, capture: "1", subscription: "0", platform: "api",
+    returnData: Buffer.from(orderId).toString("base64"), token_version: "v2",
     billToFirstName: first, billToLastName: last, billToEmail: clean(order.customerEmail, 120),
     shipToFirstName: first, shipToLastName: last,
   };
