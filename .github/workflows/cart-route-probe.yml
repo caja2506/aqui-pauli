@@ -1,0 +1,25 @@
+name: Check published cart route
+on:
+  push:
+    branches: [chatgpt/cart-route-check]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read public route status and cache metadata
+        run: |
+          node --input-type=module <<'NODE'
+          for (const origin of ['https://aquipauli.com', 'https://aqui-pauli.web.app']) {
+            for (const path of ['/carrito', '/deployment.json']) {
+              const r = await fetch(origin + path + '?verify=6247e3b98b91dbe35a556f2ec798746a67ec2f19', {
+                redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(15000)
+              });
+              const headers = Object.fromEntries(['location', 'cache-control', 'age', 'server', 'x-cache', 'x-served-by'].map(k => [k, r.headers.get(k)]));
+              console.log(JSON.stringify({origin, path, status:r.status, headers}));
+              if (path === '/deployment.json' && r.ok) console.log(await r.text());
+            }
+          }
+          NODE
