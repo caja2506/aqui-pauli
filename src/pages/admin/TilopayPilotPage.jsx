@@ -33,12 +33,12 @@ export default function TilopayPilotPage() {
     if (busy) return;
     setBusy(true); setError(''); setFormCheck(null);
     try {
-      const result = await tilopayCreatePayment({ checkClosedPilotForm: true });
-      setFormCheck(isValidTilopayPaymentUrl(result.url)
-        ? { url: result.url, message: 'Tilopay generó el formulario de ₡1 000.' }
-        : { message: result.formReason === 'MERCHANT_TRANSACTION_BLOCK'
-          ? 'Tilopay volvió a responder que el comercio tiene un bloqueo (402).'
-          : result.message || 'Tilopay no devolvió un formulario.' });
+      const result = await tilopayCreatePayment({ checkClosedPilotForm: true, shortPilotReference: true });
+      const url = isValidTilopayPaymentUrl(result.url) ? result.url : null;
+      const message = url ? 'Tilopay generó el formulario de ₡1 000.'
+        : result.formReason === 'MERCHANT_TRANSACTION_BLOCK' ? 'Tilopay volvió a responder que el comercio tiene un bloqueo (402).'
+          : result.message || 'Tilopay no devolvió un formulario.';
+      setFormCheck({ url, message, reference: result.providerReference });
     } catch (e) {
       setError(['functions/permission-denied','functions/failed-precondition','functions/unauthenticated'].includes(e.code)
         ? e.message : 'No recibimos el resultado. Podés volver a consultarlo en esta misma pantalla.');
@@ -106,12 +106,13 @@ export default function TilopayPilotPage() {
         }}>{copied ? 'Enlace copiado' : 'Copiar enlace privado'}</button></> : <p>El enlace se entrega desde la pestaña que lo preparó y tiene una vigencia de dos horas.</p>}
       {button('Cerrar el acceso a nuevos formularios','close')}
     </> : stage === 'closed' ? <>
-      <p>La tienda está cerrada para nuevas pruebas. Podés comprobar el formulario del mismo pedido de ₡1 000. No necesitás ingresar la tarjeta.</p>
+      <p>Esta prueba usa una referencia de ocho dígitos para el mismo pedido de ₡1 000. No necesitás ingresar la tarjeta.</p>
       <button type="button" disabled={busy} onClick={checkForm}
         className="block rounded-xl bg-slate-900 px-5 py-3 font-bold text-white disabled:opacity-50">
-        {busy ? 'Consultando Tilopay…' : formCheck ? 'Consultar el resultado' : 'Comprobar formulario de Tilopay'}
+        {busy ? 'Consultando Tilopay…' : formCheck ? 'Consultar el resultado' : 'Probar con referencia corta'}
       </button>
       {formCheck && <p role="status">{formCheck.message}</p>}
+      {formCheck?.reference && <p>Referencia enviada a Tilopay: <strong>{formCheck.reference}</strong></p>}
       {formCheck?.url && <a className="block font-bold underline" href={formCheck.url} target="_blank" rel="noopener noreferrer">
         Abrir formulario de Tilopay
       </a>}

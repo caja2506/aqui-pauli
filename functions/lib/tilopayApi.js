@@ -272,6 +272,6 @@ function interpretConsult(data, {
 module.exports = {
   TILOPAY_BASE, PROVINCE_ISO, tpFetch, getToken, clearTokenCache, formatAmountCRC, splitName,
   tilopayReference, orderVersion, classifyEnvironment, normalizeTransactionId, matchesOrderNumber,
-  looksNotFound, isValidPaymentUrl, processPaymentOutcome, buildProcessPayload, interpretConsult,
+  explicitMissingOrder, looksNotFound, isValidPaymentUrl, processPaymentOutcome, buildProcessPayload, interpretConsult,
   parseMinorCRC, minorToCRC, formatMinorCRC,
 };

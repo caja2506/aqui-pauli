@@ -978,6 +978,72 @@ test('el segundo 402 se conserva al recargar y no vuelve a generarse otra solici
   assert.equal(h.att().formGeneration, 1);
 });
 
+const checkShortForm = () => ({ auth: { uid: 'user1' }, data: { checkClosedPilotForm: true, shortPilotReference: true } });
+
+test('la prueba de ocho dígitos solo cambia orderNumber y reserva una vez el mismo pedido', async () => {
+  const entered = deferred(), reply = deferred();
+  let sent = 0;
+  let movement;
+  const h = await closedPilot({ onConsult: body => movement?.orderNumber === body.orderNumber
+    ? response({ type: '200', message: '', response: [movement] }) : missingForm(), onPay: () => {
+    if (++sent <= 2) return blockedForm();
+    entered.resolve(); return reply.promise;
+  } });
+  await h.service.create(checkClosedForm());
+  const original = h.att().orderNumber;
+  const send = h.service.create(checkShortForm());
+  await entered.promise;
+  const during = await h.service.create(checkShortForm());
+  assert.match(during.message, /ya se solicitó/);
+  const number = during.providerReference;
+  assert.match(number, /^[1-9]\d{7}$/);
+  assert.deepEqual(h.calls.pay[2], { ...h.calls.pay[1], orderNumber: number });
+  assert.deepEqual(h.calls.consult.slice(-2).map(q => q.orderNumber), [original, number]);
+  reply.resolve(response({ type: '100', url: URL }));
+  assert.equal((await send).url, URL);
+  assert.equal((await h.service.create(checkShortForm())).providerReference, number);
+  assert.equal(h.get(`tilopayReferences/${snapshotFingerprint({number: original})}`).attemptKey, 'a1');
+  assert.equal(h.get(`tilopayReferences/${snapshotFingerprint({number})}`).attemptKey, 'a2');
+  assert.equal(h.get('products/zz-tilopay-live-check/variants/v1').reservedStock, 1);
+  assert.equal(h.order().tilopay.attemptCount, 2);
+  assert.equal(h.calls.pay.length, 3);
+  movement = h.payment(ORDER, { orderNumber: number });
+  const last = await h.service.confirm(request());
+  assert.equal(last.result, 'paid');
+  assert.equal(h.order().tilopay.paidAttemptKey, 'a2');
+  assert.deepEqual(h.calls.consult.slice(-2).map(q => q.orderNumber).sort(), [original, number].sort());
+});
+
+test('el 402 de la referencia corta se muestra una sola vez y no sobrescribe la referencia anterior', async () => {
+  const h = await closedPilot({ onConsult: missingForm, onPay: blockedForm });
+  await h.service.create(checkClosedForm());
+  const result = await h.service.create(checkShortForm());
+  for (const res of [result, await h.service.create(checkShortForm())]) {
+    assert.equal(res.formReason, 'MERCHANT_TRANSACTION_BLOCK');
+    assert.equal(res.providerReference, result.providerReference);
+  }
+  assert.equal(h.att().creationOutcome.http, 402);
+  assert.equal(h.att(ORDER, 'a2').creationOutcome.http, 402);
+  assert.equal(h.calls.pay.length, 3);
+});
+
+test('no se registra la referencia corta con una URL previa, ambigüedad o una referencia ya utilizada', async () => {
+  for (const scenario of ['sin comprobación anterior', 'URL', 'ausencia ambigua', 'referencia ocupada']) {
+    let stage = 'initial'; let submissions = 0;
+    const h = await closedPilot({ onPay: () => {
+      submissions++;
+      return scenario === 'URL' && submissions === 2 ? response({ type: '100', url: URL }) : blockedForm();
+    }, onConsult: body => stage === 'short' &&
+      (scenario === 'ausencia ambigua' || (scenario === 'referencia ocupada' && /^\d{8}$/.test(body.orderNumber)))
+        ? response({ type: '200', message: '', response: [] }) : missingForm() });
+    if (scenario !== 'sin comprobación anterior') await h.service.create(checkClosedForm());
+    stage = 'short';
+    await assert.rejects(h.service.create(checkShortForm()), { code: 'failed-precondition' });
+    assert.equal(h.order().tilopay.attemptCount, 1);
+    assert.equal(h.calls.pay.length, scenario === 'sin comprobación anterior' ? 1 : 2);
+  }
+});
+
 test('la comprobación cerrada rechaza otro usuario, un comercio cambiado y una consulta ambigua', async () => {
   for (const scenario of ['otro admin', 'cliente', 'consulta', 'integración', 'abierto', 'contenido', 'formulario previo']) {
     const h = await closedPilot({ onConsult: scenario === 'consulta' ? () => response({ type: '200', response: [] }) : missingForm,

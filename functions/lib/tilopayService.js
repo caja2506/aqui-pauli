@@ -180,7 +180,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       message: "Transacción de prueba verificada. Este pedido no habilita una entrega real." };
     // An unavailable hosted form is a creation problem. Never present it as a
     // card authorization or grant a retry from an inconclusive consult.
-    if (list.length === 1 && attempt.status === "pending_reconciliation" && attempt.creationCheckedAt
+    if ((list.length === 1 || attempt?.shortPilotReference === true) && attempt.status === "pending_reconciliation" && attempt.creationCheckedAt
       && !attempt.url && !attempt.idTilopay && !attempt.reconciliationNeedsReview) {
       const reason = attempt.creationOutcome?.reason || "FORM_UNCONFIRMED";
       const canRequestTestForm = order.tilopay.mode === "test" && attempt.mode === "test" && attempt.schemaVersion === 2
@@ -733,10 +733,12 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     return issueForm(ctx, c, token, reservation);
   }
 
-  // One explicit check for the original admin buyer. The public checkout stays closed.
+  // Only the original admin buyer can run the closed pilot. Each variant is issued once.
   async function checkClosedPilotForm(request) {
     const uid = request.auth?.uid;
     if (!uid) fail("unauthenticated", "Iniciá sesión con la cuenta administradora que hizo la prueba.");
+    const shortRequested = request.data.shortPilotReference === true;
+    const shortNumber = shortRequested ? String(crypto.randomInt(10000000, 100000000)) : null;
     async function inspect(t, evidence) {
       const role = (await t.get(db.collection("users_roles").doc(uid))).data()?.role;
       if (role !== "admin") fail("permission-denied", "Se necesita la cuenta administradora que hizo la prueba.");
@@ -753,9 +755,11 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       assertOwner(order, uid);
       const ctx = { id: gate.orderId, ref, uid, order };
       const attempts = attemptsOf(order);
-      const a = attempts[0];
+      const a = attempts.at(-1);
+      const hasShort = attempts.length === 2 && a.shortPilotReference === true && a.key === "a2";
       const line = a?.snapshot?.lines?.[0];
-      if (attempts.length !== 1 || order.paymentMethod !== "tilopay" || order.tilopay.mode !== "live"
+      if ((!hasShort && attempts.length !== 1) || order.tilopay?.currentAttempt !== a?.key
+          || order.paymentMethod !== "tilopay" || order.tilopay.mode !== "live"
           || a.mode !== "live" || a.merchantId !== settings.merchantId || a.orderPrefix !== settings.orderPrefix
           || a.amountMinor !== 100000 || a.snapshot?.totalMinor !== 100000 || a.snapshot.currency !== "CRC"
           || a.snapshot.lines?.length !== 1 || line?.productId !== gate.productId || line.variantId !== gate.variantId || line.quantity !== 1) {
@@ -763,17 +767,21 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       }
       const current = summarize(order, ctx.id);
       if (isPaidOrder(order) || order.paymentStatus === "test_paid" || !PAYABLE_STATUSES.has(order.status)
-          || a.financialEvidence || a.idTilopay || a.lastObservedTransactionId || a.reconciliationNeedsReview
+          || attempts.some(entry => entry.financialEvidence || entry.idTilopay || entry.lastObservedTransactionId || entry.reconciliationNeedsReview)
           || order.tilopay.duplicatePaymentNeedsReview || order.tilopay.legacyNeedsReview || order.tilopay.reconciliationNeedsReview) {
         return { result: { orderId: ctx.id, message: "El pedido tiene un movimiento o está en revisión. No se solicitó otro formulario." } };
       }
-      if (a.closedPilotCheckAt) {
-        if (a.formInFlight) return { result: { orderId: ctx.id, message: "La comprobación ya se solicitó. Consultá el resultado en un momento." } };
+      const reference = hasShort ? { providerReference: a.orderNumber } : {};
+      if (a.closedPilotCheckAt && (!shortRequested || hasShort)) {
+        if (a.formInFlight) return { result: { orderId: ctx.id, ...reference, message: "La comprobación ya se solicitó. Consultá el resultado en un momento." } };
         if (a.creationOutcome?.reason === "FORM_READY" && a.status === "open" && api.isValidPaymentUrl(a.url)
-            && snapshotMatches(order, (await t.get(itemsQuery(ref))).docs, a)) return { result: { orderId: ctx.id, url: a.url } };
-        return { result: current };
+            && snapshotMatches(order, (await t.get(itemsQuery(ref))).docs, a)) return { result: { orderId: ctx.id, url: a.url, ...reference } };
+        return { result: { ...current, ...reference } };
       }
-      if (a.schemaVersion !== 2 || a.status !== "pending_reconciliation" || a.formGeneration || a.formInFlight || a.url
+      if (shortRequested && (!a.closedPilotCheckAt || a.previousCreationOutcome?.reason !== "MERCHANT_TRANSACTION_BLOCK")) {
+        fail("failed-precondition", "La prueba corta requiere que Tilopay haya bloqueado las dos solicitudes anteriores.");
+      }
+      if (a.schemaVersion !== 2 || a.status !== "pending_reconciliation" || (a.formGeneration || 0) !== (shortRequested ? 1 : 0) || a.formInFlight || a.url
           || a.creationOutcome?.reason !== "MERCHANT_TRANSACTION_BLOCK" || a.creationOutcome.http !== 402
           || a.creationOutcome.type !== "402" || order.inventoryReservation?.state !== "reserved") {
         fail("failed-precondition", "Solo se puede comprobar el pedido original que Tilopay bloqueó antes de emitir un formulario.");
@@ -787,9 +795,24 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
           || identity.orderNumber !== a.orderNumber || identity.merchantId !== a.merchantId) {
         fail("failed-precondition", "Cambió la referencia, la reserva o el contenido del pedido.");
       }
-      if (!evidence) return { ctx, c };
+      if (!evidence) return { ctx, c, a };
       if (evidence.original !== a.orderNumber || evidence.contextHash !== attemptContext(a)) {
         fail("failed-precondition", "La referencia cambió durante la consulta.");
+      }
+      if (shortRequested) {
+        const shortRef = refDoc(shortNumber);
+        if ((await t.get(shortRef)).exists) fail("aborted", "La referencia corta ya está reservada. Volvé a probar.");
+        const createdAt = now();
+        const attempt = { key: "a2", n: 2, schemaVersion: 2, orderNumber: shortNumber,
+          amount: a.amount, amountMinor: a.amountMinor, currency: a.currency, mode: a.mode, merchantId: a.merchantId,
+          orderPrefix: a.orderPrefix, keyFingerprint: a.keyFingerprint, snapshot: a.snapshot, orderVersion: a.orderVersion,
+          createdAt, requestSentAt: createdAt, createdBy: uid, shortPilotReference: true, closedPilotCheckAt: createdAt,
+          formInFlight: true, status: "reserved" };
+        t.set(shortRef, { ...identity, attemptKey: attempt.key, orderNumber: shortNumber, createdAt });
+        t.update(db.collection("tilopayCheckoutLocks").doc(order.tilopay.checkoutLockId), { attemptKey: attempt.key, updatedAt: createdAt });
+        t.update(ref, { tilopay: { ...order.tilopay, currentAttempt: attempt.key, attemptCount: 2, status: "reserved",
+          attemptsById: { [a.key]: { ...a, status: "form_rejected", providerOrderAbsent: true }, [attempt.key]: attempt } }, updatedAt: createdAt });
+        return { ctx, c, order, attempt };
       }
       const attempt = { ...a, closedPilotCheckAt: now(), formGeneration: 1, formInFlight: true,
         previousCreationOutcome: a.creationOutcome, providerOrderAbsent: false, status: "reserved" };
@@ -800,12 +823,25 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     if (first.result) return first.result;
     const token = await tokenFor(first.c);
     const observations = await readObservations(first.ctx, await readConfig(), first.c, token, { liveOnly: true });
+    if (shortRequested && observations?.length === 2) {
+      const cached = await db.runTransaction(t => inspect(t, null));
+      if (cached.result) return cached.result;
+    }
     const evidence = observations?.[0];
     if (observations?.length !== 1 || evidence.r.state !== "not_found" || !evidence.r.explicitMissing) {
       fail("failed-precondition", "Tilopay no confirmó que la transacción esté ausente. No se solicitó otro formulario.");
     }
+    if (shortRequested) {
+      const lookup = await api.tpFetch("/api/v1/consult", { token,
+        body: { key: first.c.key, orderNumber: shortNumber, merchantId: first.a.merchantId } });
+      if (!lookup.ok || lookup.jsonValid === false || !defaultApi.explicitMissingOrder(lookup.data)) {
+        fail("failed-precondition", "Tilopay no confirmó que la referencia corta esté libre. No se solicitó el formulario.");
+      }
+    }
     const claim = await db.runTransaction(t => inspect(t, evidence));
-    return claim.result || issueForm(claim.ctx, claim.c, token, claim);
+    if (claim.result) return claim.result;
+    const issued = await issueForm(claim.ctx, claim.c, token, claim);
+    return shortRequested ? { ...issued, providerReference: shortNumber } : issued;
   }
 
   // An explicit operator action for sandbox only. Preserve the original
