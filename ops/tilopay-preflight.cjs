@@ -1,37 +1,29 @@
 'use strict';
-// Read-only activation preflight. Never writes config or creates/captures a payment.
+// Read only: compares secret-version metadata with deployed bindings. Never reads secret payloads.
 const requireFunctions = require('node:module').createRequire(require('node:path').resolve(__dirname, '../functions/package.json'));
-const { cert, initializeApp } = requireFunctions('firebase-admin/app');
-const { getFirestore } = requireFunctions('firebase-admin/firestore');
-const { getToken, tpFetch } = require('../functions/lib/tilopayApi');
+const { cert } = requireFunctions('firebase-admin/app');
 const PROJECT = 'aqui-pauli';
-const allowedSecrets = ['TILOPAY_API_USER', 'TILOPAY_API_PASSWORD', 'TILOPAY_KEY'];
-let phase = 'project-credential';
+const names = ['TILOPAY_API_USER','TILOPAY_API_PASSWORD','TILOPAY_KEY'];
 async function main() {
   const account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
   delete process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (account.type !== 'service_account' || account.project_id !== PROJECT) throw new Error('Wrong or missing project credential');
-  console.log('PREFLIGHT_DEPLOY_IDENTITY', account.client_email);
-  const credential = cert(account);
-  const app = initializeApp({credential, projectId:PROJECT});
-  const db = getFirestore(app);
-  const access = await credential.getAccessToken();
-  async function google(url) {
-    const response = await fetch(url, {headers:{Authorization:'Bearer '+access.access_token}, redirect:'error', signal:AbortSignal.timeout(20000)});
-    if (!response.ok) throw new Error('Google preflight request failed: HTTP '+response.status);
-    return response.json();
+  if (account.type !== 'service_account' || account.project_id !== PROJECT) throw new Error('Wrong project');
+  const access = await cert(account).getAccessToken();
+  async function read(url) {
+    const r = await fetch(url,{headers:{Authorization:'Bearer '+access.access_token},redirect:'error',signal:AbortSignal.timeout(20000)});
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
   }
-  phase = 'read-deployed-function';
-  for (const name of allowedSecrets) {
-    const response = await fetch('https://secretmanager.googleapis.com/v1/projects/'+PROJECT+'/secrets/'+name+':testIamPermissions', {
-      method:'POST',headers:{Authorization:'Bearer '+access.access_token,'Content-Type':'application/json'},
-      body:JSON.stringify({permissions:['secretmanager.secrets.get','secretmanager.secrets.getIamPolicy','secretmanager.secrets.setIamPolicy','secretmanager.versions.access']}),
-      redirect:'error',signal:AbortSignal.timeout(20000)
-    });
-    const result = await response.json();
-    console.log('PREFLIGHT_SECRET_PERMISSION',JSON.stringify({name,http:response.status,permissions:result.permissions||[]}));
+  const latest = {};
+  for (const name of names) {
+    const s = await read('https://secretmanager.googleapis.com/v1/projects/'+PROJECT+'/secrets/'+name+'/versions/latest');
+    latest[name] = s.name.split('/').pop();
+    console.log('PREFLIGHT_SECRET_METADATA',JSON.stringify({name,version:latest[name],state:s.state,created:s.createTime}));
   }
-  console.log('PREFLIGHT_PERMISSION_CHECK_NO_WRITES');
-
+  for (const name of ['tilopayCreatePayment','tilopayConfirm','tilopayReconcilePayments']) {
+    const fn = await read('https://cloudfunctions.googleapis.com/v2/projects/'+PROJECT+'/locations/us-central1/functions/'+name);
+    console.log('PREFLIGHT_FUNCTION_METADATA',JSON.stringify({name,state:fn.state,updated:fn.updateTime,bindings:(fn.serviceConfig.secretEnvironmentVariables||[]).filter(b=>names.includes(b.key)).map(b=>({name:b.key,version:b.version,latest:latest[b.key],current:b.version===latest[b.key]||b.version==='latest'}))}));
+  }
+  console.log('PREFLIGHT_COMPLETE_METADATA_ONLY');
 }
-main().catch((error) => {console.error('PREFLIGHT_FAILED_NO_WRITES',phase, /^Google preflight request failed: HTTP [0-9]+$/.test(error.message) ? error.message : error.code || error.name);process.exitCode=1;});
+main().catch(e=>{console.error('PREFLIGHT_FAILED_METADATA_ONLY',/^HTTP [0-9]+$/.test(e.message)?e.message:e.name);process.exitCode=1;});
