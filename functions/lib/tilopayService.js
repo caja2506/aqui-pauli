@@ -47,9 +47,22 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     return order?.tilopay?.mode === "live" && attempts.length > 0 && attempts.every((a) => a.mode === "live");
   };
 
-  async function readConfig() {
+  const pilotRef = () => db.collection("_ops").doc("tilopay-live-pilot");
+  const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
+
+  function pilotPermits(pilot, request) {
+    const { pilotToken, pilotSession } = request?.data || {};
+    if (!request?.auth?.uid || pilot?.active !== true || !Number.isSafeInteger(pilot.expiresAt)
+      || pilot.expiresAt <= clock() || typeof pilotToken !== "string" || !/^[a-f0-9]{64}$/.test(pilotToken)
+      || typeof pilotSession !== "string" || !/^[a-f0-9]{32}$/.test(pilotSession)
+      || hash(pilotToken) !== pilot.tokenHash) return false;
+    return !pilot.ownerUid || (pilot.ownerUid === request.auth.uid && pilot.sessionHash === hash(pilotSession));
+  }
+
+  async function readConfig(transaction) {
     try {
-      const doc = await db.collection("config").doc("payments").get();
+      const ref = db.collection("config").doc("payments");
+      const doc = transaction ? await transaction.get(ref) : await ref.get();
       const c = doc.exists ? doc.data().tilopay || {} : {};
       const validMode = c.mode === "test" || c.mode === "live";
       const merchantId = typeof c.merchantId === "string" ? c.merchantId.trim() : "";
@@ -58,7 +71,9 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       // Live requires both identities, and every attempt keeps its original mode.
       const identityValid = c.mode === "test" || (/^[A-Za-z0-9_-]{1,100}$/.test(merchantId)
         && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(orderPrefix));
-      return { enabled: c.enabled === true && validMode && identityValid,
+      const pilot = c.access === "private-pilot";
+      const validAccess = c.access === undefined || (pilot && c.mode === "live");
+      return { enabled: c.enabled === true && validMode && identityValid && validAccess, pilot,
         mode: validMode ? c.mode : "test", merchantId, orderPrefix };
     } catch {
       return { enabled: false, mode: "test", merchantId: "", orderPrefix: "" };
@@ -195,9 +210,20 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     } catch { return false; }
   }
 
-  async function reserve(ctx, cfg, c, expectedQuote) {
+  async function reserve(ctx, cfg, c, expectedQuote, request) {
     const tokenId = randomId(); // Generated once, outside a retryable transaction.
     return db.runTransaction(async (t) => {
+      const fresh = await readConfig(t);
+      if (!fresh.enabled || fresh.mode !== cfg.mode || fresh.pilot !== cfg.pilot
+        || fresh.merchantId !== cfg.merchantId || fresh.orderPrefix !== cfg.orderPrefix) {
+        fail("failed-precondition", "La configuración de pagos cambió. Recargá el checkout.");
+      }
+      let pilot;
+      if (cfg.pilot) {
+        pilot = (await t.get(pilotRef())).data();
+        if (!pilotPermits(pilot, request) || !pilot.ownerUid || (pilot.orderId && pilot.orderId !== ctx.id))
+          fail("permission-denied", "Esta prueba admite un único pedido de la sesión invitada.");
+      }
       const snap = await t.get(ctx.ref);
       if (!snap.exists) fail("not-found", "Pedido no encontrado.");
       const order = snap.data();
@@ -213,6 +239,12 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       try { snapshot = await priceSnapshot(order, input, t); }
       catch (error) { fail("failed-precondition", error.message); }
       assertExpectedQuote(expectedQuote, snapshot);
+      if (pilot) {
+        const [line] = snapshot.lines;
+        if (snapshot.lines.length !== 1 || line.productId !== pilot.productId || line.variantId !== pilot.variantId
+          || line.quantity !== 1 || snapshot.currency !== "CRC" || snapshot.totalMinor !== 100000
+          || snapshot.amountMinor !== 100000) fail("failed-precondition", "La prueba requiere únicamente una unidad del artículo de ₡1 000.");
+      }
       const lockId = checkoutLockId(snapshot, cfg.mode);
       const lockRef = db.collection("tilopayCheckoutLocks").doc(lockId);
       const lockSnap = await t.get(lockRef);
@@ -265,6 +297,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       };
       // No network operations inside this transaction. All reads precede these writes.
       for (const write of inventoryWrites) t.update(write.ref, { reservedStock: write.reservedStock });
+      if (pilot) t.update(pilotRef(), { orderId: ctx.id, reservedAt: createdAt });
       for (const item of items) t.set(ctx.ref.collection("items").doc(item.itemId), item);
       t.set(reference, { version: 1, orderId: ctx.id, attemptKey: "a1", ownerUid: ctx.uid,
         orderNumber: number, mode: cfg.mode, merchantId: cfg.merchantId, createdAt });
@@ -662,6 +695,13 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     const ctx = await owned(request);
     const cfg = await readConfig();
     if (!cfg.enabled) fail("failed-precondition", "Tilopay está deshabilitado o falta configurar el comercio.");
+    if (cfg.pilot) {
+      const pilot = (await pilotRef().get()).data();
+      if (!pilotPermits(pilot, request) || !pilot.ownerUid || (pilot.orderId && pilot.orderId !== ctx.id)
+        || (ctx.order.tilopay && (pilot.orderId !== ctx.id || ctx.order.tilopay.mode !== "live"))) {
+        fail("permission-denied", "Este pago está limitado al pedido de la sesión invitada.");
+      }
+    }
     if (cfg.mode === "test") await requireTester(ctx.uid);
     if (request.data?.retryMissingTestFormGeneration !== undefined) {
       return requestMissingTestForm(ctx, cfg, request.data.retryMissingTestFormGeneration);
@@ -678,7 +718,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     }
     const c = configuredCredentials();
     const token = await tokenFor(c);
-    const reservation = await reserve(ctx, cfg, c, request.data?.expectedQuote);
+    const reservation = await reserve(ctx, cfg, c, request.data?.expectedQuote, request);
     if (reservation.blockedOrderId) return { result: "pending", retry: false, orderId: reservation.blockedOrderId,
       message: "Ya hay un pago pendiente para estos productos. Verifica el pedido original." };
     if (reservation.existing) return resume(request, cfg);
@@ -763,7 +803,19 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
   }
 
   return {
-    getConfig: async () => { const { enabled, mode } = await readConfig(); return { enabled, mode }; },
+    getConfig: async (request) => {
+      const cfg = await readConfig();
+      if (!cfg.enabled || !cfg.pilot) return { enabled: cfg.enabled, mode: cfg.mode };
+      const enabled = await db.runTransaction(async t => {
+        const ref = pilotRef();
+        const pilot = (await t.get(ref)).data();
+        if (!pilotPermits(pilot, request)) return false;
+        if (!pilot.ownerUid) t.update(ref, { ownerUid: request.auth.uid,
+          sessionHash: hash(request.data.pilotSession), claimedAt: now() });
+        return true;
+      });
+      return { enabled, mode: cfg.mode };
+    },
     getQuote, create, confirm, reconcile,
   };
 }

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import React from 'react';
+import * as pilot from '../src/services/payments/tilopayPilot.js';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { transformWithEsbuild } from 'vite';
@@ -86,6 +87,7 @@ function runtime(options = {}) {
   const clearCart = () => { clears++; };
   const onQuote = value => quotesShown.push(value);
   const localRequire = name => {
+    if (name.endsWith('/tilopayPilot')) return pilot;
     if (name === 'react') return hook.react;
     if (name === 'react/jsx-runtime' || name === 'lucide-react') return require(name);
     if (name === 'react-router-dom') return { ...require(name), useNavigate: () => navigate, useParams: () => ({ orderId: state.orderId }) };

@@ -76,7 +76,7 @@ export default function CheckoutPage() {
       if (!cancelled) setAvailability(prev => ({ ...prev, [p.id]: a }));
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [user?.uid]);
 
   // Compra como invitado: si no hay sesión, abrimos una sesión anónima (uid propio para el pedido)
   useEffect(() => {
