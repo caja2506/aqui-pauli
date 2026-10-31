@@ -25,7 +25,11 @@ const expected=(c)=>c.merchantId==='88802749'&&c.orderPrefix==='PFC031932';
        knownReferences:(Array.isArray(p.orderNumbers)?p.orderNumbers:[]).map(n=>['TPTEST-A-T1','TPTEST-A-T2','TPTEST-R-T1'].includes(n)),hasSavedUrl:Object.entries(p).some(([k,v])=>typeof v==='string'&&(/url/i.test(k)||/^https?:/.test(v))&&v.length>0)}:null,
       attempts:list.map(a=>({status:a.status,hasUrl:!!a.url,hasTx:!!a.idTilopay,formInFlight:!!a.formInFlight,
       sent:a.requestSentAt,checked:a.creationCheckedAt,reason:a.creationOutcome?.reason||null,last:a.lastObservedState||null,explicitAbsence:a.providerOrderAbsent===true}))}));
-   if(!safePrior && (!list.length||list.some(v=>v.mode!=='test'||!['test_paid','approved'].includes(v.status))))blocked++;
+   const refs=p.orderNumbers;
+   const expectedLegacyRefs=p.status==='approved'?['TPTEST-A-T1','TPTEST-A-T2']:p.status==='declined'?['TPTEST-R-T1']:[];
+   const safeLegacy=!list.length && expectedLegacyRefs.length && Array.isArray(refs) && refs.length===expectedLegacyRefs.length
+      && expectedLegacyRefs.every(n=>refs.includes(n)) && !/https?:\\/\\//i.test(JSON.stringify(p)) && !p.reconciliationNeedsReview;
+   if(!safeLegacy && !safePrior && (!list.length||list.some(v=>v.mode!=='test'||!['test_paid','approved'].includes(v.status))))blocked++;
   }
   console.log('PILOT_TEST_ATTEMPTS',JSON.stringify({orders:orders.size,blocking:blocked}));return blocked;
  }
