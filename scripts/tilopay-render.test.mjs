@@ -17,7 +17,8 @@ import * as backorder from '../src/utils/backorder.js';
 const require = createRequire(import.meta.url);
 const PANEL = 'src/components/payments/TilopayPanel.jsx';
 const RETURN = 'src/pages/store/TilopayReturnPage.jsx';
-const compiled = new Map(await Promise.all([PANEL, RETURN].map(async file => {
+const PILOT_ADMIN = 'src/pages/admin/TilopayPilotPage.jsx';
+const compiled = new Map(await Promise.all([PANEL, RETURN, PILOT_ADMIN].map(async file => {
   const { code } = await transformWithEsbuild(await readFile(new URL(`../${file}`, import.meta.url), 'utf8'), file,
     { loader: 'jsx', jsx: 'automatic', format: 'cjs', target: 'es2022' });
   return [file, code];
@@ -87,6 +88,11 @@ function runtime(options = {}) {
   const clearCart = () => { clears++; };
   const onQuote = value => quotesShown.push(value);
   const localRequire = name => {
+    if (options.file === PILOT_ADMIN && name === '../../firebase') return { db: {} };
+    if (options.file === PILOT_ADMIN && name === 'firebase/firestore') return {
+      doc: () => 'config/payments',
+      onSnapshot: (_ref, next) => { next({ data: () => ({ tilopay: { pilotSeed: { stage: 'closed' } } }) }); return () => {}; },
+    };
     if (name.endsWith('/tilopayPilot')) return pilot;
     if (name === 'react') return hook.react;
     if (name === 'react/jsx-runtime' || name === 'lucide-react') return require(name);
@@ -103,7 +109,7 @@ function runtime(options = {}) {
   const sessionStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) };
   const module = { exports: {} };
   new Function('require', 'module', 'exports', 'window', 'sessionStorage', 'console', compiled.get(options.file || PANEL))(
-    localRequire, module, module.exports, { location: { assign: value => redirects.push(value) } }, sessionStorage,
+    localRequire, module, module.exports, { location: { origin: 'https://aquipauli.com', assign: value => redirects.push(value) } }, sessionStorage,
     { error: (...args) => logs.push(args) });
   const render = updates => {
     Object.assign(state, updates);
@@ -126,6 +132,18 @@ function runtime(options = {}) {
 async function ready(options) { const app = runtime(options); await settle(); app.render(); return app; }
 const counts = (app, name) => app.calls.filter(call => call.name === name);
 const payButton = app => app.button(/^(Pagás ahora|Continuar el pedido pendiente|Calculando…|Verificando…)/);
+
+test('panel cerrado: el botón solicita el formulario solo al tocarlo y muestra el resultado de Tilopay', async () => {
+  for (const result of [{ url: safeUrl }, { formReason: 'MERCHANT_TRANSACTION_BLOCK' }]) {
+    const app = await ready({ file: PILOT_ADMIN, tilopayCreatePayment: async () => result });
+    assert.equal(app.calls.length, 0);
+    await app.button(/Comprobar formulario/).onClick();
+    app.render();
+    assert.deepEqual(counts(app, 'tilopayCreatePayment')[0].args, [{ checkClosedPilotForm: true }]);
+    assert.match(app.html(), result.url ? /Abrir formulario de Tilopay/ : /bloqueo \(402\)/);
+    assert.equal(app.redirects.length, 0);
+  }
+});
 
 test('cotización: clave cambia con cantidad, variante, cantón y envío; orden de líneas no la cambia', () => {
   const key = quotes.tilopayQuoteKey(items, 'Grecia', 'normal');

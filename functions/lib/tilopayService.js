@@ -697,6 +697,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
   }
 
   async function create(request) {
+    if (request?.data?.checkClosedPilotForm === true) return checkClosedPilotForm(request);
     const ctx = await owned(request);
     const cfg = await readConfig();
     if (!cfg.enabled) fail("failed-precondition", "Tilopay está deshabilitado o falta configurar el comercio.");
@@ -730,6 +731,81 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     if (reservation.existing) return resume(request, cfg);
     if (reservation.settled) return summarize((await ctx.ref.get()).data(), ctx.id);
     return issueForm(ctx, c, token, reservation);
+  }
+
+  // One explicit check for the original admin buyer. The public checkout stays closed.
+  async function checkClosedPilotForm(request) {
+    const uid = request.auth?.uid;
+    if (!uid) fail("unauthenticated", "Iniciá sesión con la cuenta administradora que hizo la prueba.");
+    async function inspect(t, evidence) {
+      const role = (await t.get(db.collection("users_roles").doc(uid))).data()?.role;
+      if (role !== "admin") fail("permission-denied", "Se necesita la cuenta administradora que hizo la prueba.");
+      const gate = (await t.get(pilotRef())).data();
+      const settings = (await t.get(db.collection("config").doc("payments"))).data()?.tilopay;
+      if (settings?.enabled !== false || settings.mode !== "live" || settings.access !== "private-pilot"
+          || settings.pilotSeed?.stage !== "closed" || !gate?.tokenHash || settings.pilotSeed.tokenHash !== gate.tokenHash
+          || !validDocumentId(gate.orderId) || gate.productId !== "zz-tilopay-live-check" || gate.variantId !== "v1") {
+        fail("failed-precondition", "No hay un pedido de la prueba privada cerrada para comprobar.");
+      }
+      if (gate.ownerUid !== uid) fail("permission-denied", "Entrá con la misma cuenta que hizo el pedido de ₡1 000.");
+      const ref = orderRef(gate.orderId);
+      const order = (await t.get(ref)).data();
+      assertOwner(order, uid);
+      const ctx = { id: gate.orderId, ref, uid, order };
+      const attempts = attemptsOf(order);
+      const a = attempts[0];
+      const line = a?.snapshot?.lines?.[0];
+      if (attempts.length !== 1 || order.paymentMethod !== "tilopay" || order.tilopay.mode !== "live"
+          || a.mode !== "live" || a.merchantId !== settings.merchantId || a.orderPrefix !== settings.orderPrefix
+          || a.amountMinor !== 100000 || a.snapshot?.totalMinor !== 100000 || a.snapshot.currency !== "CRC"
+          || a.snapshot.lines?.length !== 1 || line?.productId !== gate.productId || line.variantId !== gate.variantId || line.quantity !== 1) {
+        fail("failed-precondition", "Este pedido no coincide con la compra privada de ₡1 000.");
+      }
+      const current = summarize(order, ctx.id);
+      if (isPaidOrder(order) || order.paymentStatus === "test_paid" || !PAYABLE_STATUSES.has(order.status)
+          || a.financialEvidence || a.idTilopay || a.lastObservedTransactionId || a.reconciliationNeedsReview
+          || order.tilopay.duplicatePaymentNeedsReview || order.tilopay.legacyNeedsReview || order.tilopay.reconciliationNeedsReview) {
+        return { result: { orderId: ctx.id, message: "El pedido tiene un movimiento o está en revisión. No se solicitó otro formulario." } };
+      }
+      if (a.closedPilotCheckAt) {
+        if (a.formInFlight) return { result: { orderId: ctx.id, message: "La comprobación ya se solicitó. Consultá el resultado en un momento." } };
+        if (a.creationOutcome?.reason === "FORM_READY" && a.status === "open" && api.isValidPaymentUrl(a.url)
+            && snapshotMatches(order, (await t.get(itemsQuery(ref))).docs, a)) return { result: { orderId: ctx.id, url: a.url } };
+        return { result: current };
+      }
+      if (a.schemaVersion !== 2 || a.status !== "pending_reconciliation" || a.formGeneration || a.formInFlight || a.url
+          || a.creationOutcome?.reason !== "MERCHANT_TRANSACTION_BLOCK" || a.creationOutcome.http !== 402
+          || a.creationOutcome.type !== "402" || order.inventoryReservation?.state !== "reserved") {
+        fail("failed-precondition", "Solo se puede comprobar el pedido original que Tilopay bloqueó antes de emitir un formulario.");
+      }
+      const c = configuredCredentials();
+      const lock = (await t.get(db.collection("tilopayCheckoutLocks").doc(order.tilopay.checkoutLockId))).data();
+      const identity = (await t.get(refDoc(a.orderNumber))).data();
+      if (a.keyFingerprint !== snapshotFingerprint({ key: c.key }) || !snapshotMatches(order, (await t.get(itemsQuery(ref))).docs, a)
+          || lock?.orderId !== ctx.id || lock.ownerUid !== uid || lock.mode !== "live" || lock.attemptKey !== a.key || !["active","review"].includes(lock.state)
+          || identity?.orderId !== ctx.id || identity.ownerUid !== uid || identity.mode !== "live" || identity.attemptKey !== a.key
+          || identity.orderNumber !== a.orderNumber || identity.merchantId !== a.merchantId) {
+        fail("failed-precondition", "Cambió la referencia, la reserva o el contenido del pedido.");
+      }
+      if (!evidence) return { ctx, c };
+      if (evidence.original !== a.orderNumber || evidence.contextHash !== attemptContext(a)) {
+        fail("failed-precondition", "La referencia cambió durante la consulta.");
+      }
+      const attempt = { ...a, closedPilotCheckAt: now(), formGeneration: 1, formInFlight: true,
+        previousCreationOutcome: a.creationOutcome, providerOrderAbsent: false, status: "reserved" };
+      t.update(ref, { tilopay: { ...order.tilopay, status: "reserved", attemptsById: { [a.key]: attempt } }, updatedAt: now() });
+      return { ctx, c, order, attempt };
+    }
+    const first = await db.runTransaction(t => inspect(t, null));
+    if (first.result) return first.result;
+    const token = await tokenFor(first.c);
+    const observations = await readObservations(first.ctx, await readConfig(), first.c, token, { liveOnly: true });
+    const evidence = observations?.[0];
+    if (observations?.length !== 1 || evidence.r.state !== "not_found" || !evidence.r.explicitMissing) {
+      fail("failed-precondition", "Tilopay no confirmó que la transacción esté ausente. No se solicitó otro formulario.");
+    }
+    const claim = await db.runTransaction(t => inspect(t, evidence));
+    return claim.result || issueForm(claim.ctx, claim.c, token, claim);
   }
 
   // An explicit operator action for sandbox only. Preserve the original
