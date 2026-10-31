@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { isValidTilopayPaymentUrl as safePaymentUrl } from '../../services/payments/tilopayUrl';
 import { useCart } from '../../contexts/CartContext';
 import { tilopayConfirm, tilopayCreatePayment } from '../../services/payments/tilopayClient';
+import { tilopayQuoteAmounts } from '../../services/payments/tilopayQuote';
 
 const STORAGE_KEY = 'aqp_tilopay_pending';
 const cartKey = (items) => JSON.stringify((Array.isArray(items) ? items : []).map((item) => [
@@ -58,6 +59,7 @@ export default function TilopayReturnPage() {
           state: {
             orderNumber: res.orderNumber || pending?.orderNumber, total: res.crcTotal ?? pending?.total,
             paymentMethod: 'tilopay', online: true, paid: true, onlineLabel: 'tarjeta',
+            partial: res.partial === true, tilopayQuote: tilopayQuoteAmounts(res),
           },
         });
         return;
@@ -92,6 +94,8 @@ export default function TilopayReturnPage() {
       const actualId = typeof res?.orderId === 'string' && res.orderId ? res.orderId : orderId;
       const oldPending = readPending(uid, orderId);
       const record = actualId === orderId ? { ...(oldPending || {}), uid, orderId } : { uid, orderId: actualId };
+      const confirmedQuote = tilopayQuoteAmounts(res);
+      if (confirmedQuote) { record.quote = confirmedQuote; record.total = confirmedQuote.crcTotal; }
       try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(record)); } catch { /* Server lock remains authoritative. */ }
       if (safePaymentUrl(res?.url)) { window.location.assign(res.url); return; }
       if (actualId !== orderId) navigate(`/tilopay/retorno/${encodeURIComponent(actualId)}`, { replace: true });

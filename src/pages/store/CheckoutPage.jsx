@@ -12,6 +12,7 @@ import { createOrder } from '../../services/orderService';
 import { createPaypalPendingOrder } from '../../services/payments/paypalClient';
 import { createCashOnDeliveryOrder } from '../../services/payments/cashOnDeliveryClient';
 import { backorderFromPaypalQuote, paypalQuoteKey } from '../../services/payments/paypalQuote';
+import { backorderFromTilopayQuote, tilopayQuoteKey } from '../../services/payments/tilopayQuote';
 import { computeBackorder, BACKORDER_DEPOSIT_LABEL, BACKORDER_BALANCE_TIMING } from '../../utils/backorder';
 import { SINPE_INFO } from '../../utils/constants';
 import { doc, getDoc } from 'firebase/firestore';
@@ -58,6 +59,7 @@ export default function CheckoutPage() {
   // Disponibilidad de pasarelas online (PayPal, a futuro Tilopay)
   const [availability, setAvailability] = useState({});
   const [paypalQuote, setPaypalQuote] = useState(null);
+  const [tilopayQuote, setTilopayQuote] = useState(null);
   // Pedido pendiente ya creado para el intento de pago online actual (evita duplicados)
   const pendingOrderRef = useRef(null);
   const submittingRef = useRef(false);
@@ -201,11 +203,17 @@ export default function CheckoutPage() {
   const selectedMethod = getPaymentMethod(selectedPaymentMethod);
   const OnlinePanel = isOnlineMethod(selectedPaymentMethod) && availability[selectedPaymentMethod]?.available ? selectedMethod.Panel : null;
   const paypalSelected = selectedPaymentMethod === 'paypal';
+  const tilopaySelected = selectedPaymentMethod === 'tilopay';
+  const serverQuoteSelected = paypalSelected || tilopaySelected;
   const cashOnDeliverySelected = selectedPaymentMethod === 'contra_entrega';
   const activePaypalQuote = paypalQuote?.key === paypalQuoteKey(items, form.canton, form.shippingType) ? paypalQuote.quote : null;
-  const paymentSummary = paypalSelected ? backorderFromPaypalQuote(activePaypalQuote) : backorder;
+  const activeTilopayQuote = tilopayQuote?.uid === user?.uid
+    && tilopayQuote?.key === tilopayQuoteKey(items, form.canton, form.shippingType) ? tilopayQuote.quote : null;
+  const activeServerQuote = tilopaySelected ? activeTilopayQuote : activePaypalQuote;
+  const paymentSummary = paypalSelected ? backorderFromPaypalQuote(activePaypalQuote)
+    : tilopaySelected ? backorderFromTilopayQuote(activeTilopayQuote) : backorder;
   const showPaymentDeposit = paymentSummary?.hasBackorder && paymentSummary.depositTotal > 0
-    && (!OnlinePanel || paypalSelected);
+    && (!OnlinePanel || serverQuoteSelected);
 
   // Valida el formulario; devuelve true si todo está completo
   const validateForm = () => {
@@ -546,7 +554,7 @@ export default function CheckoutPage() {
                 validateForm={validateForm}
                 createPendingOrder={createPendingOrder}
                 onPaid={handleOnlinePaid}
-                onQuote={setPaypalQuote}
+                onQuote={tilopaySelected ? setTilopayQuote : setPaypalQuote}
               />
             )}
           </div>
@@ -573,19 +581,22 @@ export default function CheckoutPage() {
             <div className="border-t border-slate-100 pt-4 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Subtotal</span>
-                <span className="font-bold">{formatCRC(paypalSelected && activePaypalQuote ? activePaypalQuote.crcSubtotal : subtotal)}</span>
+                <span className="font-bold">{tilopaySelected && !paymentSummary ? 'Calculando…'
+                  : formatCRC(serverQuoteSelected && activeServerQuote ? activeServerQuote.crcSubtotal : subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Envío</span>
-                <span className="font-bold">{(paypalSelected && activePaypalQuote ? activePaypalQuote.crcShipping : shippingCost) > 0
-                  ? formatCRC(paypalSelected && activePaypalQuote ? activePaypalQuote.crcShipping : shippingCost) : 'Incluido'}</span>
+                <span className="font-bold">{tilopaySelected && !paymentSummary ? 'Calculando…'
+                  : (serverQuoteSelected && activeServerQuote ? activeServerQuote.crcShipping : shippingCost) > 0
+                    ? formatCRC(serverQuoteSelected && activeServerQuote ? activeServerQuote.crcShipping : shippingCost) : 'Incluido'}</span>
               </div>
               <div className="flex justify-between text-lg pt-2 border-t border-slate-100">
                 <span className="font-black text-slate-900">Total</span>
-                <span className="font-black text-rose-600">{formatCRC(paypalSelected && activePaypalQuote ? activePaypalQuote.crcTotal : total)}</span>
+                <span className="font-black text-rose-600">{tilopaySelected && !paymentSummary ? 'Calculando…'
+                  : formatCRC(serverQuoteSelected && activeServerQuote ? activeServerQuote.crcTotal : total)}</span>
               </div>
-              {paypalSelected && !paymentSummary && (
-                <p className="text-xs text-sky-800">El servidor confirmará el monto a pagar ahora y el saldo antes de habilitar PayPal.</p>
+              {serverQuoteSelected && !paymentSummary && (
+                <p className="text-xs text-sky-800">El servidor confirmará el monto a pagar ahora y el saldo antes de habilitar {tilopaySelected ? 'el pago con tarjeta' : 'PayPal'}.</p>
               )}
               {cashOnDeliverySelected && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-1.5" data-testid="cash-on-delivery-summary">
@@ -594,14 +605,14 @@ export default function CheckoutPage() {
                   <p className="text-xs text-emerald-800">En efectivo, por el total del pedido.</p>
                 </div>
               )}
-              {paypalSelected && paymentSummary && !showPaymentDeposit && (
+              {serverQuoteSelected && paymentSummary && !showPaymentDeposit && (
                 <p className="text-sm font-black text-sky-900">Pagás ahora {formatCRC(paymentSummary.payNowTotal)}</p>
               )}
               {showPaymentDeposit && (
                 <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3 space-y-1.5" data-testid="deposit-summary">
                   <p className="text-sm font-black text-amber-900">Tu pedido incluye productos «Bajo pedido»</p>
                   <div className="flex justify-between text-sm">
-                    {paypalSelected
+                    {serverQuoteSelected
                       ? <span className="font-black text-amber-900">Pagás ahora {formatCRC(paymentSummary.payNowTotal)} (apartado {BACKORDER_DEPOSIT_LABEL})</span>
                       : <><span className="font-bold text-amber-900">Apartás hoy con ({BACKORDER_DEPOSIT_LABEL} de esos productos)</span>
                         <span className="font-black text-amber-900">{formatCRC(paymentSummary.payNowTotal)}</span></>}

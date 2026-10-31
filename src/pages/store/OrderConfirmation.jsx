@@ -10,6 +10,7 @@ import { CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 import { backorderFromPaypalQuote } from '../../services/payments/paypalQuote';
+import { backorderFromTilopayQuote } from '../../services/payments/tilopayQuote';
 import usePageTitle from '../../hooks/usePageTitle';
 
 // Número de WhatsApp Business de Aquí Pauli (formato internacional sin +)
@@ -62,19 +63,28 @@ export default function OrderConfirmation() {
   const paymentMethod = savedOrder?.paymentMethod || location.state?.paymentMethod || '';
   const isSinpe = paymentMethod === 'sinpe' || paymentMethod === 'sinpe_movil';
   const isPaypal = paymentMethod === 'paypal';
+  const isTilopay = paymentMethod === 'tilopay';
   const isCashOnDelivery = paymentMethod === 'contra_entrega';
   const totalNum = Number(total) || 0;
   // Nuevos pedidos: 50% solo de Bajo pedido. Al cargar, prima el apartado guardado.
   const paypalQuote = savedOrder?.paypal || location.state?.paypalQuote;
+  const tilopayQuote = savedOrder ? savedOrder.tilopay : location.state?.tilopayQuote;
+  const tilopayBackorder = isTilopay ? backorderFromTilopayQuote(tilopayQuote) : null;
   const backorder = (isPaypal && backorderFromPaypalQuote(paypalQuote))
+    || tilopayBackorder
     || savedBackorder(savedOrder) || location.state?.backorder || null;
   const depositLabel = depositLabelFor(backorder);
   const fullyPaid = savedOrder && ['pagado', 'verificado'].includes(savedOrder.paymentStatus);
+  // Legacy Tilopay returns have no partial flag: they charged the full order.
+  const tilopayFullyPaid = isTilopay && (fullyPaid || (!savedOrder && location.state?.paid
+    && location.state?.partial !== true && !(tilopayBackorder?.balanceDue > 0)));
+  const tilopayPartial = isTilopay && !tilopayFullyPaid && (savedOrder
+    ? savedOrder.paymentStatus === 'parcial' : location.state?.partial === true);
   const hasDeposit = !!backorder?.hasBackorder && backorder.depositTotal > 0 && backorder.payNowTotal < backorder.total
-    && !(isPaypal && fullyPaid);
+    && !(isPaypal && fullyPaid) && !tilopayFullyPaid;
   const amountToPay = hasDeposit ? backorder.payNowTotal : totalNum;
 
-  const paid = savedOrder ? !!fullyPaid || (isPaypal && savedOrder.paymentStatus === 'parcial') : !!location.state?.paid;
+  const paid = savedOrder ? !!fullyPaid || ((isPaypal || isTilopay) && savedOrder.paymentStatus === 'parcial') : !!location.state?.paid;
   const online = ['paypal', 'tilopay'].includes(paymentMethod) && (savedOrder ? true : !!location.state?.online);
   // Contra entrega sigue pendiente al salir del checkout. Solo el pedido guardado
   // puede confirmar que el administrador ya registró el efectivo recibido.
@@ -83,6 +93,10 @@ export default function OrderConfirmation() {
   const paypalReceived = paid && typeof savedOrder?.paymentAmount === 'number' ? savedOrder.paymentAmount : amountToPay;
   const paypalRemaining = fullyPaid ? 0 : (typeof savedOrder?.remainingTotal === 'number'
     ? savedOrder.remainingTotal : backorder?.balanceDue || 0);
+  const tilopayReceived = paid && typeof savedOrder?.paymentAmount === 'number' ? savedOrder.paymentAmount
+    : tilopayQuote?.crcPayNow ?? amountToPay;
+  const tilopayRemaining = tilopayFullyPaid ? 0 : typeof savedOrder?.remainingTotal === 'number'
+    ? savedOrder.remainingTotal : tilopayQuote?.crcBalanceDue ?? backorder?.balanceDue ?? 0;
 
   const needsProof = isSinpe || paymentMethod === 'transferencia';
 
@@ -105,7 +119,8 @@ export default function OrderConfirmation() {
       </p>
       {online && (
         <p className={`text-sm font-bold mb-6 ${paid ? 'text-green-700' : 'text-amber-700'}`}>
-          {paid ? (isPaypal && hasDeposit ? '✅ Apartado recibido con PayPal.' : `✅ Pago recibido con ${paymentMethod === 'tilopay' ? 'tarjeta' : 'PayPal'}.`)
+          {paid ? ((isPaypal && hasDeposit) || (isTilopay && (hasDeposit || tilopayPartial))
+            ? `✅ Apartado recibido con ${isTilopay ? 'tarjeta' : 'PayPal'}.` : `✅ Pago recibido con ${paymentMethod === 'tilopay' ? 'tarjeta' : 'PayPal'}.`)
             : `Tu pago con ${paymentMethod === 'tilopay' ? 'tarjeta' : 'PayPal'} está en revisión; te avisaremos por WhatsApp.`}
         </p>
       )}
@@ -149,6 +164,20 @@ export default function OrderConfirmation() {
             <p className="text-sm text-sky-900">El saldo se paga {BACKORDER_BALANCE_TIMING}.</p>
           </>}
         </div>
+      )}
+
+      {isTilopay && (savedOrder || tilopayQuote || online) && (
+        <section className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-5 text-left mb-6 space-y-2" data-testid="tilopay-confirmation">
+          <h2 className="text-base font-black text-emerald-900">{hasDeposit || tilopayPartial ? 'Tu apartado con tarjeta' : 'Tu pago con tarjeta'}</h2>
+          <p className="text-sm text-emerald-900">{paid ? 'Monto recibido' : 'Monto del pago en revisión'}: <strong>{formatCRC(tilopayReceived)}</strong>
+            {hasDeposit ? ` (apartado ${depositLabel || 'acordado'})` : ''}</p>
+          <p className="text-sm text-emerald-900">Total del pedido: <strong>{formatCRC(totalNum || backorder?.total || 0)}</strong></p>
+          <p className="text-sm text-emerald-900">Saldo pendiente: <strong>{formatCRC(tilopayRemaining)}</strong></p>
+          {hasDeposit && <>
+            <p className="text-sm text-emerald-900">El pago incluye los productos en stock y el envío completos, más {depositLabel ? `el ${depositLabel} de los productos Bajo pedido` : 'el apartado acordado'}.</p>
+            <p className="text-sm text-emerald-900">El saldo se paga {BACKORDER_BALANCE_TIMING}.</p>
+          </>}
+        </section>
       )}
 
       {isSinpe && (

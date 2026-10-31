@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:checkout": "node --test scripts/checkout-render.test.mjs",
+    "test:checkout": "node --test scripts/checkout-render.test.mjs scripts/tilopay-render.test.mjs",
     "test:giveaway": "node scripts/giveaway-render.test.mjs && node scripts/giveaway-export.test.mjs && node scripts/firebase-deploy-targets.test.mjs",
     "test:auth": "node scripts/password-reset.test.mjs && node scripts/facebook-auth.test.mjs",
     "test:store-audit": "node scripts/product-price.test.mjs && node scripts/store-ux.test.mjs && node scripts/cart-navigation.test.mjs && node scripts/order-confirmation-ux.test.mjs && node scripts/order-notes.test.mjs && node scripts/cash-on-delivery-admin.test.mjs",
