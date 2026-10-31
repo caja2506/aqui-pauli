@@ -8,13 +8,13 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: firebase-functions-aqui-pauli
+  group: tilopay-production-activation
   cancel-in-progress: false
 jobs:
   verify:
     if: github.repository == 'caja2506/aqui-pauli' && github.ref == 'refs/heads/chatgpt/tilopay-production-activation'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -24,7 +24,7 @@ jobs:
           node-version: '22'
       - run: npm ci --prefix functions --ignore-scripts --no-audit --no-fund
       - run: node --check ops/tilopay-preflight.cjs
-      - name: Refresh three existing Tilopay function bindings to secret version 2
+      - name: Inspect only secret version metadata and deployed bindings
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI }}
         run: node ops/tilopay-preflight.cjs
