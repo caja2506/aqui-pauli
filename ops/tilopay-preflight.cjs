@@ -24,6 +24,11 @@ async function main() {
     const fn = await read('https://cloudfunctions.googleapis.com/v2/projects/'+PROJECT+'/locations/us-central1/functions/'+name);
     console.log('PREFLIGHT_FUNCTION_METADATA',JSON.stringify({name,state:fn.state,updated:fn.updateTime,bindings:(fn.serviceConfig.secretEnvironmentVariables||[]).filter(b=>names.includes(b.key)).map(b=>({name:b.key,version:b.version,latest:latest[b.key],current:b.version===latest[b.key]||b.version==='latest'}))}));
   }
+  const cfg = await read('https://firestore.googleapis.com/v1/projects/'+PROJECT+'/databases/(default)/documents/config/payments');
+  const c = cfg.fields?.tilopay?.mapValue?.fields || {};
+  const safe = {enabled:c.enabled?.booleanValue,mode:c.mode?.stringValue,merchantId:c.merchantId?.stringValue,orderPrefix:c.orderPrefix?.stringValue};
+  if(safe.mode !== 'test' || safe.merchantId !== '88802749' || safe.orderPrefix !== 'PFC031932') throw new Error('Configuration verification failed');
+  console.log('PREFLIGHT_VERIFIED_TEST_CONFIG',JSON.stringify(safe));
   console.log('PREFLIGHT_COMPLETE_METADATA_ONLY');
 }
 main().catch(e=>{console.error('PREFLIGHT_FAILED_METADATA_ONLY',/^HTTP [0-9]+$/.test(e.message)?e.message:e.name);process.exitCode=1;});
