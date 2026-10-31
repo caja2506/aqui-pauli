@@ -40,10 +40,12 @@ for (let attempt = 1; attempt <= 5; attempt++) {
       const actual = Buffer.from(await (await get(path)).arrayBuffer());
       assert.equal(hash(actual), hash(expected), `${path}: published content differs from the build`);
     }
-    const route = await get('/catalogo');
-    assert.equal(hash(Buffer.from(await route.arrayBuffer())), hash(index),
-      'The catalog route does not serve the single-page app');
-    console.log(`Verified ${origin}: commit ${expectedRelease.commit}, index, ${assets.length} assets, and /catalogo.`);
+    for (const path of ['/catalogo', '/carrito']) {
+      const route = await get(path);
+      assert.equal(hash(Buffer.from(await route.arrayBuffer())), hash(index),
+        `${path} does not serve the single-page app`);
+    }
+    console.log(`Verified ${origin}: commit ${expectedRelease.commit}, index, ${assets.length} assets, /catalogo and /carrito.`);
     break;
   } catch (error) {
     if (attempt === 5) throw error;
