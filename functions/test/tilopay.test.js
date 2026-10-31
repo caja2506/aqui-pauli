@@ -69,6 +69,30 @@ function harness({ mode = "live", extra = {}, onPay, onConsult, credentials } = 
   return { ...mem, calls, bank, service, order, att, payment, advance: (ms) => { time += ms; } };
 }
 
+test("Tilopay calcula ambos códigos postales desde el distrito en pedidos guardados", async () => {
+  for (const [distrito, codigoPostal, esperado] of [
+    ["Grecia", "", "20301"], ["San José", "10101", "20303"],
+    ["Puente de Piedra", "20306", "20307"], ["Bolívar", "20", "20308"],
+  ]) {
+    const order = orderData();
+    Object.assign(order.shippingAddress, { distrito, codigoPostal });
+    const h = harness({ extra: { [`orders/${ORDER}`]: order } });
+    assert.equal((await h.service.create(request())).url, URL);
+    assert.equal(h.calls.pay[0].billToZipPostCode, esperado);
+    assert.equal(h.calls.pay[0].shipToZipPostCode, esperado);
+  }
+});
+
+test("un distrito desconocido detiene el formulario antes de reservar existencias", async () => {
+  const order = orderData();
+  Object.assign(order.shippingAddress, { distrito: "Distrito desconocido", codigoPostal: "10101" });
+  const h = harness({ extra: { [`orders/${ORDER}`]: order } });
+  await assert.rejects(h.service.create(request()), { code: "failed-precondition", message: /código postal/ });
+  assert.equal(h.calls.pay.length, 0);
+  assert.equal(h.order().tilopay, undefined);
+  assert.equal(h.get("products/p1/variants/v1").reservedStock, 0);
+});
+
 test("reserva atómica: importe, items y resumen provienen del catálogo", async () => {
   const h = harness();
   const result = await h.service.create(request());

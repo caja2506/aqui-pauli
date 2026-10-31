@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useCart } from '../../contexts/CartContext';
 import { formatCRC } from '../../utils/formatters';
 import { listPaymentMethods, getPaymentMethod, isOnlineMethod, isCashOnDeliveryEligible, ONLINE_PROVIDERS } from '../../services/payments/registry';
-import { getProvincias, getCantones, getDistritos, buscarPorCodigoPostal } from '../../data/costaRicaTerritorial';
+import { getProvincias, getCantones, getDistritos, buscarPorCodigoPostal, codigoPostalDeDireccion } from '../../data/costaRicaTerritorial';
 import { calculateShippingCost, getShippingOptions } from '../../services/shippingService';
 import { createOrder } from '../../services/orderService';
 import { createPaypalPendingOrder } from '../../services/payments/paypalClient';
@@ -230,6 +230,9 @@ export default function CheckoutPage() {
     if (!form.provincia) newErrors.provincia = 'Selecciona provincia';
     if (!form.canton) newErrors.canton = 'Cantón requerido';
     if (!form.distrito) newErrors.distrito = 'Distrito requerido';
+    if (tilopaySelected && form.distrito && !codigoPostalDeDireccion(form)) {
+      newErrors.distrito = 'Volvé a seleccionar el distrito para confirmar el código postal.';
+    }
     if (!form.señas.trim()) newErrors.señas = 'Señas requeridas';
     if (form.customerNotes.length > 1000) newErrors.customerNotes = 'Las notas pueden tener hasta 1000 caracteres.';
     if (!selectedPaymentMethod || !paymentMethods.some(m => m.id === selectedPaymentMethod)) newErrors.paymentMethod = 'Selecciona método de pago';
@@ -261,7 +264,7 @@ export default function CheckoutPage() {
       provincia: form.provincia,
       canton: form.canton,
       distrito: form.distrito,
-      codigoPostal: form.codigoPostal,
+      codigoPostal: paymentMethod === 'tilopay' ? codigoPostalDeDireccion(form) : form.codigoPostal,
       señas: form.señas,
     },
     items: items.map(i => ({

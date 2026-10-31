@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const defaultApi = require("./tilopayApi");
+const { codigoPostalDeDireccion } = require("./costaRicaTerritorial.mjs");
 const { computeTotalsCRC: defaultPricing, PricingError } = require("./pricing");
 const { parseMinorCRC, minorToCRC } = require("./paymentMoney");
 const { normalizeInventoryStock } = require("./inventoryStock");
@@ -233,6 +234,9 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       if (isPaidOrder(order) || order.paymentStatus === "test_paid") return { settled: true };
       if (!PAYABLE_STATUSES.has(order.status) || order.paymentMethod !== "tilopay" || order.paypal) {
         fail("failed-precondition", "Este pedido no permite iniciar un pago Tilopay.");
+      }
+      if (!codigoPostalDeDireccion(order.shippingAddress || {})) {
+        fail("failed-precondition", "Verificá la provincia, el cantón y el distrito para determinar el código postal.");
       }
       const itemSnap = await t.get(itemsQuery(ctx.ref));
       const input = itemSnap.docs.map((doc) => ({ ...doc.data(), itemId: doc.id }));

@@ -30,6 +30,7 @@ const realFiles = [
   CHECKOUT, CART, CONFIRMATION, PAYPAL_PANEL, PRODUCT, WHATSAPP, SHIPPING, LEGAL,
   'src/utils/backorder.js', 'src/utils/constants.js', 'src/utils/formatters.js',
   'src/services/payments/registry.js', 'src/data/costaRicaTerritorial.js',
+  'functions/lib/costaRicaTerritorial.mjs',
   'src/components/ui/CopyButton.jsx', 'src/components/ui/LoadingSpinner.jsx',
   'src/services/payments/paypalQuote.js', 'src/services/payments/tilopayQuote.js',
   'src/components/ui/StatusBadge.jsx', 'src/utils/shippingText.js',
@@ -462,6 +463,19 @@ const validCheckoutForm = {
   name: 'Ana Prueba', email: 'ana@example.invalid', phone: '88888888',
   provincia: 'Alajuela', canton: 'Grecia', distrito: 'Grecia', señas: 'Dirección ficticia de prueba', paymentPhone: '88888888',
 };
+
+test('el checkout de tarjeta guarda el código del distrito aunque la dirección guardada no lo tenga', async () => {
+  let order;
+  const page = renderPage(CHECKOUT, {
+    items: [line('stock_propio', 1000)], paymentMethod: 'tilopay', tilopayAvailable: true,
+    form: { ...validCheckoutForm, distrito: 'Tacares', codigoPostal: '' },
+    createOrder: async data => { order = data; return { orderId: 'postal-test' }; },
+  });
+  const { props } = page.checkoutElements.find(element => typeof element.props.createPendingOrder === 'function');
+  assert.equal(props.validateForm(), true);
+  await props.createPendingOrder('tilopay');
+  assert.equal(order.shippingAddress.codigoPostal, '20305');
+});
 
 test('contra entrega aparece solo en carritos compuestos enteramente por stock conocido', () => {
   for (const items of [[line('stock_propio', 30000)], [line('stock_propio', 30000, 'p1'), line('stock_propio', 22000, 'p2')]]) {
