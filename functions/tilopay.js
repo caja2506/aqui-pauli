@@ -32,11 +32,6 @@ exports.tilopayConfirm = onCall(options, complete(service.confirm));
 exports.tilopayReconcilePayments = onSchedule({ schedule: "every 5 minutes", region: "us-central1",
   timeZone: "America/Costa_Rica", timeoutSeconds: 540, maxInstances: 1,
   secrets: [API_USER, API_PASSWORD, KEY] }, async () => {
-  try {
-    await require("./lib/tilopayActivationCheck").inspectAndSave({ db, projectId: db.projectId,
-      api: require("./lib/tilopayApi"),
-      credentials: () => ({ apiUser: API_USER.value(), password: API_PASSWORD.value(), key: KEY.value() }) });
-  } catch { console.warn("[tilopayActivationCheck] report unavailable"); }
   const result = await reconciler.run();
   console.info("[tilopayReconcilePayments]", result);
   return result;
