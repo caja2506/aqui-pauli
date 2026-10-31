@@ -52,13 +52,6 @@
           }
         ]
       }
-    ],
-    "redirects": [
-      {
-        "source": "/carrito",
-        "destination": "/checkout",
-        "type": 302
-      }
     ]
   }
 }
