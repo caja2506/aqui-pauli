@@ -10,7 +10,7 @@ const expected=(c)=>c.merchantId==='88802749'&&c.orderPrefix==='PFC031932';
  initializeApp({credential:cert(a)});const db=getFirestore(), config=db.doc('config/payments'), pilot=db.doc('_ops/tilopay-live-pilot');
  const prod=db.doc('products/'+sku), vr=prod.collection('variants').doc(variant);
  async function inspectAttempts(){
-  const [orders,evidence]=await Promise.all([db.collection('orders').where('tilopay.mode','==','test').select('tilopay').get(),db.doc('_ops/tilopay-hosted-smoke-20261031-v2').get()]);
+  const [orders,evidence]=await Promise.all([db.collection('orders').where('tilopay.mode','==','test').select('tilopay','paymentStatus','status','createdAt').get(),db.doc('_ops/tilopay-hosted-smoke-20261031-v2').get()]);
   const ev=evidence.data()?.originalConsult;
   let blocked=0;
   for(const o of orders.docs){
@@ -20,7 +20,10 @@ const expected=(c)=>c.merchantId==='88802749'&&c.orderPrefix==='PFC031932';
       !p.reconciliationNeedsReview && !p.duplicatePaymentNeedsReview && !list[0].formInFlight && !list[0].url && !list[0].idTilopay &&
       Date.parse(list[0].creationCheckedAt)<=evidence.updateTime.toMillis();
    console.log('PILOT_ATTEMPT_META',JSON.stringify({key:createHash('sha256').update(o.id).digest('hex').slice(0,12),safePrior,
-    attempts:list.map(a=>({status:a.status,hasUrl:!!a.url,hasTx:!!a.idTilopay,formInFlight:!!a.formInFlight,
+    legacy:!list.length?{orderStatus:o.get('status'),paymentStatus:o.get('paymentStatus'),createdAt:o.get('createdAt'),status:p.status||null,
+       keys:Object.keys(p).filter(k=>/^[a-z][a-zA-Z]{0,32}$/.test(k)),
+       knownReferences:(Array.isArray(p.orderNumbers)?p.orderNumbers:[]).map(n=>['TPTEST-A-T1','TPTEST-A-T2','TPTEST-R-T1'].includes(n)),hasSavedUrl:Object.entries(p).some(([k,v])=>typeof v==='string'&&(/url/i.test(k)||/^https?:/.test(v))&&v.length>0)}:null,
+      attempts:list.map(a=>({status:a.status,hasUrl:!!a.url,hasTx:!!a.idTilopay,formInFlight:!!a.formInFlight,
       sent:a.requestSentAt,checked:a.creationCheckedAt,reason:a.creationOutcome?.reason||null,last:a.lastObservedState||null,explicitAbsence:a.providerOrderAbsent===true}))}));
    if(!safePrior && (!list.length||list.some(v=>v.mode!=='test'||!['test_paid','approved'].includes(v.status))))blocked++;
   }
