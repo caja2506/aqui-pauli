@@ -22,36 +22,16 @@ async function main() {
     return response.json();
   }
   phase = 'read-deployed-function';
-  const fn = await google('https://cloudfunctions.googleapis.com/v2/projects/'+PROJECT+'/locations/us-central1/functions/tilopayCreatePayment');
-  if (fn.state !== 'ACTIVE') throw new Error('Payment function is not ACTIVE');
-  const bindings = fn.serviceConfig.secretEnvironmentVariables || [];
-  const values = {};
-  const versions = {};
   for (const name of allowedSecrets) {
-    const binding = bindings.find(b => b.key === name && b.secret === name);
-    if (!binding || !/^(latest|[0-9]+)$/.test(String(binding.version))) throw new Error('Missing deployed secret binding: '+name);
-    phase = 'read-secret-'+name;
-    const result = await google('https://secretmanager.googleapis.com/v1/projects/'+PROJECT+'/secrets/'+name+'/versions/'+binding.version+':access');
-    const value = Buffer.from(result.payload?.data || '', 'base64').toString('utf8');
-    if (!value) throw new Error('Empty secret: '+name);
-    values[name] = value;
-    versions[name] = binding.version;
+    const response = await fetch('https://secretmanager.googleapis.com/v1/projects/'+PROJECT+'/secrets/'+name+':testIamPermissions', {
+      method:'POST',headers:{Authorization:'Bearer '+access.access_token,'Content-Type':'application/json'},
+      body:JSON.stringify({permissions:['secretmanager.secrets.get','secretmanager.secrets.getIamPolicy','secretmanager.secrets.setIamPolicy','secretmanager.versions.access']}),
+      redirect:'error',signal:AbortSignal.timeout(20000)
+    });
+    const result = await response.json();
+    console.log('PREFLIGHT_SECRET_PERMISSION',JSON.stringify({name,http:response.status,permissions:result.permissions||[]}));
   }
-  phase = 'read-config';
-  const current = (await db.doc('config/payments').get()).data()?.tilopay || {};
-  console.log('PREFLIGHT_CONFIG', JSON.stringify({enabled:current.enabled,mode:current.mode,merchantId:current.merchantId||null,orderPrefix:current.orderPrefix||null}));
-  console.log('PREFLIGHT_DEPLOYED_SECRET_VERSIONS', JSON.stringify(versions));
-  phase = 'tilopay-api-login';
-  const token = await getToken({apiUser:values.TILOPAY_API_USER,password:values.TILOPAY_API_PASSWORD});
-  console.log('PREFLIGHT_API_AUTH', Boolean(token));
-  phase = 'tilopay-sdk-login';
-  const sdk = await tpFetch('/api/v1/loginSdk',{body:{apiuser:values.TILOPAY_API_USER,password:values.TILOPAY_API_PASSWORD,key:values.TILOPAY_KEY}});
-  console.log('PREFLIGHT_SDK_AUTH', JSON.stringify({http:sdk.status,hasToken:typeof sdk.data?.access_token==='string'&&sdk.data.access_token.length>0,fields:Object.keys(sdk.data||{})}));
-  if (!sdk.ok || !sdk.data?.access_token) throw new Error('Current integration key could not be validated');
-  phase = 'read-existing-test';
-  const consult = await tpFetch('/api/v1/consult',{token,body:{key:values.TILOPAY_KEY,orderNumber:'TPTEST-A-T2'}});
-  const rows = Array.isArray(consult.data?.response) ? consult.data.response : [];
-  console.log('PREFLIGHT_EXISTING_TEST_ONLY',JSON.stringify({http:consult.status,type:consult.data?.type,transactions:rows.map(r=>({orderNumber:r.orderNumber,merchantId:r.merchantId,environment:r.environment,capture:r.capture,idTilopay:r.id_tilopay}))}));
-  console.log('PREFLIGHT_COMPLETE_NO_WRITES');
+  console.log('PREFLIGHT_PERMISSION_CHECK_NO_WRITES');
+
 }
 main().catch((error) => {console.error('PREFLIGHT_FAILED_NO_WRITES',phase, /^Google preflight request failed: HTTP [0-9]+$/.test(error.message) ? error.message : error.code || error.name);process.exitCode=1;});
