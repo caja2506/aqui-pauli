@@ -5,6 +5,7 @@
 // https://tilopay.com/developers/api/procesos-operativos/consult
 const crypto = require("node:crypto");
 const { parseMinorCRC, minorToCRC, formatMinorCRC } = require("./paymentMoney");
+const { codigoPostalDeDireccion } = require("./costaRicaTerritorial.mjs");
 
 const TILOPAY_BASE = "https://app.tilopay.com";
 const PROVINCE_ISO = {
@@ -92,11 +93,13 @@ function buildProcessPayload({ key, redirect, orderId, order, orderNumber, amoun
   if (typeof orderNumber !== "string" || !/^[A-Za-z0-9-]{1,128}$/.test(orderNumber)) throw new Error("Referencia de pago inválida.");
   const { first, last } = splitName(order.customerName);
   const addr = order.shippingAddress || {};
+  const zip = codigoPostalDeDireccion(addr);
+  if (!zip) throw new Error("Verificá la provincia, el cantón y el distrito para determinar el código postal.");
   const state = PROVINCE_ISO[String(addr.provincia || "").trim().toLowerCase()] || "CR-SJ";
   const common = {
     Address: clean(addr.señas, 120) || "Costa Rica", Address2: clean(addr.distrito, 60) || "-",
     City: clean(addr.canton, 60) || "-", State: state,
-    ZipPostCode: String(addr.codigoPostal || "10101").replace(/\D/g, "").slice(0, 5) || "10101",
+    ZipPostCode: zip,
     Country: "CR", Telephone: String(order.customerPhone || "").replace(/\D/g, "").slice(-8) || "00000000",
   };
   const payload = {
