@@ -424,11 +424,12 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       }
       if (legacy) r = { ...r, state: "legacy_review", transient: false,
         reason: "Intento anterior sin snapshot verificable; revisar el movimiento antes de acreditar." };
-      return { key: attempt.key, original: attempt.orderNumber, contextHash, r };
+      return { key: attempt.key, original: attempt.orderNumber, contextHash, r,
+        hasMovements: Array.isArray(response?.data?.response) && response.data.response.length > 0 };
     });
   }
 
-  async function applyObservations(ctx, observations, { liveOnly = false } = {}) {
+  async function applyObservations(ctx, observations, { liveOnly = false, closedPilot = false } = {}) {
     return db.runTransaction(async (t) => {
       const snap = await t.get(ctx.ref);
       if (!snap.exists) fail("not-found", "Pedido no encontrado.");
@@ -512,6 +513,11 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
           continue;
         }
         if (!["approved", "pending_capture"].includes(r.state)) {
+          if (closedPilot && observation.hasMovements && ["pending_reconciliation", "mismatch"].includes(r.state)) {
+            a.reconciliationNeedsReview = true;
+            tpd.reconciliationNeedsReview = true;
+            needsReview = true;
+          }
           if (r.state === "not_found") {
             // No transaction yet does not expire a hosted page or clear an unknown creation.
             if (!["reserved", "open"].includes(a.status)) needsReview = REVIEW_STATES.has(a.status) || needsReview;
@@ -739,7 +745,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     if (!uid) fail("unauthenticated", "Iniciá sesión con la cuenta administradora que hizo la prueba.");
     const shortRequested = request.data.shortPilotReference === true;
     const shortNumber = shortRequested ? String(crypto.randomInt(10000000, 100000000)) : null;
-    async function inspect(t, evidence) {
+    async function inspect(t, evidence, checkedForms) {
       const role = (await t.get(db.collection("users_roles").doc(uid))).data()?.role;
       if (role !== "admin") fail("permission-denied", "Se necesita la cuenta administradora que hizo la prueba.");
       const gate = (await t.get(pilotRef())).data();
@@ -769,21 +775,31 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       if (isPaidOrder(order) || order.paymentStatus === "test_paid" || !PAYABLE_STATUSES.has(order.status)
           || attempts.some(entry => entry.financialEvidence || entry.idTilopay || entry.lastObservedTransactionId || entry.reconciliationNeedsReview)
           || order.tilopay.duplicatePaymentNeedsReview || order.tilopay.legacyNeedsReview || order.tilopay.reconciliationNeedsReview) {
-        return { result: { orderId: ctx.id, message: "El pedido tiene un movimiento o está en revisión. No se solicitó otro formulario." } };
+        return { result: { ...current, message: current.paid ? current.message
+          : "El pedido tiene un movimiento o está en revisión. No se solicitó otro formulario." } };
       }
       const reference = hasShort ? { providerReference: a.orderNumber } : {};
+      const blockedForm = a.schemaVersion === 2 && a.status === "pending_reconciliation"
+        && a.creationOutcome?.reason === "MERCHANT_TRANSACTION_BLOCK" && a.creationOutcome.http === 402
+        && a.creationOutcome.type === "402" && !a.formInFlight && !a.url && order.inventoryReservation?.state === "reserved";
+      const originalBlocked = blockedForm && !hasShort && a.closedPilotCheckAt && a.formGeneration === 1
+        && a.previousCreationOutcome?.reason === "MERCHANT_TRANSACTION_BLOCK";
       if (a.closedPilotCheckAt && (!shortRequested || hasShort)) {
         if (a.formInFlight) return { result: { orderId: ctx.id, ...reference, message: "La comprobación ya se solicitó. Consultá el resultado en un momento." } };
-        if (a.creationOutcome?.reason === "FORM_READY" && a.status === "open" && api.isValidPaymentUrl(a.url)
-            && snapshotMatches(order, (await t.get(itemsQuery(ref))).docs, a)) return { result: { orderId: ctx.id, url: a.url, ...reference } };
-        return { result: { ...current, ...reference } };
+        if (a.creationOutcome?.reason === "FORM_READY" && ["open", "pending_reconciliation"].includes(a.status)
+            && api.isValidPaymentUrl(a.url) && order.inventoryReservation?.state === "reserved"
+            && snapshotMatches(order, (await t.get(itemsQuery(ref))).docs, a)) {
+          if (!checkedForms) return { recover: true, ctx, c: configuredCredentials() };
+          const stillMatches = checkedForms.length === attempts.length && attempts.every((entry, i) =>
+            entry.orderNumber === checkedForms[i].original && attemptContext(entry) === checkedForms[i].contextHash);
+          if (stillMatches) return { result: { orderId: ctx.id, url: a.url, ...reference } };
+        }
+        return { result: { ...current, ...reference, ...(originalBlocked ? { canTryShortReference: true } : {}) } };
       }
-      if (shortRequested && (!a.closedPilotCheckAt || a.previousCreationOutcome?.reason !== "MERCHANT_TRANSACTION_BLOCK")) {
+      if (shortRequested && !originalBlocked) {
         fail("failed-precondition", "La prueba corta requiere que Tilopay haya bloqueado las dos solicitudes anteriores.");
       }
-      if (a.schemaVersion !== 2 || a.status !== "pending_reconciliation" || (a.formGeneration || 0) !== (shortRequested ? 1 : 0) || a.formInFlight || a.url
-          || a.creationOutcome?.reason !== "MERCHANT_TRANSACTION_BLOCK" || a.creationOutcome.http !== 402
-          || a.creationOutcome.type !== "402" || order.inventoryReservation?.state !== "reserved") {
+      if (!blockedForm || (a.formGeneration || 0) !== (shortRequested ? 1 : 0)) {
         fail("failed-precondition", "Solo se puede comprobar el pedido original que Tilopay bloqueó antes de emitir un formulario.");
       }
       const c = configuredCredentials();
@@ -819,16 +835,27 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       t.update(ref, { tilopay: { ...order.tilopay, status: "reserved", attemptsById: { [a.key]: attempt } }, updatedAt: now() });
       return { ctx, c, order, attempt };
     }
+    const pilotOptions = { liveOnly: true, closedPilot: true };
+    async function recoverForm(state) {
+      const token = await tokenFor(state.c);
+      const checks = await readObservations(state.ctx, await readConfig(), state.c, token, pilotOptions);
+      if (!checks) fail("failed-precondition", "Cambió la configuración del pedido.");
+      const result = await applyObservations(state.ctx, checks, pilotOptions);
+      if (!checks.every(({ r }) => r.state === "not_found" && r.explicitMissing === true)) return result;
+      const fresh = await db.runTransaction(t => inspect(t, null, checks));
+      return fresh.result || result;
+    }
     const first = await db.runTransaction(t => inspect(t, null));
     if (first.result) return first.result;
+    if (first.recover) return recoverForm(first);
     const token = await tokenFor(first.c);
     const observations = await readObservations(first.ctx, await readConfig(), first.c, token, { liveOnly: true });
-    if (shortRequested && observations?.length === 2) {
-      const cached = await db.runTransaction(t => inspect(t, null));
-      if (cached.result) return cached.result;
-    }
     const evidence = observations?.[0];
     if (observations?.length !== 1 || evidence.r.state !== "not_found" || !evidence.r.explicitMissing) {
+      if (observations?.length) {
+        const result = await applyObservations(first.ctx, observations, pilotOptions);
+        if (observations.some(({ hasMovements }) => hasMovements)) return result;
+      }
       fail("failed-precondition", "Tilopay no confirmó que la transacción esté ausente. No se solicitó otro formulario.");
     }
     if (shortRequested) {
@@ -840,7 +867,11 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     }
     const claim = await db.runTransaction(t => inspect(t, evidence));
     if (claim.result) return claim.result;
+    if (claim.recover) return recoverForm(claim);
     const issued = await issueForm(claim.ctx, claim.c, token, claim);
+    if (!shortRequested && issued.formReason === "MERCHANT_TRANSACTION_BLOCK") {
+      return (await db.runTransaction(t => inspect(t, null))).result || issued;
+    }
     return shortRequested ? { ...issued, providerReference: shortNumber } : issued;
   }
 

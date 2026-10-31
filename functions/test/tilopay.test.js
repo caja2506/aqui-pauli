@@ -973,12 +973,59 @@ test('el administrador puede comprobar una sola vez su pedido cerrado aunque cam
 
 test('el segundo 402 se conserva al recargar y no vuelve a generarse otra solicitud', async () => {
   const h = await closedPilot({ onConsult: missingForm, onPay: blockedForm });
-  for (let i = 0; i < 2; i++) assert.equal((await h.service.create(checkClosedForm())).formReason, 'MERCHANT_TRANSACTION_BLOCK');
+  for (let i = 0; i < 2; i++) {
+    const result = await h.service.create(checkClosedForm());
+    assert.equal(result.formReason, 'MERCHANT_TRANSACTION_BLOCK');
+    assert.equal(result.canTryShortReference, true);
+  }
   assert.equal(h.calls.pay.length, 2);
   assert.equal(h.att().formGeneration, 1);
 });
 
 const checkShortForm = () => ({ auth: { uid: 'user1' }, data: { checkClosedPilotForm: true, shortPilotReference: true } });
+
+test('si consult encuentra una captura, autorización o contradicción se conserva aun si luego responde ausente', async () => {
+  for (const capture of ['Capture', 'Authorize', 'importe incorrecto']) {
+    let movement;
+    const h = await closedPilot({ onPay: blockedForm, onConsult: () => movement
+      ? response({ type: '200', response: [movement] }) : missingForm() });
+    movement = h.payment(ORDER, capture === 'importe incorrecto' ? { amount: '1.00' } : { capture });
+    const result = await h.service.create(checkClosedForm());
+    assert.equal(result.url, undefined);
+    if (capture === 'importe incorrecto') assert.equal(h.att().reconciliationNeedsReview, true);
+    else {
+      assert.equal(h.att().financialEvidence, capture === 'Capture' ? 'captured' : 'authorized');
+      assert.equal(h.att().idTilopay, '7');
+    }
+    movement = null;
+    assert.equal((await h.service.create(checkClosedForm())).url, undefined);
+    assert.equal(h.calls.pay.length, 1);
+  }
+});
+
+test('al recuperar un enlace se concilian ambas referencias y se retira el enlace si hay pago o la respuesta es ambigua', async () => {
+  let movement, ambiguous = false, submissions = 0;
+  const h = await closedPilot({
+    onPay: () => ++submissions <= 2 ? blockedForm() : response({ type: '100', url: URL }),
+    onConsult: body => movement?.orderNumber === body.orderNumber ? response({ type: '200', response: [movement] })
+      : ambiguous ? response({ type: '200', response: [] }) : missingForm(),
+  });
+  await h.service.create(checkClosedForm());
+  const original = h.att().orderNumber;
+  const short = await h.service.create(checkShortForm());
+  assert.equal(short.url, URL);
+  ambiguous = true;
+  assert.equal((await h.service.create(checkClosedForm())).url, undefined);
+  ambiguous = false;
+  assert.equal((await h.service.create(checkClosedForm())).url, URL);
+  movement = h.payment(ORDER, { orderNumber: short.providerReference });
+  const paid = await h.service.create(checkClosedForm());
+  assert.equal(paid.paid, true);
+  assert.equal(paid.url, undefined);
+  assert.equal(h.order().tilopay.paidAttemptKey, 'a2');
+  assert.deepEqual(h.calls.consult.slice(-2).map(q => q.orderNumber).sort(), [original, short.providerReference].sort());
+  assert.equal(submissions, 3);
+});
 
 test('la prueba de ocho dígitos solo cambia orderNumber y reserva una vez el mismo pedido', async () => {
   const entered = deferred(), reply = deferred();
