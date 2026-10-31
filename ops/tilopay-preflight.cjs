@@ -53,4 +53,4 @@ async function main() {
   console.log('PREFLIGHT_EXISTING_TEST_ONLY',JSON.stringify({http:consult.status,type:consult.data?.type,transactions:rows.map(r=>({orderNumber:r.orderNumber,merchantId:r.merchantId,environment:r.environment,capture:r.capture,idTilopay:r.id_tilopay}))}));
   console.log('PREFLIGHT_COMPLETE_NO_WRITES');
 }
-main().catch(() => {console.error('PREFLIGHT_FAILED_NO_WRITES',phase);process.exitCode=1;});
+main().catch((error) => {console.error('PREFLIGHT_FAILED_NO_WRITES',phase, /^Google preflight request failed: HTTP [0-9]+$/.test(error.message) ? error.message : error.code || error.name);process.exitCode=1;});
