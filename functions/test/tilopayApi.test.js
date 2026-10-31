@@ -124,10 +124,43 @@ test("payment payload: cents survive and capture is the documented string 1", ()
   assert.equal(payload.currency, "CRC");
   assert.equal(payload.capture, "1");
   assert.equal(payload.billToState, "CR-A");
-  assert.equal(payload.hashVersion, "V2");
   assert.equal(Buffer.from(payload.returnData, "base64").toString(), "order");
   assert.equal(tp.formatAmountCRC(45000.4), "45000.40");
   assert.throws(() => tp.formatAmountCRC("45000.004"));
+});
+
+test("processPayment sends the documented JSON request for a hosted form", async () => {
+  const redirect = "https://aquipauli.com/tilopay/retorno/demo";
+  const payload = tp.buildProcessPayload({
+    key: "example-key", redirect, orderId: "demo", orderNumber: REF, amountMinor: 100000,
+    order: { customerName: "Ana Rojas", customerEmail: "ana@example.com", customerPhone: "8888-7777",
+      shippingAddress: { provincia: "Alajuela", canton: "Grecia", distrito: "Grecia",
+        codigoPostal: "20301", señas: "Casa verde" } },
+  });
+  const formUrl = "https://secure.tilopay.com/htmls/demo.html";
+  const response = await tp.tpFetch("/api/v1/processPayment", {
+    token: "example-token", body: payload, fetchFn: async (url, options) => {
+      const request = new Request(url, options);
+      assert.equal(request.url, "https://app.tilopay.com/api/v1/processPayment");
+      assert.equal(request.method, "POST");
+      assert.equal(request.headers.get("authorization"), "bearer example-token");
+      assert.equal(request.headers.get("content-type"), "application/json");
+      assert.equal(request.headers.get("accept"), "application/json");
+      assert.deepEqual(await request.json(), {
+        redirect, key: "example-key", orderNumber: REF, amount: "1000.00", currency: "CRC",
+        capture: "1", subscription: "0", platform: "api", token_version: "v2", returnData: "ZGVtbw==",
+        billToFirstName: "Ana", billToLastName: "Rojas", billToAddress: "Casa verde",
+        billToAddress2: "Grecia", billToCity: "Grecia", billToState: "CR-A", billToZipPostCode: "20301",
+        billToCountry: "CR", billToTelephone: "88887777", billToEmail: "ana@example.com",
+        shipToFirstName: "Ana", shipToLastName: "Rojas", shipToAddress: "Casa verde",
+        shipToAddress2: "Grecia", shipToCity: "Grecia", shipToState: "CR-A", shipToZipPostCode: "20301",
+        shipToCountry: "CR", shipToTelephone: "88887777",
+      });
+      return Response.json({ type: "100", html: "Use url redirect", url: formUrl });
+    },
+  });
+  assert.equal(tp.processPaymentOutcome(response, null, true).reason, "FORM_READY");
+  assert.equal(response.data.url, formUrl);
 });
 
 test("reference requires a server token and positive safe attempt number", () => {

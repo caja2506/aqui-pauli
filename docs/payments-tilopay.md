@@ -159,7 +159,7 @@ Las entradas no se borran automáticamente ni liberan reservas/bloqueos por anti
 
 ## 8. Webhook, OrderHash y captura separada
 
-El retorno del navegador no aporta evidencia financiera confiable. `code`, `auth`, `order`, `returnData` u otros parámetros de URL no deciden el pago. Solicitar `hashVersion: V2` no equivale a verificar `OrderHash`.
+Las solicitudes al API envían un objeto JSON con los encabezados `Content-Type: application/json` y `Accept: application/json`. Para el formulario hospedado se envían `platform: "api"` y `token_version: "v2"`. Se omite `hashVersion` porque esta integración confirma el pago mediante `consult` en el servidor. Los parámetros del retorno del navegador por sí solos no acreditan el pedido.
 
 No se añadió un webhook con un algoritmo supuesto. Hace falta el contrato de `processPayment` y la especificación de firma/OrderHash de Tilopay. Para los nuevos intentos live, el conciliador programado recupera pagos sin retorno del navegador y revisa movimientos posteriores mediante `consult`. Esto no equivale a haber implementado o validado un webhook.
 
