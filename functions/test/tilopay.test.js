@@ -943,3 +943,27 @@ test('piloto live: stock, importe, cantidad, variante, vencimiento y cierre se v
     assert.equal(h.get('_ops/tilopay-live-pilot').orderId,undefined,kind);
   }
 });
+
+test('aprobación Admin no expone invitación y solo crea el control privado al presentarla con sesión', async()=>{
+  const {h,req}=pilotHarness();delete h.store['_ops/tilopay-live-pilot'];
+  const tokenHash=require('node:crypto').createHash('sha256').update(pilotToken).digest('hex');
+  const startedAt={seconds:Date.UTC(2026,9,29,10)/1000};
+  await h.db.doc('config/payments').update({'tilopay.pilotSeed':{stage:'open',tokenHash,startedAt}});
+  assert.equal((await h.service.getConfig(request())).enabled,false);
+  assert.equal(h.get('_ops/tilopay-live-pilot'),undefined);
+  assert.equal((await h.service.getConfig(req())).enabled,true);
+  const bound=h.get('_ops/tilopay-live-pilot');assert.equal(bound.ownerUid,'user1');assert.equal(bound.productId,'zz-tilopay-live-check');
+  assert.equal((await h.service.getConfig(req(ORDER,'other'))).enabled,false);
+  await h.db.doc('config/payments').update({'tilopay.pilotSeed.stage':'closed'});
+  assert.equal((await h.service.getConfig(req())).enabled,false);
+  await assert.rejects(h.service.create(req()),{code:'permission-denied'});assert.equal(h.calls.pay.length,0);
+});
+
+test('preparación y aprobación vencida nunca crean ni vinculan una sesión privada',async()=>{
+  for(const stage of ['prepared','open']){
+    const {h,req}=pilotHarness();delete h.store['_ops/tilopay-live-pilot'];
+    const tokenHash=require('node:crypto').createHash('sha256').update(pilotToken).digest('hex');
+    await h.db.doc('config/payments').update({'tilopay.pilotSeed':{stage,tokenHash,startedAt:{seconds:1}}});
+    assert.equal((await h.service.getConfig(req())).enabled,false);assert.equal(h.get('_ops/tilopay-live-pilot'),undefined);
+  }
+});

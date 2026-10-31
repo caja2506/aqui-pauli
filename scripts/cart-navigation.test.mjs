@@ -55,7 +55,7 @@ function renderSource(relative, options = {}) {
     'components/storefront/Navbar', 'components/storefront/Footer', 'components/storefront/WhatsAppButton',
     'components/admin/AdminSidebar', 'components/auth/LoginPage',
     ...['HomePage', 'CatalogPage', 'ProductPage', 'CheckoutPage', 'OrderConfirmation', 'TilopayReturnPage', 'MyOrdersPage', 'NotFoundPage', 'GiveawayPage', 'GiveawayRulesPage'].map(name => `pages/store/${name}`),
-    ...['DashboardPage', 'BrandsPage', 'CategoriesPage', 'ProductsPage', 'OrdersPage', 'CrmPage', 'ShippingPage', 'GiveawayAdminPage'].map(name => `pages/admin/${name}`),
+    ...['DashboardPage', 'BrandsPage', 'CategoriesPage', 'ProductsPage', 'OrdersPage', 'CrmPage', 'ShippingPage', 'TilopayPilotPage', 'GiveawayAdminPage'].map(name => `pages/admin/${name}`),
   ]) modules.set(abs(`src/${relative}.js`), emptyComponent(relative));
 
   const cache = new Map();
