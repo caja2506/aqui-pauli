@@ -2,7 +2,7 @@
 const {initializeApp,cert}=require('firebase-admin/app');
 const {getFirestore,FieldValue}=require('firebase-admin/firestore');
 const {createHash}=require('node:crypto');
-const stage='inspect';
+const stage='arm';
 const tokenHash='6decbdafd2f5715131264551658a377df8ec040e70cc7febc008bf1fa709eeab', sku='zz-tilopay-live-check', variant='v1';
 const expected=(c)=>c.merchantId==='88802749'&&c.orderPrefix==='PFC031932';
 (async()=>{
