@@ -33,7 +33,6 @@ exports.tilopayReconcilePayments = onSchedule({ schedule: "every 5 minutes", reg
   timeZone: "America/Costa_Rica", timeoutSeconds: 540, maxInstances: 1,
   secrets: [API_USER, API_PASSWORD, KEY] }, async () => {
   const result = await reconciler.run();
-  await require("./lib/sandboxHostedCheck").run(db, () => ({ apiUser: API_USER.value(), password: API_PASSWORD.value(), key: KEY.value() }));
   console.info("[tilopayReconcilePayments]", result);
   return result;
 });
