@@ -36,7 +36,7 @@ const seed = (mode = "live") => ({
 
 function harness({ mode = "live", extra = {}, onPay, onConsult, credentials } = {}) {
   const mem = createMemoryFirestore({ ...seed(mode), ...extra });
-  const calls = { pay: [], consult: [], credentials: 0, token: 0 };
+  const calls = { pay: [], consult: [], credentials: 0, token: 0, quoteErrors: [] };
   let nonce = 0;
   let time = Date.UTC(2026, 9, 29, 10);
   const bank = new Map();
@@ -54,6 +54,7 @@ function harness({ mode = "live", extra = {}, onPay, onConsult, credentials } = 
     },
   };
   const service = createTilopayService({ db: mem.db, api, HttpsError,
+    onQuoteError: event => calls.quoteErrors.push(event),
     credentials: () => { calls.credentials++; return credentials ? credentials() : { apiUser: "u", password: "p", key: KEY }; },
     returnBase: () => "https://aquipauli.com",
     clock: () => time, randomId: () => String(++nonce).padStart(32, "0") });
@@ -775,4 +776,55 @@ test("flags previos duplicate/legacy/reconciliation no se borran ni se disfrazan
     assert.equal((await h.service.confirm(request())).result, "review");
     assert.equal(h.order().tilopay[flag], true);
   }
+});
+
+test("fixture Tilopay inactivo reproduce 400 con motivo; activo cotiza ₡1000 sin cobrar", async () => {
+  const productPath = "products/zz-tilopay-test";
+  const h = harness({ mode: "test", extra: {
+    [productPath]: { active: false, deleted: false, unlisted: true, basePrice: 1000, name: "ZZ Prueba Tilopay (no vender)" },
+    [`${productPath}/variants/v1`]: { active: true, name: "Unico", price: 1000, stock: 1, reservedStock: 0 },
+  } });
+  const input = quoteRequest([{ productId: "zz-tilopay-test", variantId: "v1", quantity: 1 }]);
+  await assert.rejects(h.service.getQuote(input), {
+    code: "invalid-argument", details: { reason: "CATALOG_UNAVAILABLE", lineIndex: 0 },
+  });
+  assert.deepEqual(h.calls.quoteErrors, [{ severity: "WARNING", event: "tilopay_quote_rejected",
+    reason: "CATALOG_UNAVAILABLE", lineIndex: 0, itemCount: 1 }]);
+  await h.db.doc(productPath).update({ active: true });
+  const before = structuredClone(h.store);
+  const quote = await h.service.getQuote(input);
+  assert.equal(quote.crcTotal, 1000);
+  assert.equal(quote.crcPayNow, 1000);
+  assert.equal(quote.crcShipping, 0);
+  assert.equal(quote.crcBalanceDue, 0);
+  assert.equal(h.get(productPath).unlisted, true);
+  assert.equal(h.get("config/payments").tilopay.mode, "test");
+  assert.deepEqual(h.store, before);
+  assert.equal(h.calls.token, 0); assert.equal(h.calls.pay.length, 0);
+});
+
+test("rechazos de cotización registran códigos y posición sin volcar datos del cliente", async () => {
+  const cases = [
+    [{ items: [] }, "INVALID_ITEM_COUNT", undefined],
+    [{ items: [{ productId: "p1", variantId: "v1", quantity: "1" }] }, "INVALID_ITEM", 0],
+    [{ shippingType: "secreto-cliente" }, "INVALID_SHIPPING_TYPE", undefined],
+    [{ canton: { secret: "secreto-cliente" } }, "INVALID_CANTON", undefined],
+  ];
+  for (const [data, reason, lineIndex] of cases) {
+    const h = harness();
+    const input = quoteRequest(); Object.assign(input.data, data, { token: "secreto-cliente" });
+    await assert.rejects(h.service.getQuote(input), { code: "invalid-argument" });
+    assert.equal(h.calls.quoteErrors[0].reason, reason);
+    assert.equal(h.calls.quoteErrors[0].lineIndex, lineIndex);
+    assert.doesNotMatch(JSON.stringify(h.calls.quoteErrors), /secreto-cliente|user1/);
+    assert.equal(h.calls.pay.length, 0);
+  }
+});
+
+test("fallo de infraestructura no se atribuye al cliente ni expone su mensaje", async () => {
+  const events = [];
+  const service = createTilopayService({ db: {}, HttpsError, onQuoteError: e => events.push(e),
+    computeTotalsCRC: async () => { throw new Error("internal secret host details"); } });
+  await assert.rejects(service.getQuote(quoteRequest()), { code: "internal", details: { reason: "QUOTE_INTERNAL_ERROR" } });
+  assert.deepEqual(events, [{ severity: "ERROR", event: "tilopay_quote_rejected", reason: "QUOTE_INTERNAL_ERROR", itemCount: 1 }]);
 });

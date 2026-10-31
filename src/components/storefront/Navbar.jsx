@@ -62,6 +62,7 @@ export default function Navbar() {
             {/* Cart */}
             <button
               onClick={() => setIsCartOpen(true)}
+              aria-label={`Abrir carrito: ${itemCount} ${itemCount === 1 ? 'unidad' : 'unidades'}`}
               className="relative p-2.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"
             >
               <ShoppingCart className="w-5 h-5" />

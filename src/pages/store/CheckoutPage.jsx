@@ -36,7 +36,7 @@ export default function CheckoutPage() {
   usePageTitle('Checkout | Aquí Pauli');
   const { user, loading: authLoading, ensureGuestSession } = useAuth();
   const [guestError, setGuestError] = useState(null);
-  const { items, subtotal, clearCart } = useCart();
+  const { items, itemCount, subtotal, clearCart } = useCart();
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -564,6 +564,10 @@ export default function CheckoutPage() {
         <div className="lg:col-span-1">
           <div className="sticky top-24 bg-white rounded-2xl border border-slate-100 p-6 shadow-sm space-y-4">
             <h2 className="font-black text-lg text-slate-900">Resumen</h2>
+            <p className="text-xs text-slate-500" data-testid="checkout-cart-count">
+              {itemCount} {itemCount === 1 ? 'unidad' : 'unidades'} · {items.length} {items.length === 1 ? 'variante' : 'variantes'}
+            </p>
+            <Link to="/carrito" className="block text-xs font-bold text-rose-600 underline">Editar cantidades</Link>
             <div className="space-y-3 max-h-60 overflow-y-auto">
               {items.map(item => (
                 <div key={`${item.productId}-${item.variantId}`} className="flex items-center gap-3">

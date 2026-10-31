@@ -61,9 +61,9 @@ function ProductDetails({ productId }) {
   }, [productId]);
 
   if (loading) return <LoadingSpinner message="Cargando producto..." />;
-  if (!product) return (
+  if (!product || product.active === false || product.deleted) return (
     <div className="max-w-7xl mx-auto px-4 py-20 text-center">
-      <h2 className="text-xl font-black text-slate-900">Producto no encontrado</h2>
+      <h2 className="text-xl font-black text-slate-900">{product ? 'Producto no disponible' : 'Producto no encontrado'}</h2>
       <Link to="/catalogo" className="text-sm font-bold text-rose-600 mt-4 inline-block">← Volver al catálogo</Link>
     </div>
   );

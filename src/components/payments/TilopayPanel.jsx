@@ -9,6 +9,18 @@ import { tilopayCreatePayment, tilopayGetQuote } from '../../services/payments/t
 import { isPayableTilopayQuote, sameTilopayQuote, tilopayQuoteKey, tilopayQuoteAmounts } from '../../services/payments/tilopayQuote';
 
 const STORAGE_KEY = 'aqp_tilopay_pending';
+const QUOTE_MESSAGES = {
+  CATALOG_UNAVAILABLE: 'Un producto o variante del carrito está desactivado. Revisá el carrito antes de pagar.',
+  CATALOG_NOT_FOUND: 'Un producto o variante ya no existe. Quitalo del carrito y agregalo nuevamente desde el catálogo.',
+  CATALOG_PRICE_INVALID: 'Un producto necesita una corrección de precio. Contactanos antes de pagar.',
+  CATALOG_STOCK_INVALID: 'Un producto necesita una revisión de inventario. Contactanos antes de pagar.',
+  CATALOG_SUPPLY_INVALID: 'Un producto necesita una revisión de disponibilidad. Contactanos antes de pagar.',
+  INVALID_ITEM: 'Hay una cantidad o variante inválida. Revisá el carrito antes de pagar.',
+  DUPLICATE_VARIANT: 'Hay una variante repetida. Revisá las cantidades en el carrito antes de pagar.',
+  INVALID_ITEM_COUNT: 'Revisá el carrito: debe tener entre 1 y 50 productos distintos.',
+  INVALID_SHIPPING_TYPE: 'Seleccioná nuevamente el tipo de envío.',
+  INVALID_CANTON: 'Seleccioná nuevamente el cantón de entrega.',
+};
 const cartKey = (items) => JSON.stringify((Array.isArray(items) ? items : []).map((item) => [
   String(item.productId ?? ''), String(item.variantId ?? ''), Number(item.quantity),
 ]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
@@ -75,9 +87,12 @@ export default function TilopayPanel({ validateForm, createPendingOrder, canton,
       if (cancelled || latest.current.uid !== uid || latest.current.quoteKey !== quoteKey) return;
       if (!isPayableTilopayQuote(value)) throw new Error('Cotización inválida.');
       setQuoted({ uid, key: quoteKey, quote: value });
-    }).catch(() => {
+    }).catch((failure) => {
       if (!cancelled && latest.current.uid === uid && latest.current.quoteKey === quoteKey) {
-        setQuoteError({ uid, key: quoteKey, message: 'No pudimos confirmar el importe con el servidor. Volvé a calcular antes de pagar.' });
+        const reason = failure?.details?.reason;
+        const message = Object.hasOwn(QUOTE_MESSAGES, reason) ? QUOTE_MESSAGES[reason]
+          : 'No pudimos confirmar el importe con el servidor. Volvé a calcular antes de pagar.';
+        setQuoteError({ uid, key: quoteKey, message });
       }
     });
     return () => { cancelled = true; };
@@ -202,7 +217,9 @@ export default function TilopayPanel({ validateForm, createPendingOrder, canton,
       </div> : visiblePending ? <p className="text-xs text-slate-600">Consultaremos el importe y el estado del pedido pendiente en el servidor.</p>
         : !canton ? <p className="text-xs text-slate-500">Seleccioná tu cantón para confirmar el importe a pagar.</p>
           : error ? <div role="alert" className="text-xs text-red-700 space-y-2">
-            <p>{error}</p><button type="button" className="font-bold underline" onClick={() => setQuoteRefresh(value => value + 1)}>Volver a calcular</button>
+            <p>{error}</p>
+            <Link to="/carrito" className="block font-bold underline">Revisar carrito</Link>
+            <button type="button" className="font-bold underline" onClick={() => setQuoteRefresh(value => value + 1)}>Volver a calcular</button>
           </div> : <p className="text-xs text-slate-500" role="status">Calculando el importe a pagar en el servidor…</p>}
       {visiblePending && <p className="text-sm text-slate-700">Hay un pedido de tarjeta pendiente. Continuaremos con ese mismo pedido.</p>}
       {!pendingMatches && <p className="text-xs font-bold text-red-700">Ese pedido tiene otro carrito o envío. Verificá el pedido pendiente antes de iniciar otra compra con tarjeta.</p>}

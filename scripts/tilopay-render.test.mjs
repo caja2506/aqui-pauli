@@ -392,3 +392,16 @@ test('retorno: solo rechazo con retry explícito permite reintentar el mismo ped
   payment.resolve({ ...quote, orderId: 'order-one', url: safeUrl }); await Promise.all([first, second]);
   assert.deepEqual(app.redirects, [safeUrl]);
 });
+
+test('producto desactivado explica el rechazo y mantiene el pago bloqueado', async () => {
+  const app = await ready({ tilopayGetQuote: async () => {
+    throw { code: 'functions/invalid-argument', details: { reason: 'CATALOG_UNAVAILABLE', lineIndex: 0 },
+      message: 'server arbitrary private text' };
+  } });
+  assert.match(app.html(), /producto o variante del carrito está desactivado/);
+  assert.match(app.html(), /href="\/carrito"/);
+  assert.doesNotMatch(app.html(), /arbitrary private/);
+  assert.equal(payButton(app).disabled, true);
+  assert.equal(counts(app, 'createPendingOrder').length, 0);
+  assert.equal(counts(app, 'tilopayCreatePayment').length, 0);
+});

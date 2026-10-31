@@ -14,6 +14,15 @@ const GAM_CANTONES = [
 const EXPRESS_CANTONES = ["Grecia"];
 const SHIPPING_INCLUDED = true;
 
+class PricingError extends Error {
+  constructor(reason, message, lineIndex) {
+    super(message);
+    this.name = "PricingError";
+    this.reason = reason;
+    if (lineIndex !== undefined) this.lineIndex = lineIndex;
+  }
+}
+
 // Existing business policy: neither normal nor express adds a shipping charge.
 function shippingCostCRC(_prices, _canton, _shippingType = "normal") { return 0; }
 
@@ -23,7 +32,7 @@ function validId(value) {
 
 function safeInteger(value, label) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`${label} inválido`);
+    throw new PricingError("AMOUNT_OUT_OF_RANGE", `${label} inválido`);
   }
   return value;
 }
@@ -47,42 +56,46 @@ function catalogText(value, max = 300) {
  */
 async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
   if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
-    throw new Error("Items inválidos: se requieren entre 1 y 50 líneas");
+    throw new PricingError("INVALID_ITEM_COUNT", "Items inválidos: se requieren entre 1 y 50 líneas");
   }
   if (transaction && typeof transaction.get !== "function") throw new Error("Transacción inválida");
   const read = (ref) => transaction ? transaction.get(ref) : ref.get();
   const seen = new Set();
   // Validate every line before doing any reads. Never coerce quantity or ids.
-  for (const item of items) {
+  for (const [lineIndex, item] of items.entries()) {
     if (!item || typeof item !== "object" || !validId(item.productId) || !validId(item.variantId)
       || typeof item.quantity !== "number" || !Number.isInteger(item.quantity)
       || item.quantity < 1 || item.quantity > 99) {
-      throw new Error("Item inválido: id o cantidad no válidos");
+      throw new PricingError("INVALID_ITEM", "Item inválido: id o cantidad no válidos", lineIndex);
     }
     const identity = JSON.stringify([item.productId, item.variantId]);
-    if (seen.has(identity)) throw new Error("Variante duplicada: agrupá las cantidades en una sola línea");
+    if (seen.has(identity)) throw new PricingError("DUPLICATE_VARIANT", "Variante duplicada: agrupá las cantidades en una sola línea", lineIndex);
     seen.add(identity);
   }
 
   const lines = [];
   let subtotalMinor = 0;
-  for (const item of items) {
+  for (const [lineIndex, item] of items.entries()) {
     const productRef = db.collection("products").doc(item.productId);
     const variantRef = productRef.collection("variants").doc(item.variantId);
     const [productSnap, variantSnap] = await Promise.all([read(productRef), read(variantRef)]);
-    if (!productSnap.exists || !variantSnap.exists) throw new Error("Producto o variante no encontrado");
+    if (!productSnap.exists || !variantSnap.exists) throw new PricingError("CATALOG_NOT_FOUND", "Producto o variante no encontrado", lineIndex);
     const product = productSnap.data();
     const variant = variantSnap.data();
     if (!product || !variant || product.active === false || product.deleted
       || variant.active === false || variant.deleted) {
-      throw new Error(`Producto no disponible: ${catalogText(product?.name) || item.productId}`);
+      throw new PricingError("CATALOG_UNAVAILABLE", `Producto no disponible: ${catalogText(product?.name) || item.productId}`, lineIndex);
     }
 
     const supplyType = variant.supplyType ?? product.supplyType ?? "stock_propio";
-    if (!["stock_propio", "bajo_pedido"].includes(supplyType)) throw new Error("Abastecimiento del catálogo inválido");
+    if (!["stock_propio", "bajo_pedido"].includes(supplyType)) throw new PricingError("CATALOG_SUPPLY_INVALID", "Abastecimiento del catálogo inválido", lineIndex);
     // A stale reservation counter must not break a quote. Physical stock still
     // validates strictly; callers normalize again inside their stock transaction.
-    normalizeInventoryStock(variant, { context: "pricing" });
+    try { normalizeInventoryStock(variant, { context: "pricing" }); }
+    catch (error) {
+      if (error.code !== "INVENTORY_STOCK_INVALID") throw error;
+      throw new PricingError("CATALOG_STOCK_INVALID", error.message, lineIndex);
+    }
 
     // A configured zero/negative/malformed variant price is an error. Only an
     // absent value inherits basePrice; falsy values must not hide a catalog error.
@@ -90,7 +103,7 @@ async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
       ? product.basePrice : variant.price;
     let unitPriceMinor;
     try { unitPriceMinor = parseMinorCRC(rawPrice); }
-    catch { throw new Error(`Producto sin precio válido: ${catalogText(product.name) || item.productId}`); }
+    catch { throw new PricingError("CATALOG_PRICE_INVALID", `Producto sin precio válido: ${catalogText(product.name) || item.productId}`, lineIndex); }
     const lineTotalMinor = safeInteger(unitPriceMinor * item.quantity, "Total de línea");
     subtotalMinor = safeInteger(subtotalMinor + lineTotalMinor, "Subtotal");
     const productName = catalogText(product.name);
@@ -115,4 +128,4 @@ async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
   };
 }
 
-module.exports = { SHIPPING_INCLUDED, computeTotalsCRC, shippingCostCRC, GAM_CANTONES, EXPRESS_CANTONES };
+module.exports = { SHIPPING_INCLUDED, computeTotalsCRC, shippingCostCRC, GAM_CANTONES, EXPRESS_CANTONES, PricingError };
