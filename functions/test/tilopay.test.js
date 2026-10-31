@@ -898,3 +898,48 @@ test('consulta ambigua, fallo de red, cambio de integración o live impiden repe
     assert.equal(h.calls.pay.length,1,variant);
   }
 });
+
+const pilotToken = 'a'.repeat(64), pilotSession = 'b'.repeat(32);
+function pilotHarness(options = {}) {
+  const h = harness({ ...options, extra: {
+    'config/payments': {tilopay:{enabled:true,mode:'live',merchantId:MERCHANT,orderPrefix:PREFIX,access:'private-pilot'}},
+    '_ops/tilopay-live-pilot': {active:true,expiresAt:Date.UTC(2026,10,2),productId:'p1',variantId:'v1',
+      tokenHash:require('node:crypto').createHash('sha256').update(pilotToken).digest('hex')},
+    'products/p1/variants/v1': {price:1000,stock:1,reservedStock:0,supplyType:'stock_propio'},
+    [`orders/${ORDER}/items/item_0`]: {productId:'p1',variantId:'v1',quantity:1},
+  }});
+  const req=(id=ORDER,uid='user1',over={})=>({auth:{uid},data:{orderId:id,pilotToken,pilotSession,...over}});
+  return {h,req};
+}
+
+test('piloto live: una invitación vinculada a una sesión y un único pedido de ₡1000', async()=>{
+  const {h,req}=pilotHarness();
+  assert.equal((await h.service.getConfig()).enabled,false);
+  assert.equal((await h.service.getConfig(request())).enabled,false);
+  assert.equal((await h.service.getConfig(req())).enabled,true);
+  assert.equal((await h.service.getConfig(req(ORDER,'other'))).enabled,false);
+  assert.equal((await h.service.getConfig(req(ORDER,'user1',{pilotSession:'c'.repeat(32)}))).enabled,false);
+  await assert.rejects(h.service.create(request()), {code:'permission-denied'});
+  const id='AnotherPilotOrder';await h.set(`orders/${id}`,orderData());
+  await h.set(`orders/${id}/items/item_0`,{productId:'p1',variantId:'v1',quantity:1});
+  const results=await Promise.allSettled([h.service.create(req()),h.service.create(req(id))]);
+  assert.equal(results.filter(x=>x.status==='fulfilled'&&x.value.url===URL).length,1);
+  assert.equal(h.calls.pay.length,1);assert.equal(h.calls.pay[0].amount,'1000.00');
+  const reserved=h.get('_ops/tilopay-live-pilot').orderId;
+  assert.ok([ORDER,id].includes(reserved));assert.equal(h.get(`orders/${reserved}`).tilopay.mode,'live');
+  assert.equal(h.get('products/p1/variants/v1').reservedStock,1);
+});
+
+test('piloto live: stock, importe, cantidad, variante, vencimiento y cierre se validan en servidor', async()=>{
+  for(const kind of ['stock','price','quantity','variant','expired','closed']) {
+    const {h,req}=pilotHarness();await h.service.getConfig(req());
+    if(kind==='stock') await h.db.doc('products/p1/variants/v1').update({stock:0});
+    if(kind==='price') await h.db.doc('products/p1/variants/v1').update({price:999});
+    if(kind==='quantity') await h.db.doc(`orders/${ORDER}/items/item_0`).update({quantity:2});
+    if(kind==='variant') await h.db.doc('_ops/tilopay-live-pilot').update({variantId:'other'});
+    if(kind==='expired') await h.db.doc('_ops/tilopay-live-pilot').update({expiresAt:0});
+    if(kind==='closed') await h.db.doc('_ops/tilopay-live-pilot').update({active:false});
+    await assert.rejects(h.service.create(req())); assert.equal(h.calls.pay.length,0,kind);
+    assert.equal(h.get('_ops/tilopay-live-pilot').orderId,undefined,kind);
+  }
+});

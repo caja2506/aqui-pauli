@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { pilotStorageKey } from '../services/payments/tilopayPilot';
 
 const CartContext = createContext(null);
 
-const CART_STORAGE_KEY = 'aquipauli_cart';
+const CART_STORAGE_KEY = pilotStorageKey('aquipauli_cart');
 
 export function useCart() {
   const context = useContext(CartContext);

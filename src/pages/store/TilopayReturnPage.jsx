@@ -8,7 +8,8 @@ import { tilopayConfirm, tilopayCreatePayment } from '../../services/payments/ti
 import { sameTilopayQuote, tilopayQuoteAmounts } from '../../services/payments/tilopayQuote';
 import { formatCRC } from '../../utils/formatters';
 
-const STORAGE_KEY = 'aqp_tilopay_pending';
+import { pilotStorageKey } from '../../services/payments/tilopayPilot';
+const STORAGE_KEY = pilotStorageKey('aqp_tilopay_pending');
 const cartKey = (items) => JSON.stringify((Array.isArray(items) ? items : []).map((item) => [
   String(item.productId ?? ''), String(item.variantId ?? ''), Number(item.quantity),
 ]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));

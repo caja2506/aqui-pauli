@@ -8,7 +8,8 @@ import { BACKORDER_BALANCE_TIMING, BACKORDER_DEPOSIT_LABEL } from '../../utils/b
 import { tilopayCreatePayment, tilopayGetQuote } from '../../services/payments/tilopayClient';
 import { isPayableTilopayQuote, sameTilopayQuote, tilopayQuoteKey, tilopayQuoteAmounts } from '../../services/payments/tilopayQuote';
 
-const STORAGE_KEY = 'aqp_tilopay_pending';
+import { pilotStorageKey } from '../../services/payments/tilopayPilot';
+const STORAGE_KEY = pilotStorageKey('aqp_tilopay_pending');
 const QUOTE_MESSAGES = {
   CATALOG_UNAVAILABLE: 'Un producto o variante del carrito está desactivado. Revisá el carrito antes de pagar.',
   CATALOG_NOT_FOUND: 'Un producto o variante ya no existe. Quitalo del carrito y agregalo nuevamente desde el catálogo.',

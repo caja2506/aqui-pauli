@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import React from 'react';
+import * as pilot from '../src/services/payments/tilopayPilot.js';
 import { transformWithEsbuild } from 'vite';
 
 const require = createRequire(import.meta.url);
@@ -34,7 +35,7 @@ function mount(initial = [line]) {
   const window = { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) };
   const module = { exports: {} };
   new Function('require', 'module', 'exports', 'localStorage', 'window', code)(
-    name => name === 'react' ? react : require(name), module, module.exports, localStorage, window);
+    name => name === 'react' ? react : name.endsWith('/tilopayPilot') ? pilot : require(name), module, module.exports, localStorage, window);
   const render = () => {
     cursor = 0; effects = [];
     const value = module.exports.CartProvider({ children: null }).props.value;
