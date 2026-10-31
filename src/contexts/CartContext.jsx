@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { useAuth } from './AuthContext';
 
 const CartContext = createContext(null);
 
@@ -14,18 +13,21 @@ export function useCart() {
 function loadCartFromStorage() {
   try {
     const stored = localStorage.getItem(CART_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
+    const parsed = stored ? JSON.parse(stored) : [];
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
 function saveCartToStorage(items) {
-  localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
+  try {
+    const stored = JSON.stringify(items);
+    if (localStorage.getItem(CART_STORAGE_KEY) !== stored) localStorage.setItem(CART_STORAGE_KEY, stored);
+  } catch { /* Keep the current cart usable when browser storage is unavailable. */ }
 }
 
 export function CartProvider({ children }) {
-  const { user } = useAuth();
   const [items, setItems] = useState(loadCartFromStorage);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
@@ -33,6 +35,17 @@ export function CartProvider({ children }) {
   useEffect(() => {
     saveCartToStorage(items);
   }, [items]);
+
+  // Another open tab can change the cart while this checkout remains mounted.
+  useEffect(() => {
+    const syncCart = (event) => {
+      if (event.storageArea === localStorage && (event.key === CART_STORAGE_KEY || event.key === null)) {
+        setItems(loadCartFromStorage());
+      }
+    };
+    window.addEventListener('storage', syncCart);
+    return () => window.removeEventListener('storage', syncCart);
+  }, []);
 
   const addItem = useCallback((product, variant, quantity = 1) => {
     setItems(prev => {

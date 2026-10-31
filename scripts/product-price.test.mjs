@@ -337,3 +337,14 @@ test('la barra no habilita compra para una consulta fallida o sin variantes comp
     assert.equal(page.addToCart, undefined);
   }
 });
+
+test('URL directa de producto inactivo o eliminado no permite agregarlo al carrito', () => {
+  for (const fields of [{ active: false }, { deleted: true }]) {
+    const page = render(PAGE, { item: { ...product, ...fields }, selected: options[0] });
+    assert.match(page.text, /Producto no disponible/);
+    assert.equal(page.addToCart, undefined);
+    assert.equal(page.cartAdds.length, 0);
+  }
+  const hidden = render(PAGE, { item: { ...product, active: true, unlisted: true }, selected: options[0] });
+  assert.equal(typeof hidden.addToCart, 'function');
+});

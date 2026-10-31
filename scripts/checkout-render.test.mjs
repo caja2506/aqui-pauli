@@ -1132,3 +1132,9 @@ test('carrito conserva lista desplazable y pie de compra con espacio para el ár
   'The checkout footer retains its height and safe-area bottom padding');
   contains(html, 'Proceder al Checkout');
 });
+
+test('resumen distingue tres unidades de una sola variante y permite editar cantidades', () => {
+  const page = renderPage(CHECKOUT, { items: [{ ...line('stock_propio', 1000), quantity: 3 }] });
+  contains(page.html, '3 unidades · 1 variante');
+  assert.match(page.html, /href="\/carrito"[^>]*>Editar cantidades/);
+});

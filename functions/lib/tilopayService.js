@@ -2,7 +2,7 @@
 
 const crypto = require("node:crypto");
 const defaultApi = require("./tilopayApi");
-const { computeTotalsCRC: defaultPricing } = require("./pricing");
+const { computeTotalsCRC: defaultPricing, PricingError } = require("./pricing");
 const { parseMinorCRC, minorToCRC } = require("./paymentMoney");
 const { normalizeInventoryStock } = require("./inventoryStock");
 const {
@@ -35,7 +35,8 @@ async function mapLimited(values, fn) {
 }
 
 function createTilopayService({ db, credentials, returnBase, HttpsError, api = defaultApi,
-  computeTotalsCRC = defaultPricing, clock = () => Date.now(), randomId = () => crypto.randomUUID().replace(/-/g, "") }) {
+  computeTotalsCRC = defaultPricing, clock = () => Date.now(), randomId = () => crypto.randomUUID().replace(/-/g, ""),
+  onQuoteError = (event) => console.warn(JSON.stringify(event)) }) {
   const fail = (code, message, details) => { throw new HttpsError(code, message, details); };
   const now = () => new Date(clock()).toISOString();
   const orderRef = (id) => db.collection("orders").doc(id);
@@ -682,15 +683,27 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
   async function getQuote(request) {
     if (!request?.auth?.uid) fail("unauthenticated", "Debes iniciar sesión.");
     const { items, canton, shippingType = "normal" } = request.data || {};
-    if (!Array.isArray(items) || !["normal", "express"].includes(shippingType)
-      || (canton !== undefined && (typeof canton !== "string" || canton.length > 100))) {
-      fail("invalid-argument", "Datos de cotización inválidos.");
-    }
     try {
+      if (!["normal", "express"].includes(shippingType)) {
+        throw new PricingError("INVALID_SHIPPING_TYPE", "Tipo de envío inválido.");
+      }
+      if (canton !== undefined && (typeof canton !== "string" || canton.length > 100)) {
+        throw new PricingError("INVALID_CANTON", "Cantón inválido.");
+      }
+      if (!Array.isArray(items)) throw new PricingError("INVALID_ITEM_COUNT", "Carrito inválido.");
       const snapshot = await priceSnapshot({ uid: request.auth.uid, shippingType, shippingAddress: { canton } },
         items.map((item, index) => ({ ...item, itemId: `item_${index}` })));
       return quoteFromSnapshot(snapshot);
-    } catch (error) { fail("invalid-argument", error.message); }
+    } catch (error) {
+      const known = error instanceof PricingError;
+      const reason = known ? error.reason : "QUOTE_INTERNAL_ERROR";
+      const details = { reason, ...(known && Number.isInteger(error.lineIndex) ? { lineIndex: error.lineIndex } : {}) };
+      // Only diagnostic codes and line positions: no credentials, auth tokens,
+      // customer/contact fields, arbitrary messages or request/catalog dumps.
+      try { onQuoteError({ severity: known ? "WARNING" : "ERROR", event: "tilopay_quote_rejected",
+        ...details, itemCount: Array.isArray(items) ? items.length : 0 }); } catch { /* best effort telemetry */ }
+      fail(known ? "invalid-argument" : "internal", known ? error.message : "No pudimos calcular el importe. Intentá nuevamente.", details);
+    }
   }
 
   return {
