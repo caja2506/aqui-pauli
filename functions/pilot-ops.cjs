@@ -19,6 +19,9 @@ const expected=(c)=>c.merchantId==='88802749'&&c.orderPrefix==='PFC031932';
       ev?.http===200&&ev?.type==='200'&&ev.rows===0&&ev.message==='does not exist' && p.mode==='test' &&
       !p.reconciliationNeedsReview && !p.duplicatePaymentNeedsReview && !list[0].formInFlight && !list[0].url && !list[0].idTilopay &&
       Date.parse(list[0].creationCheckedAt)<=evidence.updateTime.toMillis();
+   console.log('PILOT_ATTEMPT_META',JSON.stringify({key:createHash('sha256').update(o.id).digest('hex').slice(0,12),safePrior,
+    attempts:list.map(a=>({status:a.status,hasUrl:!!a.url,hasTx:!!a.idTilopay,formInFlight:!!a.formInFlight,
+      sent:a.requestSentAt,checked:a.creationCheckedAt,reason:a.creationOutcome?.reason||null,last:a.lastObservedState||null,explicitAbsence:a.providerOrderAbsent===true}))}));
    if(!safePrior && (!list.length||list.some(v=>v.mode!=='test'||!['test_paid','approved'].includes(v.status))))blocked++;
   }
   console.log('PILOT_TEST_ATTEMPTS',JSON.stringify({orders:orders.size,blocking:blocked}));return blocked;
