@@ -134,12 +134,13 @@ const counts = (app, name) => app.calls.filter(call => call.name === name);
 const payButton = app => app.button(/^(Pagás ahora|Continuar el pedido pendiente|Calculando…|Verificando…)/);
 
 test('panel cerrado: el botón solicita el formulario solo al tocarlo y muestra el resultado de Tilopay', async () => {
-  for (const result of [{ url: safeUrl }, { formReason: 'MERCHANT_TRANSACTION_BLOCK' }]) {
+  for (const result of [{ url: safeUrl, providerReference: '12345678' }, { formReason: 'MERCHANT_TRANSACTION_BLOCK', providerReference: '12345678' }]) {
     const app = await ready({ file: PILOT_ADMIN, tilopayCreatePayment: async () => result });
     assert.equal(app.calls.length, 0);
-    await app.button(/Comprobar formulario/).onClick();
+    await app.button(/Probar con referencia corta/).onClick();
     app.render();
-    assert.deepEqual(counts(app, 'tilopayCreatePayment')[0].args, [{ checkClosedPilotForm: true }]);
+    assert.deepEqual(counts(app, 'tilopayCreatePayment')[0].args, [{ checkClosedPilotForm: true, shortPilotReference: true }]);
+    assert.match(app.html(), /12345678/);
     assert.match(app.html(), result.url ? /Abrir formulario de Tilopay/ : /bloqueo \(402\)/);
     assert.equal(app.redirects.length, 0);
   }
