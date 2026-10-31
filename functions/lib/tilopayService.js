@@ -73,7 +73,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
         && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(orderPrefix));
       const pilot = c.access === "private-pilot";
       const validAccess = c.access === undefined || (pilot && c.mode === "live");
-      return { enabled: c.enabled === true && validMode && identityValid && validAccess, pilot,
+      return { enabled: c.enabled === true && validMode && identityValid && validAccess, pilot, seed: c.pilotSeed,
         mode: validMode ? c.mode : "test", merchantId, orderPrefix };
     } catch {
       return { enabled: false, mode: "test", merchantId: "", orderPrefix: "" };
@@ -221,7 +221,8 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       let pilot;
       if (cfg.pilot) {
         pilot = (await t.get(pilotRef())).data();
-        if (!pilotPermits(pilot, request) || !pilot.ownerUid || (pilot.orderId && pilot.orderId !== ctx.id))
+        if (!pilotPermits(pilot, request) || !pilot.ownerUid || (pilot.orderId && pilot.orderId !== ctx.id)
+          || (fresh.seed && (fresh.seed.stage !== "open" || fresh.seed.tokenHash !== pilot.tokenHash)))
           fail("permission-denied", "Esta prueba admite un único pedido de la sesión invitada.");
       }
       const snap = await t.get(ctx.ref);
@@ -698,6 +699,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     if (cfg.pilot) {
       const pilot = (await pilotRef().get()).data();
       if (!pilotPermits(pilot, request) || !pilot.ownerUid || (pilot.orderId && pilot.orderId !== ctx.id)
+        || (cfg.seed && (cfg.seed.stage !== "open" || cfg.seed.tokenHash !== pilot.tokenHash))
         || (ctx.order.tilopay && (pilot.orderId !== ctx.id || ctx.order.tilopay.mode !== "live"))) {
         fail("permission-denied", "Este pago está limitado al pedido de la sesión invitada.");
       }
@@ -807,10 +809,19 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       const cfg = await readConfig();
       if (!cfg.enabled || !cfg.pilot) return { enabled: cfg.enabled, mode: cfg.mode };
       const enabled = await db.runTransaction(async t => {
+        const current = await readConfig(t);
+        if (!current.enabled || !current.pilot) return false;
         const ref = pilotRef();
-        const pilot = (await t.get(ref)).data();
+        const saved = (await t.get(ref)).data();
+        const seed = current.seed;
+        const started = seed?.startedAt?.seconds;
+        const canStart = seed?.stage === "open" && /^[a-f0-9]{64}$/.test(seed.tokenHash)
+          && Number.isSafeInteger(started) && started * 1000 <= clock();
+        const pilot = saved || (canStart ? { active: true, tokenHash: seed.tokenHash, productId: "zz-tilopay-live-check",
+          variantId: "v1", expiresAt: started * 1000 + 2 * 3600000, phase: "open" } : null);
+        if (seed && (!canStart || pilot?.tokenHash !== seed.tokenHash)) return false;
         if (!pilotPermits(pilot, request)) return false;
-        if (!pilot.ownerUid) t.update(ref, { ownerUid: request.auth.uid,
+        if (!pilot.ownerUid) t.set(ref, { ...pilot, ownerUid: request.auth.uid,
           sessionHash: hash(request.data.pilotSession), claimedAt: now() });
         return true;
       });

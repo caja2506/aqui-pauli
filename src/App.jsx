@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { useRole } from './contexts/RoleContext';
 import { Loader2 } from 'lucide-react';
@@ -37,6 +37,7 @@ import OrdersPage from './pages/admin/OrdersPage';
 import CrmPage from './pages/admin/CrmPage';
 import ShippingPage from './pages/admin/ShippingPage';
 import GiveawayAdminPage from './pages/admin/GiveawayAdminPage';
+import TilopayPilotPage from './pages/admin/TilopayPilotPage';
 
 // ========================================
 // Layout: Storefront (public)
@@ -60,6 +61,7 @@ function StoreLayout() {
 // ========================================
 function AdminLayout() {
   const { user, loading: authLoading } = useAuth();
+  const location = useLocation();
   const { isAdmin, roleLoading } = useRole();
 
   if (authLoading || roleLoading) {
@@ -73,7 +75,7 @@ function AdminLayout() {
     );
   }
 
-  if (!user) return <Navigate to="/login" state={{ from: '/admin' }} replace />;
+  if (!user || user.isAnonymous) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   if (!isAdmin) return (
     <div className="h-screen flex items-center justify-center bg-slate-50">
       <div className="text-center">
@@ -135,6 +137,7 @@ export default function App() {
           <Route path="crm" element={<CrmPage />} />
           <Route path="envios" element={<ShippingPage />} />
           <Route path="sorteo" element={<GiveawayAdminPage />} />
+          <Route path="prueba-tilopay" element={<TilopayPilotPage />} />
         </Route>
 
       </Routes>
