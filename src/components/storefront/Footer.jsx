@@ -44,14 +44,6 @@ export default function Footer() {
             <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4">Contacto</h3>
             <div className="space-y-2 text-sm text-slate-300">
               <a
-                href="https://wa.me/50671613342"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block hover:text-rose-400 transition-colors"
-              >
-                WhatsApp: +506 7161 3342
-              </a>
-              <a
                 href="mailto:hola@aquipauli.com"
                 className="block hover:text-rose-400 transition-colors"
               >

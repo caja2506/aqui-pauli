@@ -4,7 +4,7 @@ import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import { Package, ChevronRight, ShoppingBag, LogIn } from 'lucide-react';
+import { Package, ShoppingBag, LogIn } from 'lucide-react';
 import { formatCRC, formatDateTime } from '../../utils/formatters';
 import { ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS, humanizeStatus } from '../../utils/constants';
 
@@ -161,19 +161,6 @@ export default function MyOrdersPage() {
                 </div>
               )}
 
-              {/* WhatsApp para enviar comprobante si pago pendiente */}
-              {!isCashOnDelivery && (order.paymentStatus === 'pendiente' || !order.paymentStatus) && (
-                <div className="px-4 pb-4">
-                  <a
-                    href={`https://wa.me/50671613342?text=${encodeURIComponent(`¡Hola! Envío mi comprobante para el pedido ${order.orderNumber}`)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 w-full py-3 bg-[#25D366] hover:bg-[#1ebe57] text-white font-bold rounded-xl text-xs transition-all"
-                  >
-                    📸 Enviar Comprobante por WhatsApp <ChevronRight className="w-3 h-3" />
-                  </a>
-                </div>
-              )}
             </div>
           );
         })}

@@ -154,8 +154,6 @@ export default function TilopayReturnPage() {
             {retryBusy ? 'Verificando…' : `Solicitar formulario de prueba por ${formatCRC(view.quote.crcPayNow)}`}
           </button>
         </>}
-        <a href="https://wa.me/50671613342" target="_blank" rel="noopener noreferrer"
-          className="px-6 py-3 bg-white text-slate-900 text-sm font-bold rounded-2xl border border-slate-200">Escribir por WhatsApp</a>
       </div>
     </div>
   );

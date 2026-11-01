@@ -9,7 +9,6 @@ import Navbar from './components/storefront/Navbar';
 import MobileCartBar from './components/storefront/MobileCartBar';
 import Footer from './components/storefront/Footer';
 import CartDrawer from './components/storefront/CartDrawer';
-import WhatsAppButton from './components/storefront/WhatsAppButton';
 import AdminSidebar from './components/admin/AdminSidebar';
 
 // --- Auth ---
@@ -53,7 +52,6 @@ function StoreLayout() {
         <Outlet />
       </main>
       <Footer />
-      <WhatsAppButton />
     </div>
   );
 }

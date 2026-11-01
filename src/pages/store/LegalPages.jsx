@@ -11,7 +11,7 @@ const A = 'font-bold text-rose-600 hover:text-rose-700';
 function ContactLine() {
   return (
     <p>
-      WhatsApp: <a className={A} href={CONTACT.whatsappUrl} target="_blank" rel="noopener noreferrer">{CONTACT.whatsappLabel}</a>
+      WhatsApp: {CONTACT.whatsappLabel}
       {' · '}Correo: <a className={A} href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a>
     </p>
   );
@@ -24,7 +24,7 @@ function MerchantInfo() {
       <li>Cédula de identidad: {CONTACT.cedula}</li>
       <li>Nombre comercial: {CONTACT.tradeName}</li>
       <li>Ubicación: {CONTACT.fullPlace}</li>
-      <li>WhatsApp: <a className={A} href={CONTACT.whatsappUrl} target="_blank" rel="noopener noreferrer">{CONTACT.whatsappLabel}</a></li>
+      <li>WhatsApp: {CONTACT.whatsappLabel}</li>
       <li>Correo: <a className={A} href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a></li>
       <li>Sitio web: {CONTACT.site}</li>
       <li>Inscrito en el Ministerio de Hacienda (régimen simplificado).</li>
@@ -169,7 +169,7 @@ export function PrivacidadPage() {
       <Section title="1. Responsable de los datos">
         <p>El responsable de la base de datos es {CONTACT.owner}, cédula de identidad {CONTACT.cedula}, persona física, titular de Aquí Pauli (aquipauli.com), con domicilio en Grecia, Alajuela, Costa Rica.</p>
         <p>
-          Contacto para temas de privacidad: WhatsApp <a className={A} href={CONTACT.whatsappUrl} target="_blank" rel="noopener noreferrer">{CONTACT.whatsappLabel}</a>
+          Contacto para temas de privacidad: WhatsApp {CONTACT.whatsappLabel}
           {' · '}correo <a className={A} href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a>.
         </p>
       </Section>

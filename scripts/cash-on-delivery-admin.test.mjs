@@ -144,9 +144,9 @@ test('Mis Pedidos distingue efectivo cobrado y cancelación sin volver a pedir e
   assert.doesNotMatch(text(cancelled.html), /Pagás.*al recibir|Enviar Comprobante/);
 });
 
-test('Mis Pedidos conserva comprobante para SINPE pendiente', () => {
+test('Mis Pedidos no ofrece el enlace a WhatsApp para SINPE pendiente', () => {
   const page = fixture({ relative: CUSTOMER, orders: [{ ...baseOrder, paymentMethod: 'sinpe' }] });
-  assert.match(text(page.html), /Enviar Comprobante por WhatsApp/);
+  assert.doesNotMatch(page.html, /Enviar Comprobante por WhatsApp|wa\.me/);
   assert.doesNotMatch(page.html, /my-order-cash-on-delivery/);
 });
 
