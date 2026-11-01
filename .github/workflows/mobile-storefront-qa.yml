@@ -1,0 +1,44 @@
+name: Inspect the public mobile storefront
+on:
+  push:
+    branches: [ops/mobile-storefront-qa]
+    paths: ['.github/workflows/mobile-storefront-qa.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - run: npm install --prefix "$RUNNER_TEMP/mobile-qa" playwright-core@1.56.1 --no-audit --no-fund
+      - name: Compare real catalog and featured cards
+        working-directory: ${{ runner.temp }}/mobile-qa
+        run: |
+          node <<'NODE'
+          const {chromium}=require('playwright-core');
+          const {execFileSync}=require('node:child_process');
+          (async()=>{
+            const url='https://firestore.googleapis.com/v1/projects/aqui-pauli/databases/(default)/documents/';
+            const cats=await (await fetch(url+'categories?pageSize=250')).json();
+            console.log('CATS',JSON.stringify(cats.documents?.map(d=>[d.name.split('/').pop(),d.fields.name?.stringValue,d.fields.parentId?.stringValue,d.fields.active?.booleanValue])));
+            for(const id of ['decant-stronger-with-you-intensely','decant-moschino-toy-2-pearl']){
+              const doc=await (await fetch(url+'products/'+id)).json();
+              const imgs=(doc.fields?.images?.arrayValue?.values||[]).map(x=>x.stringValue);
+              console.log('DOC',id,JSON.stringify(imgs));
+              for(const src of imgs){const r=await fetch(new URL(src,'https://aquipauli.com'));console.log('ASSET',src,r.status,r.headers.get('content-type'));}
+            }
+            const br=await chromium.launch({executablePath:execFileSync('which',['google-chrome'],{encoding:'utf8'}).trim(),args:['--no-sandbox']});
+            const page=await br.newPage({viewport:{width:390,height:844},isMobile:true,deviceScaleFactor:1});page.setDefaultTimeout(30000);
+            for(const path of ['/','/catalogo']){
+              await page.goto('https://aquipauli.com'+path,{waitUntil:'domcontentloaded'});
+              const a=page.locator('a[href*="/producto/decant-stronger-with-you-intensely"]').first();
+              try{await a.waitFor();await page.waitForFunction(()=>[...document.images].some(i=>i.complete&&i.naturalWidth>0),{},{timeout:3500})}catch{}
+              console.log('DOM',path,await page.locator('a[href*="/producto/decant-"]').evaluateAll(links=>links.slice(0,12).map(x=>[x.pathname,x.querySelector('img')?.getAttribute('src'),x.querySelector('img')?.naturalWidth,Math.round(x.getBoundingClientRect().top)])));
+              console.log('HEIGHT',path,await page.locator('h2').allTextContents());
+            }
+            await br.close();
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          NODE
