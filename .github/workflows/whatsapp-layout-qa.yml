@@ -1,0 +1,111 @@
+name: Verify mobile WhatsApp layout
+on:
+  push:
+    branches: [ops/whatsapp-mobile-layout-qa]
+    paths: [.github/workflows/whatsapp-layout-qa.yml]
+permissions:
+  contents: read
+jobs:
+  layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 37898f9c3c9f1e63e61f383826b7f8a7760e7745
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Check real mobile and desktop geometry
+        run: |
+          npm install --prefix "$RUNNER_TEMP/wa-layout" --no-package-lock playwright-core@1.56.1
+          cat > "$RUNNER_TEMP/wa-layout/check.mjs" <<'NODE'
+          import assert from 'node:assert/strict';
+          import { chromium } from 'playwright-core';
+          const browser = await chromium.launch({ executablePath: process.env.CHROME, args: ['--no-sandbox'] });
+          const context = await browser.newContext({ viewport: { width: 393, height: 852 }, hasTouch: true });
+          await context.route('**/accounts:signUp*', route => route.abort());
+          const page = await context.newPage();
+          const base = process.env.QA_URL || 'http://127.0.0.1:4173';
+          const wa = page.getByRole('link', { name: 'Chatea con nosotros por WhatsApp', exact: true });
+          async function check(label, dockExpected) {
+            await wa.waitFor({ state: 'visible' });
+            await page.waitForFunction(() => {
+              const a = document.querySelector('.store-whatsapp');
+              const bars = [...document.querySelectorAll('[data-mobile-cart-dock]')]
+                .filter(e => getComputedStyle(e).position === 'fixed' && e.getBoundingClientRect().height > 0);
+              return a && bars.every(e => a.getBoundingClientRect().bottom <= e.getBoundingClientRect().top - 11);
+            });
+            const state = await page.evaluate(() => {
+              const a = document.querySelector('.store-whatsapp'), r = a.getBoundingClientRect();
+              const docks = [...document.querySelectorAll('[data-mobile-cart-dock]')]
+                .filter(e => getComputedStyle(e).position === 'fixed' && e.getBoundingClientRect().height > 0);
+              const hit = document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+              return { width: innerWidth, bottom: innerHeight-r.bottom, right: innerWidth-r.right,
+                size: [r.width,r.height], clickable: hit===a || a.contains(hit), href:a.href,
+                gap: docks.length ? Math.min(...docks.map(e=>e.getBoundingClientRect().top-r.bottom)) : null,
+                docks:docks.length };
+            });
+            assert.equal(state.docks > 0, dockExpected, label);
+            assert(state.clickable, label+' WhatsApp hit target');
+            assert.match(state.href, /^https:\/\/wa.me\/50671613342\?text=/);
+            assert.deepEqual(state.size,[56,56]);
+            if(dockExpected) assert(state.gap>=11,label+' separation');
+            else assert.equal(state.bottom,24,label+' baseline position');
+            await wa.click({trial:true});
+            const controls = page.locator('[data-mobile-cart-dock] button:enabled, [data-mobile-cart-dock] a');
+            for (const control of await controls.all()) if(await control.isVisible()) await control.click({trial:true});
+            console.log('LAYOUT PASS '+label+' '+JSON.stringify(state));
+          }
+          try {
+            await page.goto(base+'/catalogo');
+            await check('393 catalog empty',false);
+            await page.goto(base+'/producto/decant-moschino-toy-2-pearl');
+            await page.getByRole('button',{name:'Elegí una variante',exact:true}).waitFor();
+            await check('393 product before selection',true);
+            await page.getByRole('button',{name:'2 ml',exact:true}).click();
+            await check('393 product selected',true);
+            await page.getByRole('button',{name:'Agregar al Carrito',exact:true}).click();
+            await page.locator('[data-mobile-cart-link]').waitFor();
+            await check('393 product combined cart',true);
+            await page.locator('[data-mobile-cart-dock]').evaluate(e=>{e.style.paddingBottom='90px';});
+            await check('393 enlarged dock resize observer',true);
+            await page.locator('[data-mobile-cart-dock]').evaluate(e=>{e.style.removeProperty('padding-bottom');});
+            await page.locator('main').getByRole('link',{name:'Catálogo',exact:true}).click();
+            await page.waitForURL('**/catalogo');
+            await check('393 catalog with cart after route change',true);
+            await page.screenshot({path:'/tmp/wa-catalog-393.png'});
+            await page.setViewportSize({width:320,height:568});
+            await check('320 catalog with wrapped cart',true);
+            await page.goto(base+'/producto/decant-moschino-toy-2-pearl');
+            await page.getByRole('button',{name:'Elegí una variante',exact:true}).waitFor();
+            await check('320 product with cart',true);
+            await page.setViewportSize({width:393,height:852});
+            await check('393 product after viewport change',true);
+            await page.screenshot({path:'/tmp/wa-product-393.png'});
+            await page.setViewportSize({width:1440,height:900});
+            await check('1440 desktop product unchanged',false);
+            await page.goto(base+'/catalogo');
+            await check('1440 desktop catalog unchanged',false);
+            await page.setViewportSize({width:393,height:852});
+            await check('393 catalog returning from desktop',true);
+            await page.getByRole('button',{name:/Abrir carrito:/}).click();
+            assert.equal(await wa.isVisible(),false);
+            await page.getByRole('button',{name:'Cerrar carrito',exact:true}).click();
+            await check('393 catalog after drawer closes',true);
+            await page.evaluate(()=>localStorage.removeItem('aquipauli_cart'));
+            await page.reload();
+            await check('393 catalog emptied',false);
+            console.log('ALL WHATSAPP LAYOUT CHECKS PASSED; no messages or orders submitted.');
+          } finally { await browser.close(); }
+          
+          NODE
+          npm run preview -- --host 127.0.0.1 > /tmp/wa-preview.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID"' EXIT
+          for attempt in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/ > /dev/null && break; sleep 1; done
+          CHROME="$(command -v google-chrome)" node "$RUNNER_TEMP/wa-layout/check.mjs"
