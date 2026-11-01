@@ -56,6 +56,10 @@ body {
 }
 
 @media (width < 64rem) {
+  .store-whatsapp {
+    bottom: max(1.5rem, calc(var(--whatsapp-dock-height, 0px) + 0.75rem), calc(env(safe-area-inset-bottom, 0px) + 0.75rem));
+  }
+
   body:has([data-mobile-cart-dock]) #admin-content {
     padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
   }

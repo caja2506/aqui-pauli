@@ -197,7 +197,7 @@ function ProductDetails({ productId }) {
 
           {/* Un solo control de compra: fijo abajo en móvil y dentro de la ficha en escritorio. */}
           {hasPurchasableOption && (
-            <section aria-label="Compra de este producto" data-testid="product-purchase-bar"
+            <section data-mobile-cart-dock aria-label="Compra de este producto" data-testid="product-purchase-bar"
               className="fixed inset-x-0 bottom-0 z-40 flex flex-col gap-3 border-t border-rose-100 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-[0_-4px_20px_rgba(15,23,42,0.08)] lg:static lg:inset-auto lg:z-auto lg:flex-row lg:items-center lg:gap-4 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
               <div className="flex items-center justify-between gap-3 lg:shrink-0">
                 <p className="min-w-0 text-lg font-black text-rose-600 lg:hidden" data-testid="product-mobile-price">

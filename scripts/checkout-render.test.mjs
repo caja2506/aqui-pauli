@@ -1065,6 +1065,13 @@ function floatingWhatsappClasses(html) {
   return classesIn(tag);
 }
 
+function assertMobileVisible(html) {
+  const classes = floatingWhatsappClasses(html);
+  assert.ok(classes.has('block'));
+  assert.ok(!classes.has('hidden'), 'Purchase routes and cart contents must not hide WhatsApp');
+  assert.ok(classes.has('z-50'), 'WhatsApp stays above the z-40 purchase docks');
+}
+
 function assertMobileHidden(html) {
   const classes = floatingWhatsappClasses(html);
   assert.ok(classes.has('hidden'), 'The floating link must not cover mobile purchase controls');
@@ -1074,8 +1081,10 @@ function assertMobileHidden(html) {
 for (const url of ['/', '/?categoria=perfumes', '/catalogo', '/catalogo/?marca=versace',
   '/producto/versace-eros', '/producto/versace-eros/?variante=100ml#comprar',
   '/checkout', '/checkout/?metodo=paypal', '/carrito', '/carrito/']) {
-  test(`WhatsApp se oculta solo en móvil en la ruta de compra ${url}`, () => {
-    assertMobileHidden(renderPage(WHATSAPP, { url }).html);
+  test(`WhatsApp permanece visible en la ruta de compra ${url}`, () => {
+    for (const items of [[], [line('stock_propio', 47000)]]) {
+      assertMobileVisible(renderPage(WHATSAPP, { url, items }).html);
+    }
   });
 }
 
@@ -1087,24 +1096,23 @@ test('WhatsApp sigue visible en rutas sin tarjetas o controles de compra', () =>
   }
 });
 
-test('el carrito oculta WhatsApp móvil y al cerrarlo respeta la visibilidad de la ruta', () => {
+test('el panel del carrito conserva su prioridad y al cerrarlo vuelve WhatsApp', () => {
   for (const url of ['/', '/catalogo', '/terminos']) {
     const open = renderPage(CART, { url, cartOpen: true, items: [line('stock_propio', 47000)], withWhatsapp: true });
     assertMobileHidden(open.html);
     contains(open.html, 'Proceder al Checkout');
     assert.match(open.html, /href="\/checkout"/);
-    const closed = renderPage(CART, { url, cartOpen: false, withWhatsapp: true });
-    if (url === '/terminos') assert.ok(!floatingWhatsappClasses(closed.html).has('hidden'), 'Closing the drawer restores normal visibility');
-    else assertMobileHidden(closed.html);
+    const closed = renderPage(CART, { url, cartOpen: false, items: [line('stock_propio', 47000)], withWhatsapp: true });
+    assertMobileVisible(closed.html);
     assert.ok(!text(closed.html).includes('Mi Carrito'));
   }
 });
 
-test('la ficha conserva Agregar al Carrito y espacio inferior seguro sin WhatsApp móvil encima', () => {
+test('la ficha conserva Agregar al Carrito, espacio inferior y WhatsApp visible', () => {
   for (const supplyType of ['stock_propio', 'bajo_pedido']) {
     const { html } = renderPage(PRODUCT, { withWhatsapp: true,
       variant: { supplyType, commercialStatus: supplyType === 'bajo_pedido' ? 'bajo_pedido' : 'disponible' } });
-    assertMobileHidden(html);
+    assertMobileVisible(html);
     contains(html, 'Versace Eros EDT 100 ml');
     const addButton = [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)]
       .map(([button]) => button).find((button) => text(button).includes('Agregar al Carrito'));
@@ -1117,12 +1125,12 @@ test('la ficha conserva Agregar al Carrito y espacio inferior seguro sin WhatsAp
   }
 });
 
-test('checkout deja espacio inferior y conserva código postal, SINPE y panel PayPal sin el flotante móvil', () => {
+test('checkout conserva código postal, SINPE y panel PayPal con WhatsApp visible', () => {
   for (const paymentMethod of ['sinpe', 'paypal']) {
     const { html } = renderPage(CHECKOUT, { items: [line('bajo_pedido', 32000)], paymentMethod,
       paypalAvailable: true, paypalQuote: serverQuote({ total: 32000, balance: 16000, deposit: 16000, backorder: 32000 }),
       withWhatsapp: true });
-    assertMobileHidden(html);
+    assertMobileVisible(html);
     contains(html, 'Código Postal (auto-llena dirección)');
     assert.match(html, /<input\b[^>]*placeholder="Ej: 10301"[^>]*>/);
     const page = classesIn(html.match(/<div\b[^>]*class="[^"]*max-w-4xl[^"\n]*"[^>]*>/)?.[0]);
