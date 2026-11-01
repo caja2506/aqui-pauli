@@ -42,7 +42,7 @@ jobs:
           const textOf=async loc=>(await loc.innerText()).replace(/\s+/g,' ').trim();
           const metrics=async(page,url)=>{
             await page.goto(url,{waitUntil:'domcontentloaded'});
-            await readyImg(page,id); await readyImg(page,moschino);
+            await readyImg(page,id); await readyImg(page,moschino); await card(page,id).getByRole('button',{name:'Ver opciones'}).waitFor();
             await page.locator('[data-testid="giveaway-banner"]').waitFor({timeout:3500}).catch(()=>{});
             const nodes=[page.locator('h1'),page.locator('#home-product-search'),page.getByRole('heading',{name:'Productos Destacados'}),card(page,id)];
             return Promise.all(nodes.map(box));
