@@ -1,0 +1,177 @@
+name: Review Meta Pixel network events
+on:
+  push:
+    branches: [ops/meta-pixel-review]
+    paths: [.github/workflows/review-meta-pixel.yml]
+permissions:
+  contents: read
+jobs:
+  pixel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: c110a81513d8cd6828690e147ffa0c0085feba34
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Test and build the proposed revision
+        run: npm run test:checkout && npm run test:giveaway && npm run test:auth && npm run test:store-audit && npm run build
+      - name: Prepare isolated browser and compiled storefront with fixture data
+        run: |
+          mkdir -p /tmp/aqp-pixel-qa
+          npm install --prefix /tmp/aqp-pixel-browser-tools --no-package-lock playwright-core@1.56.1
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pixel-browsers"
+          node /tmp/aqp-pixel-browser-tools/node_modules/playwright-core/cli.js install chromium --no-shell
+          browser_path="$(node -p "require('/tmp/aqp-pixel-browser-tools/node_modules/playwright-core').chromium.executablePath()")"
+          echo "CHROME_BIN=$browser_path" >> "$GITHUB_ENV"
+          curl -fsSL --retry 2 https://connect.facebook.net/en_US/fbevents.js -o /tmp/aqp-fbevents.js
+          curl -fsSL --retry 2 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=141.0.7390.0&acceptformat=crx2,crx3&x=id%3Dfdgfkebogiimcoedlicjlajpkdmockpc%26installsource%3Dondemand%26uc' -o /tmp/aqp-pixel-qa/helper.crx
+          python - <<'PY'
+          import base64,hashlib,json,struct,zipfile
+          from pathlib import Path
+          data=Path('/tmp/aqp-pixel-qa/helper.crx').read_bytes()
+          assert data[:4]==b'Cr24' and struct.unpack('<I',data[4:8])[0]==3
+          size=struct.unpack('<I',data[8:12])[0]
+          def fields(buf):
+           pos=0
+           def number():
+            nonlocal pos
+            n=0;shift=0
+            while True:
+             byte=buf[pos];pos+=1;n|=(byte&127)<<shift
+             if byte<128:return n
+             shift+=7
+           while pos<len(buf):
+            tag=number();assert tag%8==2
+            length=number();yield tag//8,buf[pos:pos+length];pos+=length
+          key=None
+          for tag,proof in fields(data[12:12+size]):
+           if tag not in (2,3):continue
+           pub=dict(fields(proof))[1]
+           h=hashlib.sha256(pub).hexdigest()[:32]
+           eid=''.join(chr(97+int(c,16)) for c in h)
+           if eid=='fdgfkebogiimcoedlicjlajpkdmockpc':key=pub
+          assert key
+          folder=Path('/tmp/aqp-pixel-qa/helper')
+          with zipfile.ZipFile('/tmp/aqp-pixel-qa/helper.crx') as z:z.extractall(folder)
+          manifest=json.loads((folder/'manifest.json').read_text());manifest['key']=base64.b64encode(key).decode();(folder/'manifest.json').write_text(json.dumps(manifest))
+          PY
+          cat > /tmp/aqp-pixel-qa/build.mjs <<'NODE'
+          import { createRequire } from 'node:module';
+          import { join } from 'node:path';
+          const root=process.cwd(), req=createRequire(join(root,'package.json'));
+          const { build }= await import(req.resolve('vite'));
+          const store=req.resolve('firebase/firestore').replace('index.cjs.js','index.mjs');
+          const fn=req.resolve('firebase/functions').replace('index.cjs.js','index.mjs');
+          const fixture={
+            name:'pixel-review-fixtures', enforce:'pre',
+            resolveId(id){ if(id==='firebase/firestore'||id==='firebase/functions')return '\0qa-'+id; },
+            load(id){
+              if(id.endsWith('/contexts/AuthContext.jsx'))return `export const AuthProvider=({children})=>children; const buyer={uid:'local-buyer',isAnonymous:true}; export const useAuth=()=>({user:buyer,loading:false,ensureGuestSession:async()=>buyer});export const socialAuthErrorMessage=()=>'';`;
+              if(id==='\0qa-firebase/functions')return `export * from '${fn}'; export const httpsCallable=(_f,name)=>async()=>({data:name==='quoteCartDelivery'?{subtotal:5300,delivery:{shippingCost:2500},lines:[{}]}:{enabled:false}});`;
+              if(id!=='\0qa-firebase/firestore')return;
+              return `export * from '${store}';
+              const normal='6tG0W3Uj3PfrKUKftaMk', decant='decant-invictus-edt';
+              const data={['products/'+normal]:{name:'New Balance 574 Core',active:true,basePrice:89000,images:[]},['products/'+decant]:{name:'Paco Rabanne Invictus EDT · Decant',active:true,productKind:'decant',basePrice:2800,images:[]}};
+              for(const [pid,vid,name,sku,price] of [[normal,'v1','Única',normal,89000],[decant,'2ml','2 ml','DECANT-INVICTUS-EDT-2ML',2800],[decant,'3ml','3 ml','DECANT-INVICTUS-EDT-3ML',3500],[decant,'5ml','5 ml','DECANT-INVICTUS-EDT-5ML',5300]])data['products/'+pid+'/variants/'+vid]={name,sku,price,stock:5,reservedStock:0,commercialStatus:'disponible',supplyType:'stock_propio',order:price,active:true};
+              const line={productId:decant,variantId:'5ml',productName:'Invictus',variantName:'5 ml',quantity:1,price:5300};
+              const order={paymentMethod:'contra_entrega',paymentStatus:'pendiente',status:'pendiente_pago',total:7800,itemsSummary:[line]};
+              data['orders/local-qa-receipt']={...order,orderNumber:'QA-LOCAL'};
+              data['orders/local-test-card']={...order,paymentMethod:'tilopay',paymentStatus:'test_paid',tilopay:{mode:'test'}};
+              function path(ref){return ref.path||ref._query.path.canonicalString();}
+              function snap(p){return {id:p.split('/').at(-1),exists:()=>!!data[p],data:()=>data[p],metadata:{fromCache:false,hasPendingWrites:false}};}
+              function list(p){return {docs:Object.keys(data).filter(k=>k.startsWith(p+'/')&&k.split('/').length===p.split('/').length+1).map(snap)};}
+              export const getDoc=async ref=>snap(path(ref)); export const getDocs=async q=>list(path(q));
+              export function onSnapshot(ref,...args){let active=true;const cb=args.find(a=>typeof a==='function');queueMicrotask(()=>{if(active)cb(ref.type==='document'?snap(path(ref)):list(path(ref)));});return ()=>{active=false;};}
+              `;
+            }
+          };
+          await build({ plugins:[fixture], build:{outDir:'/tmp/aqp-pixel-qa/dist',emptyOutDir:true}, logLevel:'warn' });
+          
+          NODE
+          node /tmp/aqp-pixel-qa/build.mjs
+      - name: Verify events in Chrome with the official Meta extension and inspect network payloads
+        run: |
+          cat > /tmp/aqp-pixel-qa/events.cjs <<'NODE'
+          const fs=require('node:fs/promises'), path=require('node:path'), assert=require('node:assert/strict'), {execFile}=require('node:child_process'), {promisify}=require('node:util');
+          const {chromium}=require('/tmp/aqp-pixel-browser-tools/node_modules/playwright-core');
+          const browserArgs=[];
+          const run=promisify(execFile);
+          (async()=>{
+           const ext='/tmp/aqp-pixel-qa/helper';
+           const ctx=await chromium.launchPersistentContext('/tmp/aqp-pixel-qa/extension-profile',{executablePath:process.env.CHROME_BIN,args:['--no-sandbox','--disable-dev-shm-usage','--disable-extensions-except='+ext,'--load-extension='+ext], viewport:{width:393,height:852}, headless:false});
+           try {
+           const page=await ctx.newPage(), events=[];
+           const helper=ctx.serviceWorkers()[0]||await ctx.waitForEvent('serviceworker',{timeout:20000});
+           const helperInfo=await helper.evaluate(()=>({name:chrome.i18n.getMessage('extensionName'),version:chrome.runtime.getManifest().version,id:chrome.runtime.id})); console.log('OFFICIAL HELPER',helperInfo);assert.equal(helperInfo.id,'fdgfkebogiimcoedlicjlajpkdmockpc');
+           const wires=[];
+           await page.exposeFunction('observePixelCall', call => {
+             const [verb,ev,data,opt]=call;if(verb!=='track')return;const row={ev,id:'1636839314476198',eid:opt?.eventID};
+             for(const [k,v] of Object.entries(data||{}))row['cd['+k+']']=typeof v==='object'?JSON.stringify(v):String(v);
+             events.push(row);console.log('SDK INPUT',ev,JSON.stringify(data||{}),opt?.eventID||'');
+           });
+           await page.addInitScript(()=>{
+             let wrapped;Object.defineProperty(window,'_fbq',{configurable:true,get:()=>wrapped,set:()=>{}});
+             Object.defineProperty(window,'fbq',{configurable:true,get:()=>wrapped,set:fn=>{
+               wrapped=new Proxy(fn,{apply(target,self,args){window.observePixelCall(args);return Reflect.apply(target,self,args);}});
+             }});
+           });
+           await ctx.route('**/*',async route=>{
+            const req=route.request(), url=new URL(req.url());console.log('REQ',req.method(),url.hostname,url.pathname.slice(0,140));
+            if(['aquipauli.com','aqui-pauli.web.app'].includes(url.hostname)) {
+              const asset=url.pathname.startsWith('/assets/');
+              if(!asset && /\.(jpg|png|svg|jpeg|woff2)$/.test(url.pathname))return route.fulfill({status:404,body:''});
+              const file=asset?url.pathname.slice(1):'index.html';
+              return route.fulfill({body:await fs.readFile(path.join('/tmp/aqp-pixel-qa/dist',file)),contentType:file.endsWith('.css')?'text/css':file.endsWith('.js')?'text/javascript':'text/html'});
+            }
+            if(/(^|\.)facebook\.com$/.test(url.hostname)&&/^\/tr\/?$/.test(url.pathname)){
+             const p=new URLSearchParams(url.search);for(const [k,v] of new URLSearchParams(req.postData()||''))p.set(k,v);
+             const ev=Object.fromEntries(p);wires.push(ev);
+             console.log('PIXEL',ev.ev,ev.dl,ev['cd[content_ids]'],ev['cd[value]'],ev.eid);
+             return route.fulfill({status:200,body:'',headers:{'Access-Control-Allow-Origin':'*'}});
+            }
+            if(url.hostname==='connect.facebook.net') {
+              try {
+                const body=url.pathname==='/en_US/fbevents.js'?await fs.readFile('/tmp/aqp-fbevents.js','utf8'):(await run('curl',['-fsSL','--max-time','20',url.href],{maxBuffer:15*1024*1024})).stdout;
+                return route.fulfill({contentType:'text/javascript',body});
+              }catch(e){console.log('SDK resource failed',url.pathname);return route.abort();}
+            }
+            return route.abort();
+           });
+           await page.addInitScript(()=>window.addEventListener('message',m=>{if(m.data?.action==='FB_LOG')console.log('FB:',m.data.logType,m.data.logMessage);}));
+           page.on('requestfailed',r=>console.log('FAILED',new URL(r.url()).pathname,r.failure()?.errorText));
+           page.on('console',m=>console.log('CONSOLE',m.type(),m.text().slice(0,240)));
+           page.on('pageerror',e=>console.log('PAGEERROR',e.message));
+           const normal='6tG0W3Uj3PfrKUKftaMk', decant='decant-invictus-edt';
+           async function waitFor(name,n){for(let i=0;i<450;i++){if(events.filter(e=>e.ev===name).length>=n && wires.filter(e=>e.ev===name).length>=n)return;await new Promise(r=>setTimeout(r,100));}console.log('DIAG',await page.evaluate(()=>({state:JSON.stringify(window.fbq?.getState?.()).slice(0,2000), resources:performance.getEntriesByType('resource').filter(r=>r.name.includes('facebook')).map(r=>[new URL(r.name).pathname,r.duration]),title:document.title,body:document.body.innerText.slice(0,160),fbq:typeof window.fbq,callMethod:typeof window.fbq?.callMethod,queue:window.fbq?.queue?.length,scripts:[...document.scripts].map(s=>s.src)})));throw Error('Missing '+name+' '+n+'; got '+events.map(e=>e.ev));}
+           await page.goto('https://aquipauli.com/'); await waitFor('PageView',1);
+           await page.locator('a[href="/producto/'+normal+'"]').first().click(); await waitFor('ViewContent',1);
+           await page.locator('main a[href="/catalogo"]').first().click();
+           await page.locator('a[href="/producto/'+decant+'"]').first().click(); await waitFor('ViewContent',2);
+           await page.getByRole('button',{name:'5 ml',exact:true}).click();await page.getByRole('button',{name:'Agregar al Carrito',exact:true}).click();await waitFor('AddToCart',1);
+           await page.locator('[data-mobile-cart-link]').click();await waitFor('InitiateCheckout',1);
+           await page.goto('https://aquipauli.com/orden-confirmada/local-qa-receipt');await waitFor('Purchase',1);
+           const badge=await helper.evaluate(async()=>{const tabs=await chrome.tabs.query({});const tab=tabs.find(t=>t.url?.includes('local-qa-receipt')); if(!tab) return 'no tab'; return chrome.action.getBadgeText({tabId:tab.id});});
+           console.log('HELPER purchase tab badge',badge);
+           await page.reload(); await waitFor('PageView',7); await page.goto('https://aquipauli.com/orden-confirmada/local-test-card');await waitFor('PageView',8);
+           await page.goto('https://aqui-pauli.web.app/');await waitFor('PageView',9);
+           // Open a WhatsApp inquiry without sending any message or following the link.
+           await page.locator('.store-whatsapp').evaluate(a=>a.addEventListener('click',e=>e.preventDefault(),{once:true}));
+           await page.locator('.store-whatsapp').click();await waitFor('Contact',1);
+           await new Promise(r=>setTimeout(r,650));
+           const count=name=>events.filter(e=>e.ev===name).length;
+           for(const [k,n] of Object.entries({PageView:9,ViewContent:2,AddToCart:1,InitiateCheckout:1,Purchase:1,Contact:1})){assert.equal(count(k),n,k); assert.equal(wires.filter(e=>e.ev===k).length,n,'network '+k);}
+           const find=k=>wires.find(e=>e.ev===k);
+           for(const e of wires){assert.equal(e.id,'1636839314476198'); if(['ViewContent','AddToCart','InitiateCheckout','Purchase'].includes(e.ev)){assert.equal(e['cd[currency]'],'CRC');assert.equal(e['cd[content_type]'],'product');const ids=JSON.parse(e['cd[content_ids]']);assert(ids.every(id=>[normal,'DECANT-INVICTUS-EDT-2ML','DECANT-INVICTUS-EDT-5ML'].includes(id)));}}
+           const added=find('AddToCart'), bought=find('Purchase');assert.equal(added['cd[value]'],'5300');assert.equal(find('InitiateCheckout')['cd[value]'],'5300');assert.equal(bought['cd[value]'],'7800');assert.equal(bought.eid,'local-qa-receipt');assert.equal(find('Contact')['cd[value]'],undefined);
+           assert.deepEqual(JSON.parse(bought['cd[contents]']),[{id:'DECANT-INVICTUS-EDT-5ML',quantity:1,item_price:5300}]);console.log('PASS: official Meta Helper installed, real SDK requests verified on both hosts including Purchase and eventID; synthetic requests intercepted before transmission.');
+           } finally {await ctx.close();}
+          })().catch(e=>{console.error(e.stack);process.exitCode=1});
+          
+          NODE
+          xvfb-run -a node /tmp/aqp-pixel-qa/events.cjs
