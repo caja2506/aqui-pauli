@@ -1,0 +1,70 @@
+{
+  "promoActive": true,
+  "defaultOption": "sorpresa",
+  "title": "Escogé tu muestra de regalo (3 ml)",
+  "options": [
+    {
+      "id": "boss-in-motion",
+      "name": "Boss In Motion",
+      "brand": "Hugo Boss",
+      "order": 1,
+      "active": true
+    },
+    {
+      "id": "212-vip-rose-i-love-ny",
+      "name": "212 VIP Rosé I Love NY",
+      "brand": "Carolina Herrera",
+      "order": 2,
+      "active": true
+    },
+    {
+      "id": "odyssey-homme-white",
+      "name": "Odyssey Homme White Edition",
+      "brand": "Armaf",
+      "order": 3,
+      "active": true
+    },
+    {
+      "id": "ariana-grande-cloud",
+      "name": "Ariana Grande Cloud",
+      "brand": "Ariana Grande",
+      "order": 4,
+      "active": true
+    },
+    {
+      "id": "badee-al-oud-honor-glory",
+      "name": "Bade'e Al Oud Honor & Glory",
+      "brand": "Lattafa",
+      "order": 5,
+      "active": true
+    },
+    {
+      "id": "amber-oud-gold-edition",
+      "name": "Amber Oud Gold Edition",
+      "brand": "Al Haramain",
+      "order": 6,
+      "active": true
+    },
+    {
+      "id": "lacoste-l1212-blanc",
+      "name": "Lacoste L.12.12 Blanc",
+      "brand": "Lacoste",
+      "order": 7,
+      "active": true
+    },
+    {
+      "id": "moschino-toy-2",
+      "name": "Moschino Toy 2",
+      "brand": "Moschino",
+      "order": 8,
+      "active": true
+    },
+    {
+      "id": "stronger-with-you-intensely",
+      "name": "Stronger With You Intensely",
+      "brand": "Emporio Armani",
+      "order": 9,
+      "active": true
+    }
+  ]
+}

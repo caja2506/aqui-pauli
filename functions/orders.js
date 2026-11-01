@@ -1,3 +1,5 @@
+const { createHash } = require("node:crypto");
+const { normalizeCode } = require("./lib/promotions.mjs");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
@@ -16,6 +18,7 @@ const telegramChatId = defineSecret("TELEGRAM_CHAT_ID");
 // otros endpoints. Solo este trigger los necesita cuando se despliega/ejecuta.
 const gmailSmtpUser = "GMAIL_SMTP_USER";
 const gmailSmtpAppPassword = "GMAIL_SMTP_APP_PASSWORD";
+const { allowedCode, discountedTotals, reservationForCode, giftForOrder, releaseCode } = require("./lib/discounts");
 const { computeBackorder } = require("./lib/backorderDeposit");
 const MAX_ORDER_EVENT_AGE_MS = 60 * 60 * 1000;
 const PAYMENT_METHODS = new Set(["sinpe", "sinpe_movil", "transferencia", "efectivo", "contra_entrega", "paypal", "tilopay"]);
@@ -70,19 +73,60 @@ exports.createOrderWithReservation = onCall(
       }
     }
     const customerUid = request.auth.uid;
-    const orderRef = db.collection("orders").doc();
+    const retryKey = data.discountCode && data.promotionRequestId;
+    if (retryKey && (typeof retryKey !== "string" || !/^[a-f0-9]{32}$/.test(retryKey))) {
+      throw new HttpsError("invalid-argument", "La referencia del checkout no es válida.");
+    }
+    const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+    const orderRef = retryKey ? db.collection("orders").doc(hash([customerUid, retryKey])) : db.collection("orders").doc();
+    const fingerprint = retryKey && hash([normalizeCode(data.discountCode), items, paymentMethod, shippingType, shippingAddress,
+      customerName, customerEmail, customerPhone, customerNotes, data.giftSample?.choice || "", data.expectedDiscountAmount]);
+    function savedReceipt(order) {
+      if (order.promotionReceipt?.fingerprint !== fingerprint || order.uid !== customerUid || order.discountReleasedAt ||
+          ["cancelado", "expirado"].includes(order.status)) {
+        throw new HttpsError("failed-precondition", "El pedido original cambió. Revisá tus pedidos antes de intentar de nuevo.");
+      }
+      return order.promotionReceipt.response;
+    }
+    if (retryKey) {
+      const prior = await orderRef.get();
+      if (prior.exists) return savedReceipt(prior.data());
+    }
+    let code;
+    if (data.discountCode) {
+      try { code = await allowedCode(db, customerUid, data.discountCode); }
+      catch (error) {
+        const prior = retryKey && await orderRef.get();
+        if (prior?.exists) return savedReceipt(prior.data());
+        throw error;
+      }
+    }
     const orderId = orderRef.id;
     const orderNumber = generateOrderNumber();
     const now = new Date().toISOString();
 
     try {
-      const confirmedTotals = await db.runTransaction(async (transaction) => {
+      const outcome = await db.runTransaction(async (transaction) => {
+        if (retryKey) {
+          const prior = await transaction.get(orderRef);
+          if (prior.exists) return { response: savedReceipt(prior.data()), reused: true };
+        }
         let totals;
         try {
           totals = await computeTotalsCRC(db, items, { canton: shippingAddress.canton, shippingType }, { transaction });
         } catch (error) {
           throw new HttpsError("failed-precondition", error.message);
         }
+        const card = code ? await reservationForCode(db, transaction, code) : null;
+        totals = discountedTotals(totals, code);
+        if (code && data.expectedDiscountAmount !== undefined && data.expectedDiscountAmount !== totals.discount.amount) {
+          throw new HttpsError("failed-precondition", "El descuento cambió. Volvé a aplicar el código.");
+        }
+        const giftSample = await giftForOrder(db, transaction, items, data.giftSample?.choice).catch(error => {
+          console.warn("[giftSample] No se pudo consultar la promoción", error.code || "unavailable");
+          return null;
+        });
+        const promotion = { ...(giftSample && { giftSample }), ...(code && { discount: totals.discount, subtotalBeforeDiscount: totals.subtotalBeforeDiscount }) };
         const canonical = fulfillment.normalizeLines(totals.lines, { priced: true });
         // Contra entrega es una orden completa en stock. El navegador no puede
         // ocultar una línea Bajo pedido ni eliminar su adelanto del 50%.
@@ -90,7 +134,15 @@ exports.createOrderWithReservation = onCall(
           throw new HttpsError("failed-precondition", "El pago contra entrega solo está disponible si todos los productos están en stock. Los productos Bajo pedido requieren el adelanto del 50%.");
         }
         // Tilopay reserva cuando crea el intento LIVE, en su propia transacción. Un pedido TEST no reserva nada.
-        const reserveLines = paymentMethod === "tilopay" ? [] : canonical.filter((line) => line.supplyType === "stock_propio");
+        let reserveStock = paymentMethod !== "tilopay";
+        if (paymentMethod === "tilopay" && code) {
+          const cfg = (await transaction.get(db.collection("config").doc("payments"))).data()?.tilopay;
+          if (!cfg?.enabled || !["live","test"].includes(cfg.mode) || cfg.access === "private-pilot") {
+            throw new HttpsError("failed-precondition", "Este método de pago no está disponible para esta compra con código.");
+          }
+          reserveStock = cfg.mode === "live";
+        }
+        const reserveLines = reserveStock ? canonical.filter((line) => line.supplyType === "stock_propio") : [];
         const reserves = [];
         for (const line of reserveLines) {
           const ref = db.collection("products").doc(line.productId).collection("variants").doc(line.variantId);
@@ -111,20 +163,25 @@ exports.createOrderWithReservation = onCall(
             itemId: `item_${index}`, productId: line.productId, variantId: line.variantId,
             productName: line.productName || line.name || "", variantName: line.variantName || "",
             imageUrl: line.imageUrl || "", price: line.unitPrice, quantity: line.quantity,
+            ...(code && { discountMinor: line.discountMinor }),
             subtotal: line.lineTotal, lineTotal: line.lineTotal, supplyType: line.supplyType,
             depositAmount, depositPaid: false, remainingPaid: false,
           };
         });
         const hasBackorderItems = backorder.hasBackorder;
         const depositTotal = backorder.depositTotal;
+        const confirmedTotals = { ...promotion, subtotal: totals.subtotal, shippingCost: totals.shippingCost, total: totals.total,
+          ...(giftSample || code ? { backorder } : {}) };
+        const response = { orderId, orderNumber, ...(giftSample || code ? confirmedTotals : {}), ...(cashOnDelivery ? {
+          ...confirmedTotals, paymentMethod: "contra_entrega", paymentStatus: "pendiente", amountDueOnDelivery: totals.total } : {}) };
         // Todas las lecturas de productos, configuración y variantes terminaron antes de escribir.
+        if (card) transaction.update(card, { used: true, usedAt: now, usedByUid: customerUid, orderId });
         for (const reserve of reserves) transaction.update(reserve.ref, { reservedStock: reserve.reservedStock + reserve.line.quantity });
         transaction.set(orderRef, {
-          orderNumber, uid: customerUid, customerUid,
+          ...(retryKey && { promotionReceipt: { fingerprint, response } }), ...promotion, orderNumber, uid: customerUid, customerUid,
           customerEmail, customerName, customerPhone,
+          customerCedula: clean(data.customerCedula, 40), isGuest: request.auth.token?.firebase?.sign_in_provider === "anonymous",
           ...(cashOnDelivery ? {
-            customerCedula: clean(data.customerCedula, 40),
-            isGuest: request.auth.token?.firebase?.sign_in_provider === "anonymous",
             cashOnDelivery: { version: 1, state: "pending", createdAt: now },
           } : {}),
           status: "pendiente_pago", paymentStatus: "pendiente", paymentMethod,
@@ -145,16 +202,13 @@ exports.createOrderWithReservation = onCall(
           customerNotes, notes: "", createdAt: now, updatedAt: now,
         });
         for (const item of orderItems) transaction.set(orderRef.collection("items").doc(item.itemId), item);
-        return { subtotal: totals.subtotal, shippingCost: totals.shippingCost, total: totals.total };
+        return { response };
       });
       // Tilopay espera a la captura live. Contra entrega crea/actualiza el CRM en
       // la transacción de cobro: el alta legacy fuera de transacción podría pisar
       // los acumulados si un administrador confirma efectivo simultáneamente.
-      if (paymentMethod !== "tilopay" && !cashOnDelivery) await updateCrmOnOrderCreated(customerUid);
-      return { orderId, orderNumber, ...(cashOnDelivery ? {
-        ...confirmedTotals, paymentMethod: "contra_entrega", paymentStatus: "pendiente",
-        amountDueOnDelivery: confirmedTotals.total,
-      } : {}) };
+      if (!outcome.reused && paymentMethod !== "tilopay" && !cashOnDelivery) await updateCrmOnOrderCreated(customerUid);
+      return outcome.response;
     } catch (error) {
       if (error instanceof HttpsError) throw error;
       console.error("Error creating order with reservation:", error.message);
@@ -285,6 +339,8 @@ exports.deleteOrder = onCall(async (request) => {
       const items = await transaction.get(ref.collection("items"));
       const releases = order.inventoryReservation?.state === "reserved"
         ? await fulfillment.reservationReleasePlan({ db, transaction, order }) : [];
+      if (order.discount && order.paypal && !order.discountReleasedAt) throw new HttpsError("failed-precondition", "Conciliá el pago antes de eliminar el pedido con descuento.");
+      await releaseCode(db, transaction, orderId, order, new Date().toISOString());
       for (const variant of releases) transaction.update(variant.ref, { reservedStock: variant.reservedStock - variant.line.quantity });
       for (const item of items.docs) transaction.delete(item.ref);
       transaction.delete(ref);

@@ -38,7 +38,8 @@ function normalizeLines(lines, { priced = false } = {}) {
     if (priced) {
       const unitMinor = moneyMinor(line.unitPrice);
       const totalMinor = moneyMinor(line.lineTotal);
-      if (unitMinor <= 0 || totalMinor !== unitMinor * line.quantity) throw new Error("Línea de pago inconsistente");
+      const cut = line.discountMinor ?? 0;
+      if (!Number.isSafeInteger(cut) || cut < 0 || unitMinor <= 0 || totalMinor !== unitMinor * line.quantity - cut) throw new Error("Línea de pago inconsistente");
       normalized.price = unitMinor / 100;
       normalized.unitPrice = unitMinor / 100;
       normalized.lineTotal = totalMinor / 100;
@@ -259,12 +260,21 @@ async function releaseCancelledReservation({ db, orderId }) {
     const snap = await transaction.get(ref);
     if (!snap.exists) return { kind: "missing" };
     const order = snap.data();
-    if (order.status !== "cancelado" || order.inventoryReservation?.state !== "reserved") return { kind: "noop" };
+    const terminal = ["cancelado", "expirado"].includes(order.status);
+    if (!terminal && !(order.discount && order.paymentStatus === "rechazado")) return { kind: "noop" };
+    // External attempts with an unknown outcome must first be reconciled.
+    if (order.discount && (order.paypal || order.tilopay?.attemptCount)
+        && !["rechazado", "expirado"].includes(order.paymentStatus)) return { kind: "noop" };
     if (order.fulfillment?.state === "applied") return { kind: "noop" };
-    const variants = await reservationReleasePlan({ db, transaction, order });
-    for (const variant of variants) transaction.update(variant.ref, { reservedStock: variant.reservedStock - variant.line.quantity });
+    const hasStock = order.inventoryReservation?.state === "reserved";
+    if (!hasStock && !order.discount) return { kind: "noop" };
+    const variants = hasStock ? await reservationReleasePlan({ db, transaction, order }) : [];
     const now = new Date().toISOString();
-    transaction.update(ref, { inventoryReservation: { ...order.inventoryReservation, state: "released", releasedAt: now }, updatedAt: now });
+    const released = await require("./discounts").releaseCode(db, transaction, orderId, order, now);
+    if (!hasStock && !released) return { kind: "noop" };
+    for (const variant of variants) transaction.update(variant.ref, { reservedStock: variant.reservedStock - variant.line.quantity });
+    transaction.update(ref, { ...(hasStock && { inventoryReservation: { ...order.inventoryReservation, state: "released", releasedAt: now } }),
+      ...(order.discount && { discountReleasedAt: now }), updatedAt: now });
     return { kind: "released" };
   });
 }

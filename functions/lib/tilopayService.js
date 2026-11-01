@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const { allowedCode, discountedTotals, reservedTotals } = require("./discounts");
 const defaultApi = require("./tilopayApi");
 const { codigoPostalDeDireccion } = require("./costaRicaTerritorial.mjs");
 const { computeTotalsCRC: defaultPricing, PricingError } = require("./pricing");
@@ -116,10 +117,11 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
     catch { fail("unavailable", "No pudimos consultar Tilopay. Conserva este pedido y vuelve a verificarlo."); }
   }
 
-  async function priceSnapshot(order, input, transaction) {
-    const totals = await computeTotalsCRC(db, input, {
+  async function priceSnapshot(order, input, transaction, orderId, previewCode) {
+    const gross = await computeTotalsCRC(db, input, {
       canton: order.shippingAddress?.canton, shippingType: order.shippingType,
     }, transaction ? { transaction } : {});
+    const totals = previewCode ? discountedTotals(gross, previewCode) : await reservedTotals(db, transaction, orderId, order, gross);
     const lines = totals.lines.map((line) => ({ ...line,
       itemId: input.find((item) => item.productId === line.productId && item.variantId === line.variantId)?.itemId,
     }));
@@ -167,7 +169,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       || list.find((a) => a.key === order.tilopay?.currentAttempt) || list[0];
     let quote = {};
     try { if (attempt?.snapshot) quote = quoteFromSnapshot(attempt.snapshot); } catch { /* No invented legacy amounts. */ }
-    const extra = { orderId: id, orderNumber: order.orderNumber || "", currency: "CRC", retry: false,
+    const extra = { ...(order.giftSample && { giftSample: order.giftSample }), ...(order.discount && { discount: order.discount }), orderId: id, orderNumber: order.orderNumber || "", currency: "CRC", retry: false,
       ...quote, partial: quote.crcBalanceDue > 0 };
     if (order.tilopay?.duplicatePaymentNeedsReview || order.tilopay?.legacyNeedsReview || order.tilopay?.reconciliationNeedsReview) {
       return { ...extra, result: "review", code: order.tilopay?.duplicatePaymentNeedsReview ? "duplicate_payment"
@@ -241,7 +243,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       const itemSnap = await t.get(itemsQuery(ctx.ref));
       const input = itemSnap.docs.map((doc) => ({ ...doc.data(), itemId: doc.id }));
       let snapshot;
-      try { snapshot = await priceSnapshot(order, input, t); }
+      try { snapshot = await priceSnapshot(order, input, t, ctx.id); }
       catch (error) { fail("failed-precondition", error.message); }
       assertExpectedQuote(expectedQuote, snapshot);
       if (pilot) {
@@ -311,7 +313,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       const update = {
         ...paymentPlanFields(snapshot), itemsSummary: items,
         itemCount: snapshot.lines.reduce((sum, line) => sum + line.quantity, 0), updatedAt: createdAt,
-        priceCorrectedByServer: { previousTotal: order.total ?? null, at: createdAt },
+        ...(!order.discount || order.total !== quote.crcTotal ? { priceCorrectedByServer: { previousTotal: order.total ?? null, at: createdAt } } : {}),
         tilopay: { schemaVersion: 2, mode: cfg.mode, attemptCount: 1, currentAttempt: "a1", checkoutLockId: lockId,
           ...quote, status: "reserved", attemptsById: { a1: attempt } },
       };
@@ -719,7 +721,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       // Fail stale/tampered displayed totals before even asking for a token.
       const docs = (await itemsQuery(ctx.ref).get()).docs;
       let snapshot;
-      try { snapshot = await priceSnapshot(ctx.order, docs.map((doc) => ({ ...doc.data(), itemId: doc.id }))); }
+      try { snapshot = await priceSnapshot(ctx.order, docs.map((doc) => ({ ...doc.data(), itemId: doc.id })), undefined, ctx.id); }
       catch (error) { fail("failed-precondition", error.message); }
       assertExpectedQuote(request.data.expectedQuote, snapshot);
     }
@@ -896,7 +898,8 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
 
   async function getQuote(request) {
     if (!request?.auth?.uid) fail("unauthenticated", "Debes iniciar sesión.");
-    const { items, canton, shippingType = "normal" } = request.data || {};
+    const { items, canton, shippingType = "normal", discountCode } = request.data || {};
+    const code = discountCode ? await allowedCode(db, request.auth.uid, discountCode) : null;
     try {
       if (!["normal", "express"].includes(shippingType)) {
         throw new PricingError("INVALID_SHIPPING_TYPE", "Tipo de envío inválido.");
@@ -906,7 +909,7 @@ function createTilopayService({ db, credentials, returnBase, HttpsError, api = d
       }
       if (!Array.isArray(items)) throw new PricingError("INVALID_ITEM_COUNT", "Carrito inválido.");
       const snapshot = await priceSnapshot({ uid: request.auth.uid, shippingType, shippingAddress: { canton } },
-        items.map((item, index) => ({ ...item, itemId: `item_${index}` })));
+        items.map((item, index) => ({ ...item, itemId: `item_${index}` })), undefined, undefined, code);
       return quoteFromSnapshot(snapshot);
     } catch (error) {
       const known = error instanceof PricingError;

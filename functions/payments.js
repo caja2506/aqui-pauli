@@ -3,6 +3,7 @@ const { db } = require("./utils");
 const { hasTilopay, isPaidState, isTerminalOrder, validDocumentId, moneyMinor } = require("./lib/orderFulfillment");
 
 function assertManualFlow(order) {
+  if (order.discountReleasedAt) throw new HttpsError("failed-precondition", "El descuento fue liberado. Creá un nuevo pedido.");
   if (order.paymentMethod === "contra_entrega" || Object.prototype.hasOwnProperty.call(order, "cashOnDelivery")) {
     throw new HttpsError("failed-precondition", "Este pedido se cobra contra entrega. Usá la confirmación de efectivo recibido; no admite comprobantes ni aprobación manual de transferencias.");
   }

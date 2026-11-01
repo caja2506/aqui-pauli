@@ -1,3 +1,4 @@
+import OrderPromotion from '../../components/checkout/OrderPromotion';
 import { useState, useEffect } from 'react';
 import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -112,6 +113,7 @@ export default function MyOrdersPage() {
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-slate-50">
                 <div>
+                  <OrderPromotion order={order} />
                   <p className="text-xs font-bold text-rose-600">{order.orderNumber}</p>
                   <p className="text-[10px] text-slate-400">{formatDateTime(order.createdAt)}</p>
                 </div>

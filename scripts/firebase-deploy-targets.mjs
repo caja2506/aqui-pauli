@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 const existingFunctions = [
   'tilopayGetConfig', 'tilopayGetQuote', 'tilopayCreatePayment', 'tilopayConfirm', 'tilopayReconcilePayments',
   'createOrderWithReservation', 'deleteOrder', 'manageCashOnDeliveryOrder', 'submitPaymentProof', 'approvePaymentManually',
+  'validateDiscountCode', 'generateDiscountBatch', 'releaseOrderDiscount',
   'paypalCreateOrder', 'paypalCaptureOrder', 'paypalGetQuote', 'cleanExpiredReservations',
 ];
 const giveawayFiles = new Set([
@@ -45,6 +46,8 @@ export function firebaseDeployTargets(changedPaths, indexBefore = '', indexAfter
       ...(hasManualPaymentChanges ? ['submitPaymentProof', 'approvePaymentManually'] : []),
       ...(hasGiveawayChanges ? ['enterGiveaway'] : [])]
     : [...existingFunctions, 'enterGiveaway'];
+  // Updating the paid-order template requires publishing its existing sender.
+  if (changedPaths.includes('functions/lib/orderEmail.js')) names.push('onOrderStatusChange');
   return ['firestore:rules', ...names.map((name) => `functions:default:${name}`)].join(',');
 }
 

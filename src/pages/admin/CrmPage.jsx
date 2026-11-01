@@ -1,3 +1,4 @@
+import { Link as CrmLink } from 'react-router-dom';
 import { useState } from 'react';
 import { Users, UserPlus, ShoppingCart, Repeat, Frown, AlertCircle, ChevronDown, ChevronRight, MessageCircle, Brain, Tag, Save, X, Pencil, MapPin, CreditCard, IdCard, Trash2 } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
@@ -132,6 +133,7 @@ export default function CrmPage() {
         <div>
           <h2 className="font-black text-2xl text-slate-800 tracking-tight">CRM</h2>
           <p className="text-sm text-slate-400 mt-1">Gestión de clientes y embudo de ventas</p>
+          <CrmLink to="/admin/crm/tarjetitas" className="mt-3 inline-block rounded-xl bg-rose-100 px-4 py-2 font-bold text-rose-800">Códigos de tarjetitas</CrmLink>
         </div>
         {unresolvedCount > 0 && (
           <button

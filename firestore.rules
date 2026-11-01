@@ -117,7 +117,7 @@ service cloud.firestore {
 
     function unlockedItems(data) {
       return !isCashOnDeliveryOrder(data)
-        && !data.keys().hasAny(['tilopay', 'inventoryReservation', 'fulfillment'])
+        && !data.keys().hasAny(['tilopay', 'inventoryReservation', 'fulfillment', 'discount', 'giftSample'])
         && data.get('paymentStatus', '') in ['pendiente', 'rechazado', 'verificando'];
     }
 
@@ -151,6 +151,10 @@ service cloud.firestore {
           && before.status == 'pendiente_pago' && before.paymentStatus == 'pendiente' && after.status == 'cancelado');
     }
 
+    match /discountCodes/{code} { allow read, write: if isAdmin(); }
+    match /discountBatches/{id} { allow read, write: if isAdmin(); }
+    match /discountAttempts/{uid} { allow read, write: if false; }
+
     // --- Pedidos ---
     match /orders/{orderId} {
       allow read: if request.auth != null
@@ -160,7 +164,7 @@ service cloud.firestore {
       allow create: if validPendingOrder(request.resource.data);
 
       allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'uid', 'customerUid', 'tilopay', 'cashOnDelivery', 'inventoryReservation', 'fulfillment', 'paidEffects', 'legacyReservationReleasedAt'
+          'uid', 'customerUid', 'promotionReceipt', 'discount', 'discountReleasedAt', 'subtotalBeforeDiscount', 'tilopay', 'cashOnDelivery', 'inventoryReservation', 'fulfillment', 'paidEffects', 'legacyReservationReleasedAt'
         ])
         && ((isAdmin()
             && ((!isTilopayOrder(resource.data) && !isTilopayOrder(request.resource.data)
@@ -184,7 +188,7 @@ service cloud.firestore {
 
       // Los cobros y reservas requieren cancelación servidor, conservando su rastro.
       allow delete: if isAdmin() && !isTilopayOrder(resource.data) && !isCashOnDeliveryOrder(resource.data)
-        && !resource.data.keys().hasAny(['inventoryReservation', 'fulfillment']);
+        && !resource.data.keys().hasAny(['inventoryReservation', 'fulfillment', 'discount']);
 
       match /items/{itemId} {
         allow read: if request.auth != null

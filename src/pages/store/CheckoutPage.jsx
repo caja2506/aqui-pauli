@@ -32,6 +32,9 @@ const CASH_VALIDATION_MESSAGES = new Set([
   'Las notas del pedido pueden tener hasta 1000 caracteres.',
 ]);
 
+import CheckoutPromotion from '../../components/checkout/CheckoutPromotion';
+import { useCheckoutPromotion } from '../../hooks/useCheckoutPromotion';
+
 export default function CheckoutPage() {
   usePageTitle('Checkout | Aquí Pauli');
   const { user, loading: authLoading, ensureGuestSession } = useAuth();
@@ -63,6 +66,13 @@ export default function CheckoutPage() {
   // Pedido pendiente ya creado para el intento de pago online actual (evita duplicados)
   const pendingOrderRef = useRef(null);
   const submittingRef = useRef(false);
+  const options = useCheckoutPromotion(items);
+  const [choice, setChoice] = useState('sorpresa');
+  const [coupon, setCoupon] = useState(null);
+  const [applyingKey, setApplyingKey] = useState(null);
+  const cartKey = JSON.stringify([user?.uid, items.map(i => [i.productId, i.variantId, i.quantity, i.price])]);
+  const applied = coupon?.key === cartKey ? coupon : null;
+  const sampleChoice = options.some(o => o.id === choice) ? choice : 'sorpresa';
   const cashOnDeliveryEligible = isCashOnDeliveryEligible(items);
   const invalidCashOnDeliverySelection = form.paymentMethod === 'contra_entrega' && !cashOnDeliveryEligible;
   // Derivar la selección válida evita mostrar un radio activo o aceptar un
@@ -145,10 +155,19 @@ export default function CheckoutPage() {
   }
 
   const shippingCost = form.canton ? calculateShippingCost(form.canton, form.shippingType) : 0;
-  const total = subtotal + shippingCost;
+  const total = subtotal + shippingCost - (applied?.amount || 0);
   // "Bajo pedido": se aparta con el 50% de esas líneas; stock y envío se pagan completos.
   // PayPal confirma estos mismos importes con su cotización calculada en servidor.
-  const backorder = computeBackorder(items, shippingCost);
+  let previousShare = 0, cumulative = 0;
+  const displayedLines = applied && subtotal > 0 ? items.map(i => {
+    const gross = Number(i.price) * i.quantity;
+    cumulative += gross;
+    const share = Math.round(applied.amount * 100 * cumulative / subtotal);
+    const lineTotal = gross - (share - previousShare) / 100;
+    previousShare = share;
+    return { ...i, lineTotal };
+  }) : items;
+  const backorder = computeBackorder(displayedLines, shippingCost);
   const showDeposit = backorder.hasBackorder && backorder.depositTotal > 0;
   const shippingOptions = form.canton ? getShippingOptions(form.canton) : [];
 
@@ -206,9 +225,9 @@ export default function CheckoutPage() {
   const tilopaySelected = selectedPaymentMethod === 'tilopay';
   const serverQuoteSelected = paypalSelected || tilopaySelected;
   const cashOnDeliverySelected = selectedPaymentMethod === 'contra_entrega';
-  const activePaypalQuote = paypalQuote?.key === paypalQuoteKey(items, form.canton, form.shippingType) ? paypalQuote.quote : null;
+  const activePaypalQuote = paypalQuote?.key === paypalQuoteKey(items, form.canton, form.shippingType, applied?.code) ? paypalQuote.quote : null;
   const activeTilopayQuote = tilopayQuote?.uid === user?.uid
-    && tilopayQuote?.key === tilopayQuoteKey(items, form.canton, form.shippingType) ? tilopayQuote.quote : null;
+    && tilopayQuote?.key === tilopayQuoteKey(items, form.canton, form.shippingType, applied?.code) ? tilopayQuote.quote : null;
   const activeServerQuote = tilopaySelected ? activeTilopayQuote : activePaypalQuote;
   const paymentSummary = paypalSelected ? backorderFromPaypalQuote(activePaypalQuote)
     : tilopaySelected ? backorderFromTilopayQuote(activeTilopayQuote) : backorder;
@@ -218,6 +237,7 @@ export default function CheckoutPage() {
   // Valida el formulario; devuelve true si todo está completo
   const validateForm = () => {
     const newErrors = {};
+    if (applyingKey === cartKey) newErrors.submit = "Esperá a que termine la validación del código.";
     if (!form.name.trim()) newErrors.name = 'Nombre requerido';
     if (cashOnDeliverySelected) {
       if (!isValidGiveawayPhone(form.phone)) newErrors.phone = GIVEAWAY_PHONE_ERROR;
@@ -248,6 +268,8 @@ export default function CheckoutPage() {
   };
 
   const buildOrderData = (paymentMethod) => ({
+    ...(options.length > 0 && { giftSample: { choice: sampleChoice } }),
+    ...(applied && { discountCode: applied.code, expectedDiscountAmount: applied.amount, promotionRequestId: applied.requestId }),
     uid: user.uid,
     customerEmail: form.email.trim(),
     isGuest: !!user.isAnonymous,
@@ -290,6 +312,7 @@ export default function CheckoutPage() {
     try {
       const result = await pending.promise;
       pending.orderId = result.orderId;
+      pending.promotion = { ...(result.giftSample && { giftSample: result.giftSample }), ...(result.discount && { discount: result.discount }) };
       return result;
     } catch (error) {
       if (pendingOrderRef.current === pending) pendingOrderRef.current = null;
@@ -300,7 +323,7 @@ export default function CheckoutPage() {
   const handleOnlinePaid = ({ orderId, orderNumber, paypalResult, paypalQuote: confirmedQuote, partial }) => {
     clearCart();
     navigate(`/orden-confirmada/${orderId}`, {
-      state: { orderNumber, total: confirmedQuote?.crcTotal ?? total, paymentMethod: form.paymentMethod,
+      state: { ...(pendingOrderRef.current?.orderId === orderId && pendingOrderRef.current.promotion), orderNumber, total: confirmedQuote?.crcTotal ?? total, paymentMethod: form.paymentMethod,
         paid: paypalResult !== 'pending', online: true, paypalQuote: confirmedQuote, partial,
         customerNotes: pendingOrderRef.current?.orderId === orderId ? pendingOrderRef.current.customerNotes : undefined },
     });
@@ -321,11 +344,12 @@ export default function CheckoutPage() {
 
       clearCart();
       navigate(`/orden-confirmada/${result.orderId}`, { state: {
-        orderNumber: result.orderNumber, total: cashOnDeliverySelected ? result.total : total, paymentMethod: selectedPaymentMethod,
+        ...(result.giftSample && { giftSample: result.giftSample }), ...(result.discount && { discount: result.discount }),
+        orderNumber: result.orderNumber, total: result.total ?? total, paymentMethod: selectedPaymentMethod,
         customerNotes: data.customerNotes,
         ...(cashOnDeliverySelected
           ? { paid: false, online: false, paymentStatus: 'pendiente', amountDueOnDelivery: result.amountDueOnDelivery }
-          : { backorder: computeBackorder(items, shippingCost) }),
+          : { backorder: result.backorder || backorder }),
       } });
     } catch (err) {
       if (cashOnDeliverySelected) console.error('Error creating cash-on-delivery order:', err?.code || 'unknown');
@@ -492,6 +516,8 @@ export default function CheckoutPage() {
           </div>
 
           {/* Payment */}
+          <CheckoutPromotion key={cartKey} items={items} options={options} choice={sampleChoice} setChoice={setChoice}
+            applied={applied} onBusy={busy => setApplyingKey(prior => busy ? cartKey : prior === cartKey ? null : prior)} onApply={value => setCoupon(value ? { ...value, key: cartKey, requestId: crypto.randomUUID().replaceAll('-', '') } : null)} />
           <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm space-y-4">
             <h2 className="font-black text-lg text-slate-900">Método de Pago</h2>
             {!selectedPaymentMethod && <p className="text-sm text-slate-500">Elegí cómo querés pagar este pedido.</p>}
@@ -551,6 +577,7 @@ export default function CheckoutPage() {
             {OnlinePanel && (
               <OnlinePanel
                 items={items}
+                discountCode={applied?.code}
                 canton={form.canton}
                 shippingType={form.shippingType}
                 totalCRC={total}
@@ -586,10 +613,11 @@ export default function CheckoutPage() {
               ))}
             </div>
             <div className="border-t border-slate-100 pt-4 space-y-2">
+              {applied && <p className="flex justify-between text-sm font-bold text-rose-700"><span>Descuento con {applied.code} (−10%)</span><span>−{formatCRC(applied.amount)}</span></p>}
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Subtotal</span>
                 <span className="font-bold">{tilopaySelected && !paymentSummary ? 'Calculando…'
-                  : formatCRC(serverQuoteSelected && activeServerQuote ? activeServerQuote.crcSubtotal : subtotal)}</span>
+                  : formatCRC(serverQuoteSelected && activeServerQuote ? activeServerQuote.crcSubtotal + (applied?.amount || 0) : subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Envío</span>

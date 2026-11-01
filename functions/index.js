@@ -26,4 +26,5 @@ module.exports = {
   ...schedulers,
   ...catalogBatch,
   ...giveaway,
+  ...require("./promotions"),
 };

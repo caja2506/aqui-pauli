@@ -70,9 +70,9 @@ function validateSnapshotAmounts(snapshot) {
     if (typeof line.itemId !== "string" || !line.itemId || ids.has(line.itemId)
       || !["stock_propio", "bajo_pedido"].includes(line.supplyType)
       || !Number.isSafeInteger(line.quantity) || line.quantity < 1 || line.quantity > 99
-      || minor(line.unitPriceMinor, { positive: true }) * line.quantity !== minor(line.lineTotalMinor, { positive: true })
+      || minor(line.unitPriceMinor, { positive: true }) * line.quantity - minor(line.discountMinor ?? 0) !== minor(line.lineTotalMinor)
       || parseMinorCRC(line.unitPrice) !== line.unitPriceMinor
-      || parseMinorCRC(line.lineTotal) !== line.lineTotalMinor) {
+      || parseMinorCRC(line.lineTotal, { allowZero: true }) !== line.lineTotalMinor) {
       throw new Error("Línea del snapshot de pago inválida.");
     }
     ids.add(line.itemId);

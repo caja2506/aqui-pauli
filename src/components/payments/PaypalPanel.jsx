@@ -8,7 +8,7 @@ const fmtUsd = (n) => `US$ ${Number(n).toFixed(2)}`;
 const CHANGED_QUOTE = 'El importe o el tipo de cambio cambió. Revisá la cotización actualizada y volvé a pulsar PayPal para aprobarla.';
 
 /** The visible quote and the provider order charge only the server's due-now amount. */
-export default function PaypalPanel({ items, canton, shippingType, validateForm, createPendingOrder, onPaid, onQuote }) {
+export default function PaypalPanel({ discountCode, items, canton, shippingType, validateForm, createPendingOrder, onPaid, onQuote }) {
   const [cfg, setCfg] = useState(null);
   const [quoted, setQuoted] = useState(null);
   const [quoteError, setQuoteError] = useState('');
@@ -22,9 +22,9 @@ export default function PaypalPanel({ items, canton, shippingType, validateForm,
   const latest = useRef({});
   const unresolvedCapture = useRef(null);
   const captureInFlight = useRef(false);
-  const quoteKey = paypalQuoteKey(items, canton, shippingType);
+  const quoteKey = paypalQuoteKey(items, canton, shippingType, discountCode);
   const quote = quoted?.key === quoteKey && isPayablePaypalQuote(quoted.quote) ? quoted.quote : null;
-  latest.current = { validateForm, createPendingOrder, onPaid, onQuote, quote, quoteKey, items, canton, shippingType, confirmPayment };
+  latest.current = { validateForm, createPendingOrder, onPaid, onQuote, quote, quoteKey, items, canton, shippingType, discountCode, confirmPayment };
 
   async function confirmPayment(pending) {
     if (captureInFlight.current) return;
@@ -71,7 +71,7 @@ export default function PaypalPanel({ items, canton, shippingType, validateForm,
     const t = setTimeout(() => {
       paypalGetQuote({
         items: items.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),
-        canton, shippingType,
+        canton, shippingType, ...(discountCode && { discountCode }),
       }).then((value) => {
         if (!isPayablePaypalQuote(value)) throw new Error('No se pudo confirmar el importe a pagar. Volvé a cargar la cotización.');
         if (!cancelled) {
@@ -142,7 +142,7 @@ export default function PaypalPanel({ items, canton, shippingType, validateForm,
                   // that server quote avoids a loop against a newer catalog FX.
                   const refreshed = isPayablePaypalQuote(savedQuote) ? savedQuote : await paypalGetQuote({
                     items: current.items.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),
-                    canton: current.canton, shippingType: current.shippingType,
+                    canton: current.canton, shippingType: current.shippingType, ...(current.discountCode && { discountCode: current.discountCode }),
                   });
                   if (!isPayablePaypalQuote(refreshed)) throw new Error('Cotización no disponible.');
                   if (latest.current.quoteKey === quoteKey) {

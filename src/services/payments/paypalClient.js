@@ -13,6 +13,8 @@ export const paypalCaptureOrder = call('paypalCaptureOrder');
 // No price, supply type or financial state from the cart is sent as authority.
 export const createPaypalPendingOrder = (order) => call('createOrderWithReservation')({
   paymentMethod: 'paypal',
+  ...(order.giftSample && { giftSample: order.giftSample }),
+  ...(order.discountCode && { discountCode: order.discountCode, expectedDiscountAmount: order.expectedDiscountAmount, promotionRequestId: order.promotionRequestId }),
   customerName: order.customerName,
   customerEmail: order.customerEmail,
   customerPhone: order.customerPhone,

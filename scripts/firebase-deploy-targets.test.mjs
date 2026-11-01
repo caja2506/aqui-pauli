@@ -75,3 +75,10 @@ test('la preparación Tilopay publica la cotización y el cron junto con todos l
     assert.equal(result.includes('onOrderStatusChange'), false, 'el trigger de correo conserva su despliegue separado');
   }
 });
+
+test('el cambio de plantilla publica su emisor y las funciones de promoción', () => {
+  const targets = firebaseDeployTargets(['functions/lib/orderEmail.js', 'functions/promotions.js']);
+  for (const name of ['onOrderStatusChange', 'validateDiscountCode', 'generateDiscountBatch', 'releaseOrderDiscount']) {
+    assert.ok(targets.includes('functions:default:' + name));
+  }
+});

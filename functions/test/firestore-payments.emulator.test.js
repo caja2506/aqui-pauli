@@ -315,6 +315,18 @@ describe("reglas de pagos (Firestore Emulator)", { skip: !process.env.FIRESTORE_
     await assertSucceeds(sdk.updateDoc(sdk.doc(db("admin"), "orders/o1"), { notes: "Apartado recibido; saldo pendiente" }));
   });
 
+  test("los clientes no pueden leer ni listar tarjetitas ni declarar descuentos y muestras en un pedido", async () => {
+    const user = db("owner");
+    for (const collection of ["discountCodes", "discountBatches", "discountAttempts"]) {
+      await assertFails(sdk.getDoc(sdk.doc(user, collection, "AP-7K3M9P")));
+      await assertFails(sdk.getDocs(sdk.collection(user, collection)));
+      await assertFails(sdk.setDoc(sdk.doc(user, collection, "x"), {used:false}));
+    }
+    await assertFails(sdk.setDoc(sdk.doc(user, "orders", "forged"), order("owner", {discount:{value:10}})));
+    await assertFails(sdk.setDoc(sdk.doc(user, "orders", "forged"), order("owner", {giftSample:{choice:"arbitrario"}})));
+    await assertSucceeds(sdk.getDocs(sdk.collection(db("admin"), "discountCodes")));
+  });
+
   test("ledger, referencias, locks y cola de reconciliación son exclusivamente del servidor", async () => {
     const collections = ["tilopayTx", "tilopayReferences", "tilopayCheckoutLocks", "tilopayReconciliation"];
     await env.withSecurityRulesDisabled(async (ctx) => {

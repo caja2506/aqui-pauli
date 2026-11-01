@@ -17,7 +17,7 @@ const abs = relative => path.join(root, relative);
 const ADMIN = 'src/pages/admin/OrdersPage.jsx';
 const CUSTOMER = 'src/pages/store/MyOrdersPage.jsx';
 const compiled = new Map(await Promise.all([
-  ADMIN, CUSTOMER, 'src/components/ui/ConfirmDialog.jsx',
+  ADMIN, CUSTOMER, 'src/components/checkout/OrderPromotion.jsx', 'src/components/ui/ConfirmDialog.jsx',
   'src/components/ui/StatusBadge.jsx', 'src/components/ui/EmptyState.jsx',
   'src/utils/constants.js', 'src/utils/formatters.js',
 ].map(async relative => {

@@ -108,7 +108,7 @@ jobs:
           NODE
 
       # Explicit codebase and endpoint selectors prevent unrelated Functions deployments.
-      # onOrderStatusChange is intentionally excluded until GMAIL_SMTP_* are configured.
+      # A paid-email template change also publishes its existing sender and requires the configured SMTP secrets.
       - name: Deploy only Firestore Rules and the selected Functions
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-aqui-pauli-functions-service-account.json

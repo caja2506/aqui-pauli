@@ -43,3 +43,13 @@ test("deshabilitado y sin credenciales no envían", async () => {
   assert.equal((await sendPaidOrderEmail({ db: fakeDb({ paidOrderEmail: { enabled: false } }), orderId: "o", order, items })).result, "disabled");
   assert.equal((await sendPaidOrderEmail({ db: fakeDb(null), orderId: "o", order, items })).result, "error");
 });
+
+test("correo de empaque: muestra y código de descuento en HTML y texto", () => {
+  for (const [choice,name,expected] of [["moschino-toy-2","Moschino Toy 2","Moschino Toy 2"],["sorpresa","Sorpresa","Sorpresa (elegila vos)"]]) {
+    const mail=buildPaidOrderEmail({total:40410,giftSample:{choice,name},discount:{code:"AP-7K3M9P",amount:4490}},[]);
+    for (const body of [mail.html,mail.text]) {
+      assert.ok(body.includes("Muestra de regalo (3 ml): "+expected));
+      assert.ok(body.includes("AP-7K3M9P"));
+    }
+  }
+});
