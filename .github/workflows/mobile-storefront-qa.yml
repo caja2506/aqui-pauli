@@ -77,7 +77,7 @@ jobs:
               await mobile.goto(site);await readyImg(mobile,id);
               await mobile.evaluate(()=>window.scrollTo({top:document.body.scrollHeight,behavior:'instant'}));
               await card(mobile,moschino).click();await mobile.waitForURL('**/producto/'+moschino);
-              await mobile.getByRole('heading',{name:/Moschino Toy 2 Pearl/}).waitFor();
+              await mobile.getByRole('heading',{level:1,name:'Moschino Toy 2 Pearl · Decant',exact:true}).waitFor();
               assert.equal(await mobile.evaluate(()=>scrollY),0);
               await mobile.getByRole('button',{name:'2 ml',exact:true}).click();
               await mobile.getByRole('button',{name:/Agregar al Carrito/i}).click();
@@ -87,7 +87,7 @@ jobs:
               assert.ok((a.x+a.width<=b.x+1 || b.x+b.width<=a.x+1 || a.y+a.height<=b.y+1 || b.y+b.height<=a.y+1) && b.y+b.height<=845,JSON.stringify({a,b}));
               console.log('COMBINED',JSON.stringify({payText,a,b,scroll:'top on entry'}));
               await mobile.goto(site+'/catalogo');await mobile.locator('[data-mobile-cart-dock]').waitFor();
-              await card(mobile,id).click();await mobile.getByRole('heading',{name:/Stronger With You/}).waitFor();assert.equal(await mobile.evaluate(()=>scrollY),0);
+              await card(mobile,id).click();await mobile.waitForURL('**/producto/'+id);await mobile.getByRole('heading',{level:1,name:'Stronger With You Intensely · Decant',exact:true}).waitFor();assert.equal(await mobile.evaluate(()=>scrollY),0);
               await mobile.getByRole('button',{name:'5 ml',exact:true}).click();await mobile.getByRole('button',{name:/Agregar al Carrito/i}).click();
               await mobile.waitForFunction(()=>/12\s?600, 2 artículos/.test(document.querySelector('[data-mobile-cart-link]')?.textContent||''));
               await mobile.goto(site+'/terminos');const dock=mobile.locator('[data-mobile-cart-dock]');
