@@ -1,3 +1,5 @@
+import { isSaleDecant } from './decantSale.mjs';
+
 export const PERFUMES = 'tEunA0AXM35keXWWcz2P';
 const perfumeCategories = new Set([PERFUMES, 'LTD4HApgXSUBRmJt0ZVo', 'd7002zlsGNkSBbQpYnGw']);
 
@@ -8,7 +10,7 @@ export function activeSamples(config) {
 }
 
 export async function containsPerfume(products, readParent) {
-  const ids = [...new Set(products.flatMap(p => (p?.categoryRefs || []).map(ref => ref?.id || ref).filter(id => typeof id === 'string' && /^[\w-]+$/.test(id))))];
+  const ids = [...new Set(products.filter(p => !isSaleDecant(p)).flatMap(p => (p?.categoryRefs || []).map(ref => ref?.id || ref).filter(id => typeof id === 'string' && /^[\w-]+$/.test(id))))];
   if (ids.some(id => perfumeCategories.has(id))) return true;
   const parents = await Promise.all(ids.map(readParent));
   return parents.some(id => id === PERFUMES);

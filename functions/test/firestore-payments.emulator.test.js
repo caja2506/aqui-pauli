@@ -59,11 +59,11 @@ describe("reglas de pagos (Firestore Emulator)", { skip: !process.env.FIRESTORE_
     await sdk.setDoc(sdk.doc(d, "orders/o1/items/item_0"), cartItem());
   });
 
-  test("checkout real puede crear padre e items juntos y no agregar líneas después", async () => {
+  test("el navegador no puede crear pedidos ni saltarse el mínimo y el envío con un batch", async () => {
     const d = db("owner"); const batch = sdk.writeBatch(d);
     batch.set(sdk.doc(d, "orders/o1"), order());
     batch.set(sdk.doc(d, "orders/o1/items/item_0"), cartItem());
-    await assertSucceeds(batch.commit());
+    await assertFails(batch.commit());
     await assertFails(sdk.setDoc(sdk.doc(d, "orders/o1/items/item_1"), cartItem()));
   });
 
@@ -176,10 +176,10 @@ describe("reglas de pagos (Firestore Emulator)", { skip: !process.env.FIRESTORE_
       const d = db("owner");
       const id = `notes-valid-${index}`;
       const ref = sdk.doc(d, "orders", id);
-      const batch = sdk.writeBatch(d);
-      batch.set(ref, order("owner", { paymentMethod: "sinpe", ...(customerNotes === undefined ? {} : { customerNotes }) }));
-      batch.set(sdk.doc(d, "orders", id, "items/item_0"), cartItem());
-      await assertSucceeds(batch.commit());
+      await env.withSecurityRulesDisabled(async ctx => {
+        await sdk.setDoc(sdk.doc(ctx.firestore(), "orders", id), order("owner", {
+          paymentMethod: "sinpe", ...(customerNotes === undefined ? {} : { customerNotes }) }));
+      });
       const snapshot = await assertSucceeds(sdk.getDoc(ref));
       if (customerNotes !== undefined && snapshot.data().customerNotes !== customerNotes) throw new Error("Las reglas alteraron las notas del pedido");
       await assertFails(sdk.getDoc(sdk.doc(db("other"), "orders", id)));
@@ -358,10 +358,11 @@ describe("reglas de pagos (Firestore Emulator)", { skip: !process.env.FIRESTORE_
 
   test("checkout de invitado autenticado funciona sin documento users_roles", async () => {
     const d = db("guest-without-role");
-    const batch = sdk.writeBatch(d);
-    batch.set(sdk.doc(d, "orders/guest-order"), order("guest-without-role", { isGuest: true }));
-    batch.set(sdk.doc(d, "orders/guest-order/items/item_0"), cartItem());
-    await assertSucceeds(batch.commit());
+    await env.withSecurityRulesDisabled(async ctx => {
+      const server = ctx.firestore();
+      await sdk.setDoc(sdk.doc(server, "orders/guest-order"), order("guest-without-role", { isGuest: true }));
+      await sdk.setDoc(sdk.doc(server, "orders/guest-order/items/item_0"), cartItem());
+    });
     await assertSucceeds(sdk.getDoc(sdk.doc(d, "orders/guest-order")));
     await assertSucceeds(sdk.getDoc(sdk.doc(d, "orders/guest-order/items/item_0")));
   });

@@ -9,7 +9,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { transformWithEsbuild } from 'vite';
-import { getVariantPrice, getProductPriceSummary } from '../src/utils/productPrice.js';
+import { getVariantPrice, getProductPriceSummary, isPurchasableVariant } from '../src/utils/productPrice.js';
 import { formatCRC } from '../src/utils/formatters.js';
 import { selectGiveawayProduct } from '../functions/lib/giveawayCatalog.mjs';
 
@@ -25,7 +25,7 @@ const variant = (id, price, extra = {}) => ({ id, name: id, price,
   active: true, commercialStatus: 'disponible', supplyType: 'stock_propio', ...extra });
 const options = [variant('Negro 35', 100000), variant('Rojo 34', 119000)];
 const compiled = new Map(await Promise.all([
-  CARD, PAGE, 'src/utils/productPrice.js', 'functions/lib/catalogPrice.mjs', 'src/utils/constants.js',
+  CARD, PAGE, 'functions/lib/decantSale.mjs', 'src/utils/productPrice.js', 'functions/lib/catalogPrice.mjs', 'src/utils/constants.js',
   'src/utils/formatters.js', 'src/utils/backorder.js', 'src/utils/shippingText.js',
   'src/components/ui/StatusBadge.jsx', 'src/components/ui/LoadingSpinner.jsx',
 ].map(async relative => {
@@ -347,4 +347,13 @@ test('URL directa de producto inactivo o eliminado no permite agregarlo al carri
   }
   const hidden = render(PAGE, { item: { ...product, active: true, unlisted: true }, selected: options[0] });
   assert.equal(typeof hidden.addToCart, 'function');
+});
+
+test('el decant vendido solo admite unidades disponibles para entrega inmediata', () => {
+  const decant = { productKind: 'decant' };
+  const vial = variant('3 ml', 4700, { stock: 3, reservedStock: 2 });
+  assert.equal(isPurchasableVariant(vial, decant), true);
+  assert.equal(isPurchasableVariant(vial, decant, 2), false);
+  assert.equal(isPurchasableVariant({ ...vial, stock: 0 }, decant), false);
+  assert.equal(isPurchasableVariant({ ...vial, supplyType: 'bajo_pedido' }, decant), false);
 });

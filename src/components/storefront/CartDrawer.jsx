@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { X, Minus, Plus, ShoppingBag, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useCart } from '../../contexts/CartContext';
+import { usePricedCart } from '../../hooks/usePricedCart';
 import { formatCRC } from '../../utils/formatters';
 
+import DecantDeliveryNotice from '../checkout/DecantDeliveryNotice';
+
 export default function CartDrawer() {
-  const { items, isCartOpen, setIsCartOpen, removeItem, updateQuantity, subtotal, itemCount } = useCart();
+  const { items, isCartOpen, setIsCartOpen, removeItem, updateQuantity, subtotal, itemCount, delivery } = usePricedCart(true);
   const drawerRef = useRef(null);
   const closeRef = useRef(null);
 
@@ -141,7 +143,8 @@ export default function CartDrawer() {
               <span className="text-sm font-bold text-slate-500">Subtotal</span>
               <span className="text-xl font-black text-slate-900">{formatCRC(subtotal)}</span>
             </div>
-            <p className="text-[10px] text-slate-400">Envío incluido a todo el país</p>
+            <p className="text-sm text-slate-600">{delivery.shippingCost ? `Envío: ${formatCRC(delivery.shippingCost)} · Total: ${formatCRC(subtotal + delivery.shippingCost)}` : 'Envío incluido a todo el país'}</p>
+            <DecantDeliveryNotice delivery={delivery} />
             <Link
               to="/carrito"
               onClick={() => setIsCartOpen(false)}
@@ -149,14 +152,14 @@ export default function CartDrawer() {
             >
               Ver carrito completo
             </Link>
-            <Link
+            {!delivery.belowMinimum && <Link
               to="/checkout"
               onClick={() => setIsCartOpen(false)}
               className="w-full flex items-center justify-center gap-2 py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 text-sm"
             >
               Proceder al Checkout
               <ArrowRight className="w-4 h-4" />
-            </Link>
+            </Link>}
           </div>
         )}
       </div>

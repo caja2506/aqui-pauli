@@ -77,33 +77,6 @@ service cloud.firestore {
           && stages[after.status] > stages[before.status]);
     }
 
-    // Campos reales enviados por orderService.createOrder. No admite snapshots,
-    // reservas, evidencias ni futuros campos financieros aportados por el cliente.
-    function validPendingOrder(data) {
-      return request.auth != null
-        // Solo el callable valida el catálogo y reserva stock para contra entrega.
-        && !isCashOnDeliveryOrder(data)
-        && data.keys().hasOnly([
-          'orderNumber', 'uid', 'customerUid', 'customerName', 'customerEmail', 'customerPhone',
-          'customerCedula', 'isGuest', 'shippingAddress', 'subtotal', 'shippingCost', 'shippingType', 'total',
-          'paymentMethod', 'paymentPhone', 'paymentStatus', 'paymentProofUrl', 'hasBackorder', 'backorderDeposit',
-          'status', 'notes', 'customerNotes', 'trackingNumber', 'trackingUrl', 'itemsSummary', 'itemCount', 'createdAt', 'updatedAt'
-        ])
-        && data.uid == request.auth.uid
-        && (!data.keys().hasAny(['customerUid']) || data.customerUid == request.auth.uid)
-        && data.paymentStatus == 'pendiente' && data.status == 'pendiente_pago'
-        && data.get('paymentProofUrl', '') == ''
-        && data.get('customerNotes', '') is string && data.get('customerNotes', '').size() <= 1000
-        && data.get('trackingNumber', '') == '' && data.get('trackingUrl', '') == ''
-        && data.orderNumber is string && data.orderNumber.size() > 0 && data.orderNumber.size() <= 100
-        && data.paymentMethod is string && data.paymentMethod.size() > 0 && data.paymentMethod.size() <= 40
-        && data.itemsSummary is list && data.itemsSummary.size() > 0 && data.itemsSummary.size() <= 50
-        && data.itemCount is int && data.itemCount > 0 && data.itemCount <= 4950
-        && data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 90071992547409
-        && data.shippingCost is number && data.shippingCost >= 0 && data.shippingCost <= 90071992547409
-        && data.total is number && data.total > 0 && data.total <= 90071992547409;
-    }
-
     function validClientItem(data) {
       return data.keys().hasOnly([
           'productId', 'variantId', 'productName', 'variantName', 'imageUrl', 'price', 'quantity', 'supplyType', 'lineTotal'
@@ -161,7 +134,7 @@ service cloud.firestore {
         && (isAdmin() || ownsOrder(resource.data));
 
       // Ni los admins de navegador crean pedidos pagados ni metadatos de pasarela.
-      allow create: if validPendingOrder(request.resource.data);
+      allow create: if false; // El callable calcula envío, mínimo y reserva desde catálogo.
 
       allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'uid', 'customerUid', 'promotionReceipt', 'discount', 'discountReleasedAt', 'subtotalBeforeDiscount', 'tilopay', 'cashOnDelivery', 'inventoryReservation', 'fulfillment', 'paidEffects', 'legacyReservationReleasedAt'
@@ -193,15 +166,9 @@ service cloud.firestore {
       match /items/{itemId} {
         allow read: if request.auth != null
           && (isAdmin() || ownsOrder(get(/databases/$(database)/documents/orders/$(orderId)).data));
-        // El checkout crea padre e items en el MISMO batch. No puede agregar
-        // líneas a posteriori, ni siquiera antes de que empiece el cobro.
-        allow create: if unlockedItems(getAfter(/databases/$(database)/documents/orders/$(orderId)).data)
-          && validClientItem(request.resource.data)
-          && (isAdmin()
-            || (request.auth != null
-              && !exists(/databases/$(database)/documents/orders/$(orderId))
-              && ownsOrder(getAfter(/databases/$(database)/documents/orders/$(orderId)).data)
-              && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.paymentStatus == 'pendiente'));
+        // El administrador conserva la edición de líneas históricas sin reserva.
+        allow create: if isAdmin() && unlockedItems(getAfter(/databases/$(database)/documents/orders/$(orderId)).data)
+          && validClientItem(request.resource.data);
         allow update: if isAdmin()
           && unlockedItems(getAfter(/databases/$(database)/documents/orders/$(orderId)).data)
           && validClientItem(request.resource.data);

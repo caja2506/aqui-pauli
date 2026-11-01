@@ -21,7 +21,8 @@ function loadHandlers(seed, options = {}) {
   const dependencies = {
     "firebase-functions/v2/https": { onCall: wrap, HttpsError },
     "firebase-functions/v2/firestore": { onDocumentUpdated: (config, handler) => {
-      effects.triggerOptions = config; return handler;
+      if (config.secrets) effects.triggerOptions = config;
+      return handler;
     } },
     "firebase-functions/v2/scheduler": { onSchedule: wrap },
     "firebase-functions/params": {
@@ -77,7 +78,7 @@ function loadHandlers(seed, options = {}) {
     return module.exports;
   }
   return { ...memory, effects, orders: load(path.join(ROOT, "orders.js")),
-    payments: load(path.join(ROOT, "payments.js")), paypal: load(path.join(ROOT, "paypal.js")),
+    promos: load(path.join(ROOT, "promotions.js")), payments: load(path.join(ROOT, "payments.js")), paypal: load(path.join(ROOT, "paypal.js")),
     schedulers: load(path.join(ROOT, "schedulers.js")) };
 }
 
@@ -1574,4 +1575,76 @@ test("la misma solicitud de checkout recupera su pedido después de perder la re
   assert.deepEqual(await h.orders.createOrderWithReservation(req),one);
   assert.equal(h.get(VARIANT).reservedStock,1);
   await assert.rejects(h.orders.createOrderWithReservation(cashRequest({...req.data,giftSample:{choice:"otra"}})));
+});
+
+test("decants: el servidor valida mínimo y cobra envío por el subtotal de catálogo antes del cupón", async () => {
+  for (const paymentMethod of ["sinpe", "transferencia", "contra_entrega", "paypal", "tilopay"]) {
+    for (const [price, shipping] of [[7999, null], [8000, 2500], [24999, 2500], [25000, 0]]) {
+      const seed = promoCatalog();
+      const product = seed["products/p1"];
+      product.productKind = "decant";
+      product.categoryRefs.push({ id: "decants" }); // una segunda categoría de colonia no concede una muestra
+      seed[VARIANT].price = price;
+      const h = loadHandlers(seed);
+      const req = cashRequest({ paymentMethod, includeTotals: true, shippingCost: 0, subtotal: 99999,
+        items: [{ productId: "p1", variantId: "v1", quantity: 1, productKind: "bottle", price: 99999 }],
+        giftSample: { choice: "moschino-toy-2" } });
+      if (shipping === null) {
+        await assert.rejects(h.orders.createOrderWithReservation(req), /pedido mínimo/);
+        assert.equal(h.get(VARIANT).reservedStock, 0);
+        continue;
+      }
+      const order = await h.orders.createOrderWithReservation(req);
+      assert.equal(order.shippingCost, shipping);
+      assert.equal(order.total, price + shipping);
+      assert.equal(order.giftSample, undefined);
+      assert.equal(h.get("orders/" + order.orderId).giftSample, undefined);
+      assert.equal(h.get("discountCodes/" + promoCode).used, false);
+    }
+  }
+});
+
+test("un AP existente descuenta solo productos y conserva envío gratis en el umbral", async () => {
+  for (const [price, shipping] of [[8000, 2500], [25000, 0]]) {
+    const seed = promoCatalog();
+    seed["products/p1"].categoryRefs = [{id: "decants"}];
+    seed[VARIANT].price = price;
+    const h = loadHandlers(seed);
+    const order = await h.orders.createOrderWithReservation(cashRequest({ discountCode: promoCode }));
+    assert.equal(order.discount.amount, price / 10);
+    assert.equal(order.amountDueOnDelivery, price * 0.9 + shipping);
+    assert.equal(order.giftSample, undefined);
+    assert.equal(h.get("discountCodes/" + promoCode).orderId, order.orderId);
+  }
+});
+
+test("un frasco más un decant conserva el envío incluido y una única muestra", async () => {
+  const seed = promoCatalog();
+  seed[VARIANT].price = 6000;
+  seed["products/d"] = { productKind: "decant", active: true, name: "Decant" };
+  seed["products/d/variants/s"] = { price: 1500, stock: 1 };
+  const h = loadHandlers(seed);
+  const result = await h.orders.createOrderWithReservation(cashRequest({ items: [
+    { productId: "p1", variantId: "v1", quantity: 1 }, { productId: "d", variantId: "s", quantity: 1 },
+  ] }));
+  assert.equal(result.shippingCost, 0);
+  assert.equal(result.total, 7500);
+  assert.equal(result.giftSample.size, "3 ml");
+});
+
+test("cotización pública del carrito usa catálogo y muestra el faltante sin reservar ni habilitar pedidos bajo mínimo", async () => {
+  const seed = promoCatalog();
+  seed["products/p1"].productKind = "decant";
+  seed[VARIANT].price = 4700;
+  const h = loadHandlers(seed);
+  const items = [{ productId: "p1", variantId: "v1", quantity: 1, price: 25000, productKind: "other" }];
+  const quote = await h.promos.quoteCartDelivery({ data: { items, subtotal: 25000 } });
+  assert.deepEqual(quote, { subtotal: 4700, delivery: { belowMinimum: true, shippingCost: 2500, toFreeShipping: 20300 },
+    lines: [{ price: 4700, supplyType: "stock_propio", productKind: "decant" }] });
+  assert.equal(h.get(VARIANT).reservedStock, 0);
+  await assert.rejects(h.orders.createOrderWithReservation(cashRequest({ items, previewDelivery: true })), /pedido mínimo/);
+  await assert.rejects(h.orders.createOrderWithReservation(cashRequest({ items: [{ ...items[0], quantity: 2 }],
+    expectedTotal: 9400, discountCode: promoCode })), /importe cambió/);
+  assert.equal(h.get("discountCodes/" + promoCode).used, false);
+  assert.equal(h.get(VARIANT).reservedStock, 0);
 });

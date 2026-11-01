@@ -3,11 +3,13 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, CreditCard, ShoppingBag, ShieldCheck } from 'lucide-react';
 import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 import { useAuth } from '../../contexts/AuthContext';
-import { useCart } from '../../contexts/CartContext';
+import { usePricedCart } from '../../hooks/usePricedCart';
 import { formatCRC } from '../../utils/formatters';
 import { listPaymentMethods, getPaymentMethod, isOnlineMethod, isCashOnDeliveryEligible, ONLINE_PROVIDERS } from '../../services/payments/registry';
 import { getProvincias, getCantones, getDistritos, buscarPorCodigoPostal, codigoPostalDeDireccion } from '../../data/costaRicaTerritorial';
-import { calculateShippingCost, getShippingOptions } from '../../services/shippingService';
+import { MINIMUM_MESSAGE } from '../../../functions/lib/decantSale.mjs';
+import DecantDeliveryNotice from '../../components/checkout/DecantDeliveryNotice';
+import { getShippingOptions } from '../../services/shippingService';
 import { createOrder } from '../../services/orderService';
 import { createPaypalPendingOrder } from '../../services/payments/paypalClient';
 import { createCashOnDeliveryOrder } from '../../services/payments/cashOnDeliveryClient';
@@ -39,7 +41,7 @@ export default function CheckoutPage() {
   usePageTitle('Checkout | Aquí Pauli');
   const { user, loading: authLoading, ensureGuestSession } = useAuth();
   const [guestError, setGuestError] = useState(null);
-  const { items, itemCount, subtotal, clearCart } = useCart();
+  const { items, itemCount, subtotal, clearCart, delivery } = usePricedCart();
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -154,7 +156,7 @@ export default function CheckoutPage() {
     );
   }
 
-  const shippingCost = form.canton ? calculateShippingCost(form.canton, form.shippingType) : 0;
+  const { shippingCost } = delivery;
   const total = subtotal + shippingCost - (applied?.amount || 0);
   // "Bajo pedido": se aparta con el 50% de esas líneas; stock y envío se pagan completos.
   // PayPal confirma estos mismos importes con su cotización calculada en servidor.
@@ -169,7 +171,7 @@ export default function CheckoutPage() {
   }) : items;
   const backorder = computeBackorder(displayedLines, shippingCost);
   const showDeposit = backorder.hasBackorder && backorder.depositTotal > 0;
-  const shippingOptions = form.canton ? getShippingOptions(form.canton) : [];
+  const shippingOptions = form.canton ? getShippingOptions(form.canton, shippingCost) : [];
 
   // Territorial data
   const provincias = getProvincias();
@@ -231,12 +233,14 @@ export default function CheckoutPage() {
   const activeServerQuote = tilopaySelected ? activeTilopayQuote : activePaypalQuote;
   const paymentSummary = paypalSelected ? backorderFromPaypalQuote(activePaypalQuote)
     : tilopaySelected ? backorderFromTilopayQuote(activeTilopayQuote) : backorder;
+  const waitingForCardQuote = tilopaySelected && !paymentSummary && !delivery.belowMinimum;
   const showPaymentDeposit = paymentSummary?.hasBackorder && paymentSummary.depositTotal > 0
     && (!OnlinePanel || serverQuoteSelected);
 
   // Valida el formulario; devuelve true si todo está completo
   const validateForm = () => {
     const newErrors = {};
+    if (delivery.belowMinimum) newErrors.submit = MINIMUM_MESSAGE;
     if (applyingKey === cartKey) newErrors.submit = "Esperá a que termine la validación del código.";
     if (!form.name.trim()) newErrors.name = 'Nombre requerido';
     if (cashOnDeliverySelected) {
@@ -280,6 +284,7 @@ export default function CheckoutPage() {
     paymentMethod,
     paymentPhone: form.paymentPhone,
     subtotal,
+    expectedTotal: Math.round(total * 100) / 100,
     shippingCost,
     shippingType: form.shippingType,
     shippingAddress: {
@@ -574,7 +579,7 @@ export default function CheckoutPage() {
                 <p className="text-[10px] text-blue-500">Subí tu comprobante después de realizar el pago</p>
               </div>
             )}
-            {OnlinePanel && (
+            {OnlinePanel && !delivery.belowMinimum && (
               <OnlinePanel
                 items={items}
                 discountCode={applied?.code}
@@ -612,25 +617,26 @@ export default function CheckoutPage() {
                 </div>
               ))}
             </div>
+            <DecantDeliveryNotice delivery={delivery} />
             <div className="border-t border-slate-100 pt-4 space-y-2">
               {applied && <p className="flex justify-between text-sm font-bold text-rose-700"><span>Descuento con {applied.code} (−10%)</span><span>−{formatCRC(applied.amount)}</span></p>}
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Subtotal</span>
-                <span className="font-bold">{tilopaySelected && !paymentSummary ? 'Calculando…'
+                <span className="font-bold">{waitingForCardQuote ? 'Calculando…'
                   : formatCRC(serverQuoteSelected && activeServerQuote ? activeServerQuote.crcSubtotal + (applied?.amount || 0) : subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500">Envío</span>
-                <span className="font-bold">{tilopaySelected && !paymentSummary ? 'Calculando…'
+                <span className="font-bold">{waitingForCardQuote ? 'Calculando…'
                   : (serverQuoteSelected && activeServerQuote ? activeServerQuote.crcShipping : shippingCost) > 0
                     ? formatCRC(serverQuoteSelected && activeServerQuote ? activeServerQuote.crcShipping : shippingCost) : 'Incluido'}</span>
               </div>
               <div className="flex justify-between text-lg pt-2 border-t border-slate-100">
                 <span className="font-black text-slate-900">Total</span>
-                <span className="font-black text-rose-600">{tilopaySelected && !paymentSummary ? 'Calculando…'
+                <span className="font-black text-rose-600">{waitingForCardQuote ? 'Calculando…'
                   : formatCRC(serverQuoteSelected && activeServerQuote ? activeServerQuote.crcTotal : total)}</span>
               </div>
-              {serverQuoteSelected && !paymentSummary && (
+              {serverQuoteSelected && !paymentSummary && !delivery.belowMinimum && (
                 <p className="text-xs text-sky-800">El servidor confirmará el monto a pagar ahora y el saldo antes de habilitar {tilopaySelected ? 'el pago con tarjeta' : 'PayPal'}.</p>
               )}
               {cashOnDeliverySelected && (
@@ -666,12 +672,12 @@ export default function CheckoutPage() {
             <p className="text-[10px] text-slate-400 text-center">
               Al comprar aceptas los <Link to="/terminos" className="underline">términos</Link>, las <Link to="/devoluciones" className="underline">devoluciones</Link> y los <Link to="/envios" className="underline">envíos</Link>.
             </p>
-            {OnlinePanel ? (
+            {OnlinePanel ? (!delivery.belowMinimum &&
               <p className="text-[11px] text-slate-400 text-center">Paga con el panel de pago de arriba para confirmar tu pedido.</p>
             ) : (
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || delivery.belowMinimum}
               className="w-full py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
               {submitting ? 'Procesando...' : cashOnDeliverySelected ? 'Confirmar pedido contra entrega'

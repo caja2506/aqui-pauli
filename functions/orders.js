@@ -119,6 +119,9 @@ exports.createOrderWithReservation = onCall(
         }
         const card = code ? await reservationForCode(db, transaction, code) : null;
         totals = discountedTotals(totals, code);
+        if (data.expectedTotal !== undefined && data.expectedTotal !== totals.total) {
+          throw new HttpsError("failed-precondition", "El importe cambió. Volvé a abrir el carrito para actualizarlo.");
+        }
         if (code && data.expectedDiscountAmount !== undefined && data.expectedDiscountAmount !== totals.discount.amount) {
           throw new HttpsError("failed-precondition", "El descuento cambió. Volvé a aplicar el código.");
         }
@@ -170,10 +173,11 @@ exports.createOrderWithReservation = onCall(
         });
         const hasBackorderItems = backorder.hasBackorder;
         const depositTotal = backorder.depositTotal;
+        const includeTotals = data.includeTotals === true || giftSample || code;
         const confirmedTotals = { ...promotion, subtotal: totals.subtotal, shippingCost: totals.shippingCost, total: totals.total,
-          ...(giftSample || code ? { backorder } : {}) };
-        const response = { orderId, orderNumber, ...(giftSample || code ? confirmedTotals : {}), ...(cashOnDelivery ? {
-          ...confirmedTotals, paymentMethod: "contra_entrega", paymentStatus: "pendiente", amountDueOnDelivery: totals.total } : {}) };
+          ...(includeTotals ? { backorder } : {}) };
+        const response = { orderId, orderNumber, ...(includeTotals || cashOnDelivery ? confirmedTotals : {}), ...(cashOnDelivery ? {
+          paymentMethod: "contra_entrega", paymentStatus: "pendiente", amountDueOnDelivery: totals.total } : {}) };
         // Todas las lecturas de productos, configuración y variantes terminaron antes de escribir.
         if (card) transaction.update(card, { used: true, usedAt: now, usedByUid: customerUid, orderId });
         for (const reserve of reserves) transaction.update(reserve.ref, { reservedStock: reserve.reservedStock + reserve.line.quantity });
@@ -201,6 +205,16 @@ exports.createOrderWithReservation = onCall(
           } } : {}),
           customerNotes, notes: "", createdAt: now, updatedAt: now,
         });
+        // Conservar el contacto que el checkout manual guardaba junto al pedido.
+        if (["sinpe", "sinpe_movil", "transferencia", "efectivo"].includes(paymentMethod)) {
+          const isGuest = request.auth.token?.firebase?.sign_in_provider === "anonymous";
+          transaction.set(db.collection("crm_contacts").doc(customerUid), {
+            uid: customerUid, email: customerEmail, displayName: customerName, phone: customerPhone,
+            cedula: clean(data.customerCedula, 40), lastAddress: shippingAddress, preferredPaymentMethod: paymentMethod,
+            paymentPhone: clean(data.paymentPhone, 40), isGuest, source: isGuest ? "guest_checkout" : "checkout",
+            funnelStage: "comprador", lastOrderId: orderId, lastOrderDate: now, updatedAt: now,
+          }, { merge: true });
+        }
         for (const item of orderItems) transaction.set(orderRef.collection("items").doc(item.itemId), item);
         return { response };
       });

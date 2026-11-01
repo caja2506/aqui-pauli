@@ -47,7 +47,7 @@ export function TerminosPage() {
         <p>Horario de atención: lunes a sábado, de 9:00 a. m. a 6:00 p. m.</p>
       </Section>
       <Section title="2. Productos y precios">
-        <p>Los precios se muestran en colones costarricenses (₡), incluyen IVA cuando corresponda e incluyen el envío a todo el país.</p>
+        <p>Los precios se muestran en colones costarricenses (₡), incluyen IVA cuando corresponda. El checkout muestra el costo de envío antes de confirmar.</p>
         <p>Nos reservamos el derecho de corregir errores evidentes de precio o de inventario. Si un producto se agota después de tu pedido, te contactamos para ofrecerte un cambio o el reembolso completo.</p>
         <p>Las fotos son ilustrativas; las marcas y modelos son los indicados en cada ficha de producto.</p>
       </Section>
@@ -129,8 +129,8 @@ export function DevolucionesPage() {
 export function EnviosPage() {
   return (
     <LegalLayout title="Envíos y entregas" updated={UPDATED}>
-      <Section title="1. Envío incluido a todo el país">
-        <p>El envío está incluido en el precio de tus productos: no pagas nada extra por el envío, vivas donde vivas en Costa Rica.</p>
+      <Section title="1. Costo del envío nacional">
+        <p>Si pedís solo decants, la compra mínima es de ₡8.000. El envío cuesta ₡2.500 y es gratis desde ₡25.000 en productos, antes de descuentos. En los demás pedidos, incluidos los que llevan una colonia completa, el envío está incluido.</p>
       </Section>
       <Section title="2. Tiempos de entrega">
         <ul className="list-disc pl-5 space-y-1">

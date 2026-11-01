@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import React from 'react';
+import * as decantSale from '../functions/lib/decantSale.mjs';
 import * as pilot from '../src/services/payments/tilopayPilot.js';
 import { transformWithEsbuild } from 'vite';
 
@@ -35,7 +36,7 @@ function mount(initial = [line]) {
   const window = { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) };
   const module = { exports: {} };
   new Function('require', 'module', 'exports', 'localStorage', 'window', code)(
-    name => name === 'react' ? react : name.endsWith('/tilopayPilot') ? pilot : require(name), module, module.exports, localStorage, window);
+    name => name === 'react' ? react : name.endsWith('/tilopayPilot') ? pilot : name.endsWith('/decantSale.mjs') ? decantSale : require(name), module, module.exports, localStorage, window);
   const render = () => {
     cursor = 0; effects = [];
     const value = module.exports.CartProvider({ children: null }).props.value;
@@ -74,4 +75,47 @@ test('una pestaña abierta recibe carrito y cantidades de otra sin reescribir el
   app.external([], 'unrelated'); assert.equal(app.render().itemCount, 1);
   app.external([], null); assert.equal(app.render().itemCount, 0);
   app.unmount(); assert.equal(app.listeners.size, 0);
+});
+
+test('el carrito descarta cotizaciones tardías y refleja el nuevo precio y envío devueltos por el servidor', async () => {
+  const filename = 'src/hooks/usePricedCart.js';
+  const { code } = await transformWithEsbuild(await readFile(new URL('../' + filename, import.meta.url), 'utf8'), filename,
+    { loader: 'js', format: 'cjs', target: 'es2022' });
+  let state = null, previousKey, cleanup, start, finish;
+  let cart = { items: [{ ...line, productKind: 'decant', price: 4000 }], subtotal: 4000, isCartOpen: false };
+  const requests = [];
+  const dependencies = {
+    react: { useState: () => [state, value => { state = value; }], useEffect: (fn, [key]) => {
+      if (key !== previousKey) { cleanup?.(); previousKey = key; cleanup = fn(); }
+    } },
+    'firebase/functions': { httpsCallable: (_functions, name) => payload => {
+      assert.equal(name, 'quoteCartDelivery'); requests.push(payload);
+      return new Promise(resolve => { finish = resolve; });
+    } },
+    '../firebase': {}, '../contexts/CartContext': { useCart: () => cart },
+    '../../functions/lib/decantSale.mjs': decantSale,
+  };
+  const module = { exports: {} };
+  new Function('require', 'module', 'exports', 'setTimeout', 'clearTimeout', code)(
+    name => dependencies[name], module, module.exports, fn => { start = fn; return 1; }, () => {});
+  const render = () => module.exports.usePricedCart(true);
+  assert.equal(render().delivery.estimated, true);
+  assert.equal(start, undefined);
+  cart.isCartOpen = true;
+  render();
+  const old = start(), finishOld = finish;
+  cart = { ...cart, subtotal: 8000, items: [{ ...cart.items[0], quantity: 2 }] };
+  render();
+  const current = start();
+  const confirmed = { subtotal: 25000, delivery: { shippingCost: 0, belowMinimum: false, toFreeShipping: 0 },
+    lines: [{ price: 12500, productKind: 'decant', supplyType: 'stock_propio' }] };
+  finish({ data: confirmed });
+  await current;
+  finishOld({ data: { ...confirmed, subtotal: 4000 } });
+  await old;
+  const result = render();
+  assert.deepEqual(requests.map(r => r.items[0]), [1, 2].map(quantity => ({ productId: line.productId, variantId: 'v1', quantity })));
+  assert.equal(result.items[0].price, 12500);
+  assert.equal(result.subtotal, 25000);
+  assert.deepEqual(result.delivery, confirmed.delivery);
 });

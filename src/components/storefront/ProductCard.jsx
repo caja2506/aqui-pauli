@@ -38,7 +38,7 @@ function ProductCardDetails({ product }) {
 
   const { price, isFrom, mainVariant } = getProductPriceSummary(product, variants);
   const imageUrl = (product.images && product.images[0]) || mainVariant?.imageUrl || '';
-  const purchasableVariant = variants.find(variant => isPurchasableVariant(variant)
+  const purchasableVariant = variants.find(variant => isPurchasableVariant(variant, product)
     && getVariantPrice(product, variant) !== null);
   const commercialStatus = normalizeCommercialStatus((purchasableVariant || mainVariant || variants[0])?.commercialStatus);
   const canBuy = Boolean(purchasableVariant) && !variantError;

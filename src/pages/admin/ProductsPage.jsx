@@ -1,3 +1,4 @@
+import { isSaleDecant } from '../../../functions/lib/decantSale.mjs';
 import { useState } from 'react';
 import { Plus, Edit3, Trash2, Package, Search, Eye, EyeOff, X, ChevronDown, Tag, RefreshCw } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
@@ -196,6 +197,8 @@ export default function ProductsPage() {
     setIsVariantModal(true);
   };
 
+  const editingDecant = isSaleDecant(products.find(p => p.id === variantParentId));
+
   const handleSaveVariant = async (e) => {
     e.preventDefault();
     const data = {
@@ -205,7 +208,7 @@ export default function ProductsPage() {
       stock: Number(variantForm.stock) || 0,
       imageUrl: variantForm.imageUrl.trim(),
       commercialStatus: variantForm.commercialStatus,
-      supplyType: variantForm.supplyType,
+      supplyType: editingDecant ? 'stock_propio' : variantForm.supplyType,
     };
     if (editingVariant) {
       await updateVariant(variantParentId, editingVariant.id, data);
@@ -465,21 +468,21 @@ export default function ProductsPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Stock</label>
-                  <input type="number" value={variantForm.stock} onChange={e => setVariantForm({ ...variantForm, stock: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
+                  <input type="number" min="0" step="1" value={variantForm.stock} onChange={e => setVariantForm({ ...variantForm, stock: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Estado Comercial</label>
                   <select value={variantForm.commercialStatus} onChange={e => setVariantForm({ ...variantForm, commercialStatus: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500">
-                    {Object.entries(COMMERCIAL_STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    {Object.entries(COMMERCIAL_STATUS_LABELS).filter(([k]) => !editingDecant || k !== 'bajo_pedido').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Abastecimiento</label>
-                  <select value={variantForm.supplyType} onChange={e => setVariantForm({ ...variantForm, supplyType: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500">
+                  <select disabled={editingDecant} value={editingDecant ? 'stock_propio' : variantForm.supplyType} onChange={e => setVariantForm({ ...variantForm, supplyType: e.target.value })} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500">
                     <option value="stock_propio">Stock Propio</option>
-                    <option value="bajo_pedido">Bajo Pedido</option>
+                    {!editingDecant && <option value="bajo_pedido">Bajo Pedido</option>}
                   </select>
                 </div>
               </div>

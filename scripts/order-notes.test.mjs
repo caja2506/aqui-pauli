@@ -107,39 +107,23 @@ test('el contrato compartido normaliza notas opcionales y conserva saltos de lí
   assert.throws(() => normalizeCustomerNotes('x'.repeat(1001)), /hasta 1000 caracteres/);
 });
 
-test('SINPE guarda notas del cliente en el pedido, separadas de las notas internas y del CRM', async () => {
-  const h = loadServices();
-  const notes = '  Dejar en recepción.\nLlamar al llegar.  ';
-  const result = await h.manual.createOrder(orderFixture({ customerNotes: notes, notes: 'Nota interna falsificada' }));
-  assert.equal(result.orderId, 'local-order');
-  assert.equal(h.effects.commits, 1);
-  assert.equal(h.effects.callables.length, 0);
-  const order = h.store.get('orders/local-order');
-  assert.equal(order.customerNotes, notes.trim());
-  assert.equal(order.notes, '');
-  assert.equal(order.paymentMethod, 'sinpe');
-  assert.equal(order.paymentStatus, 'pendiente');
-  assert.equal(order.status, 'pendiente_pago');
-  assert.equal(order.total, 104000);
-  assert.equal(order.backorderDeposit, 32000);
-  assert.equal(order.uid, 'customer-1');
-  assert.equal(h.store.get('crm_contacts/customer-1').customerNotes, undefined);
-  assert.equal(h.store.get('orders/local-order/items/item_0').customerNotes, undefined);
-});
-
-test('agregar notas a SINPE no modifica importes, apartados, líneas ni estado financiero', async () => {
-  const before = loadServices();
-  const after = loadServices();
-  await before.manual.createOrder(orderFixture());
-  await after.manual.createOrder(orderFixture({ customerNotes: '{"total":1,"paymentStatus":"pagado"}' }));
-  const comparable = value => {
-    const result = structuredClone(value);
-    for (const key of ['customerNotes', 'createdAt', 'updatedAt', 'orderNumber']) delete result[key];
-    return result;
-  };
-  assert.deepEqual(comparable(after.store.get('orders/local-order')), comparable(before.store.get('orders/local-order')));
-  assert.deepEqual(after.store.get('orders/local-order/items/item_0'), before.store.get('orders/local-order/items/item_0'));
-  assert.deepEqual(after.store.get('orders/local-order/items/item_1'), before.store.get('orders/local-order/items/item_1'));
+test('SINPE y transferencia envían notas, contacto e IDs al servidor sin poder fijar el mínimo, envío ni estado', async () => {
+  for (const paymentMethod of ['sinpe', 'transferencia']) {
+    const h = loadServices();
+    const result = await h.manual.createOrder(orderFixture({ paymentMethod, customerNotes: '  Entregar el lunes  ',
+      notes: 'Privada', shippingCost: 0, total: 1, paymentStatus: 'pagado' }));
+    assert.equal(result.orderId, 'server-order');
+    assert.equal(h.effects.commits, 0);
+    assert.equal(h.effects.callables.length, 1);
+    const { name, data } = h.effects.callables[0];
+    assert.equal(name, 'createOrderWithReservation');
+    assert.equal(data.customerNotes, 'Entregar el lunes');
+    assert.equal(data.paymentMethod, paymentMethod);
+    assert.equal(data.paymentPhone, '88887777');
+    for (const key of ['subtotal', 'shippingCost', 'total', 'paymentStatus', 'notes']) assert.ok(!(key in data));
+    assert.deepEqual(data.items, [{ productId: 'stock', variantId: 'v1', quantity: 1 },
+      { productId: 'backorder', variantId: 'v2', quantity: 2 }]);
+  }
 });
 
 test('PayPal transmite notas normalizadas al callable junto con IDs y cantidades, sin autoridad financiera del carrito', async () => {
@@ -209,14 +193,14 @@ for (const method of ['manual', 'paypal', 'cash']) {
     for (const customerNotes of [undefined, null, '', ' \n ']) {
       const h = loadServices();
       await create(h, orderFixture(customerNotes === undefined ? {} : { customerNotes }));
-      const saved = method === 'manual' ? h.store.get('orders/local-order') : h.effects.callables[0].data;
+      const saved = h.effects.callables[0].data;
       assert.equal(saved.customerNotes, '');
     }
   });
   test(`${method}: 1000 caracteres se conservan y 1001 se rechazan antes de cualquier escritura`, async () => {
     const valid = loadServices();
     await create(valid, orderFixture({ customerNotes: 'x'.repeat(1000) }));
-    const saved = method === 'manual' ? valid.store.get('orders/local-order') : valid.effects.callables[0].data;
+    const saved = valid.effects.callables[0].data;
     assert.equal(saved.customerNotes.length, 1000);
     for (const value of ['x'.repeat(1001), false, 123, [], {}]) {
       const h = loadServices();

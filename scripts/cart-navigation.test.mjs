@@ -18,7 +18,7 @@ const CART = 'src/pages/store/CartPage.jsx';
 const DRAWER = 'src/components/storefront/CartDrawer.jsx';
 const TITLE = 'src/hooks/usePageTitle.js';
 const abs = relative => path.join(root, relative);
-const realFiles = [APP, CART, DRAWER, TITLE, 'src/utils/backorder.js', 'src/utils/formatters.js'];
+const realFiles = ['src/hooks/usePricedCart.js','functions/lib/decantSale.mjs', 'src/components/checkout/DecantDeliveryNotice.jsx', APP, CART, DRAWER, TITLE, 'src/utils/backorder.js', 'src/utils/formatters.js'];
 const compiled = new Map(await Promise.all(realFiles.map(async relative => {
   const filename = abs(relative);
   const { code } = await transformWithEsbuild(await readFile(filename, 'utf8'), filename, {
@@ -46,6 +46,7 @@ function renderSource(relative, options = {}) {
   };
   const emptyComponent = name => ({ __esModule: true, default: () => React.createElement('div', { 'data-stub': name }) });
   const modules = new Map([
+    ['firebase/functions', {}], [abs('src/firebase.js'), {}],
     [abs('src/contexts/CartContext.js'), { useCart: () => cart }],
     [abs('src/contexts/AuthContext.js'), { useAuth: () => ({ user: null, loading: false }) }],
     [abs('src/contexts/RoleContext.js'), { useRole: () => ({ isAdmin: false, roleLoading: false }) }],
@@ -66,6 +67,7 @@ function renderSource(relative, options = {}) {
     const module = { exports: {} };
     cache.set(filename, module);
     const localRequire = name => {
+      if (modules.has(name)) return modules.get(name);
       if (name === 'react/jsx-runtime') {
         const runtime = require(name);
         return { ...runtime, ...Object.fromEntries(['jsx', 'jsxs'].map(factory => [factory, (type, props, key) => {
@@ -223,4 +225,15 @@ test('el panel cerrado no intercepta teclas ni bloquea el scroll', () => {
     assert.equal(doc.activeElement, opener);
     page.unmount();
   });
+});
+
+test('carrito y panel lateral muestran el flete y bloquean continuar hasta ₡8.000 en decants', () => {
+  for (const view of [CART, DRAWER]) {
+    for (const [price, canCheckout] of [[7999, false], [8000, true], [25000, true]]) {
+      const { html } = renderSource(view, { items: [{ ...stockLine, productKind: 'decant', price, quantity: 1 }], open: true });
+      assert.equal(html.includes('href="/checkout"'), canCheckout);
+      assert.equal(html.includes('Te faltan'), price < 25000);
+      if (price < 25000) assert.match(plainText(html), /₡2 500/);
+    }
+  }
 });
