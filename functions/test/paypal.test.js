@@ -2,7 +2,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { crcToUsd, round2, getFxRate } = require("../lib/fx");
-const { shippingCostCRC, computeTotalsCRC } = require("../lib/pricing");
+const { computeTotalsCRC } = require("../lib/pricing");
 const pp = require("../lib/paypalApi");
 
 test("crcToUsd redondea a 2 decimales", () => {
@@ -14,13 +14,13 @@ test("crcToUsd redondea a 2 decimales", () => {
   assert.throws(() => crcToUsd(100, 0));
 });
 
-test("envío: GAM, fuera, express Grecia", () => {
-  // Envío incluido: siempre ₡0
-  assert.equal(shippingCostCRC(null, "Grecia", "express"), 0);
-  assert.equal(shippingCostCRC(null, "grecia", "normal"), 0);
-  assert.equal(shippingCostCRC(null, "Upala", "normal"), 0);
-  assert.equal(shippingCostCRC(null, "Upala", "express"), 0);
-  assert.equal(shippingCostCRC({ normalOutside: 6000 }, "Upala"), 0);
+test("PayPal incluye el flete de decants en el cobro", async () => {
+  const db = fakeDb({ "products/p": { productKind: "decant", active: true }, "products/p/variants/v": { price: 4000, stock: 2 } });
+  const totals = await computeTotalsCRC(db, [{ productId: "p", variantId: "v", quantity: 2 }]);
+  const quote = require("../lib/paypalDeposit").paymentQuote(totals, { rate: 500, bufferPct: 0 });
+  assert.equal(quote.crcPayNow, 10500);
+  assert.equal(quote.crcShipping, 2500);
+  assert.equal(quote.usdTotal, 21);
 });
 
 // Firestore falso mínimo

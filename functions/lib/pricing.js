@@ -1,7 +1,8 @@
 // Prices and fulfillment fields come from the catalog, never from checkout input.
-// All monetary arithmetic uses integer CRC centavos; shipping remains INCLUDED.
+// All monetary arithmetic uses integer CRC centavos.
 const { parseMinorCRC, minorToCRC } = require("./paymentMoney");
 const { normalizeInventoryStock } = require("./inventoryStock");
+const { isSaleDecant, decantDelivery, MINIMUM_MESSAGE } = require("./decantSale.mjs");
 
 const GAM_CANTONES = [
   "San José", "Escazú", "Desamparados", "Goicoechea", "Alajuelita",
@@ -12,7 +13,6 @@ const GAM_CANTONES = [
   "San Isidro", "Belén", "Flores", "San Pablo",
 ];
 const EXPRESS_CANTONES = ["Grecia"];
-const SHIPPING_INCLUDED = true;
 
 class PricingError extends Error {
   constructor(reason, message, lineIndex) {
@@ -22,9 +22,6 @@ class PricingError extends Error {
     if (lineIndex !== undefined) this.lineIndex = lineIndex;
   }
 }
-
-// Existing business policy: neither normal nor express adds a shipping charge.
-function shippingCostCRC(_prices, _canton, _shippingType = "normal") { return 0; }
 
 function validId(value) {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -75,6 +72,7 @@ async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
 
   const lines = [];
   let subtotalMinor = 0;
+  let onlyDecants = true;
   for (const [lineIndex, item] of items.entries()) {
     const productRef = db.collection("products").doc(item.productId);
     const variantRef = productRef.collection("variants").doc(item.variantId);
@@ -87,8 +85,13 @@ async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
       throw new PricingError("CATALOG_UNAVAILABLE", `Producto no disponible: ${catalogText(product?.name) || item.productId}`, lineIndex);
     }
 
+    const decant = isSaleDecant(product);
+    if (!decant) onlyDecants = false;
     const supplyType = variant.supplyType ?? product.supplyType ?? "stock_propio";
     if (!["stock_propio", "bajo_pedido"].includes(supplyType)) throw new PricingError("CATALOG_SUPPLY_INVALID", "Abastecimiento del catálogo inválido", lineIndex);
+    if (decant && (supplyType !== "stock_propio" || (variant.commercialStatus ?? "disponible") !== "disponible")) {
+      throw new PricingError("CATALOG_UNAVAILABLE", "Este tamaño de decant no está disponible para entrega inmediata.", lineIndex);
+    }
     // A stale reservation counter must not break a quote. Physical stock still
     // validates strictly; callers normalize again inside their stock transaction.
     try { normalizeInventoryStock(variant, { context: "pricing" }); }
@@ -118,9 +121,9 @@ async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
     });
   }
 
-  // There is no config/shipping read: with shipping included it cannot change
-  // the amount. This also avoids a silent config-read fallback in a transaction.
-  const shippingCostMinor = parseMinorCRC(shippingCostCRC(null, ship?.canton, ship?.shippingType), { allowZero: true });
+  const delivery = decantDelivery(onlyDecants, minorToCRC(subtotalMinor));
+  if (delivery.belowMinimum) throw new PricingError("DECANT_MINIMUM", MINIMUM_MESSAGE);
+  const shippingCostMinor = parseMinorCRC(delivery.shippingCost, { allowZero: true });
   const totalMinor = safeInteger(subtotalMinor + shippingCostMinor, "Total");
   return {
     lines, subtotal: minorToCRC(subtotalMinor), shippingCost: minorToCRC(shippingCostMinor), total: minorToCRC(totalMinor),
@@ -128,4 +131,4 @@ async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
   };
 }
 
-module.exports = { SHIPPING_INCLUDED, computeTotalsCRC, shippingCostCRC, GAM_CANTONES, EXPRESS_CANTONES, PricingError };
+module.exports = { computeTotalsCRC, GAM_CANTONES, EXPRESS_CANTONES, PricingError };

@@ -5,10 +5,14 @@ import { formatCRC } from '../../utils/formatters';
 import { computeBackorder, BACKORDER_DEPOSIT_LABEL } from '../../utils/backorder';
 import usePageTitle from '../../hooks/usePageTitle';
 
+import { cartDecantDelivery } from '../../../functions/lib/decantSale.mjs';
+import DecantDeliveryNotice from '../../components/checkout/DecantDeliveryNotice';
+
 export default function CartPage() {
   usePageTitle('Mi carrito | Aquí Pauli');
   const { items, subtotal, itemCount, removeItem, updateQuantity } = useCart();
-  const summary = computeBackorder(items);
+  const delivery = cartDecantDelivery(items, subtotal);
+  const summary = computeBackorder(items, delivery.shippingCost);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:pb-12">
@@ -59,7 +63,7 @@ export default function CartPage() {
               <h2 id="cart-summary-title" className="text-xl font-black text-slate-900 mb-5">Resumen</h2>
               <dl className="space-y-3 text-sm">
                 <div className="flex justify-between gap-4"><dt className="text-slate-500">Subtotal</dt><dd className="font-bold text-slate-800">{formatCRC(subtotal)}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Envío</dt><dd className="font-bold text-slate-800">Incluido</dd></div>
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Envío</dt><dd className="font-bold text-slate-800">{delivery.shippingCost ? formatCRC(delivery.shippingCost) : 'Incluido'}</dd></div>
                 <div className="flex justify-between gap-4 pt-3 border-t border-rose-100 text-base"><dt className="font-bold text-slate-800">Total del pedido</dt><dd className="font-black text-slate-900">{formatCRC(summary.total)}</dd></div>
                 {summary.hasBackorder && <>
                   <div className="flex justify-between gap-4"><dt className="font-bold text-rose-700">Pagás ahora</dt><dd className="font-black text-rose-700">{formatCRC(summary.payNowTotal)}</dd></div>
@@ -67,7 +71,8 @@ export default function CartPage() {
                 </>}
               </dl>
               {summary.hasBackorder && <p className="text-xs text-slate-600 leading-relaxed mt-4">Pagás el {BACKORDER_DEPOSIT_LABEL} de las líneas Bajo pedido y el importe completo de los productos en stock. El saldo se paga cuando el pedido esté listo para entregarse.</p>}
-              <Link to="/checkout" className="mt-6 w-full inline-flex items-center justify-center gap-2 py-4 px-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl text-sm transition-all">Continuar al checkout <ArrowRight className="w-4 h-4" /></Link>
+              <DecantDeliveryNotice delivery={delivery} />
+              {!delivery.belowMinimum && <Link to="/checkout" className="mt-6 w-full inline-flex items-center justify-center gap-2 py-4 px-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl text-sm transition-all">Continuar al checkout <ArrowRight className="w-4 h-4" /></Link>}
               <p className="text-xs text-slate-500 mt-3">En el siguiente paso completás el envío y elegís cómo pagar.</p>
             </section>
           </div>

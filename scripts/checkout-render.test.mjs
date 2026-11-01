@@ -27,6 +27,7 @@ const WHATSAPP = 'src/components/storefront/WhatsAppButton.jsx';
 const SHIPPING = 'src/services/shippingService.js';
 const LEGAL = 'src/pages/store/LegalPages.jsx';
 const realFiles = [
+  'functions/lib/decantSale.mjs', 'src/components/checkout/DecantDeliveryNotice.jsx',
   CHECKOUT, CART, CONFIRMATION, 'src/components/checkout/OrderPromotion.jsx', PAYPAL_PANEL, PRODUCT, WHATSAPP, SHIPPING, LEGAL,
   'src/components/checkout/CheckoutPromotion.jsx', 'functions/lib/promotions.mjs',
   'src/utils/backorder.js', 'src/utils/constants.js', 'src/utils/formatters.js',
@@ -118,7 +119,6 @@ function renderPage(relative, options = {}) {
       'createPaypalPendingOrder', 'loadPaypalSdk', 'paypalCaptureOrder', 'paypalCreateOrder', 'paypalGetConfig', 'paypalGetQuote',
     ].map((name) => [name, forbidden(name)])), ...(options.paypalClient || {}) }],
     [abs('src/services/shippingService.js'), {
-      calculateShippingCost: () => shippingCost,
       getShippingOptions: () => [{ type: 'normal', label: 'Envío normal', estimatedDays: '3 días', price: shippingCost }],
     }],
     [abs('src/services/payments/paypalProvider.js'), { paypalProvider }],
@@ -129,6 +129,11 @@ function renderPage(relative, options = {}) {
     } }],
     [abs('src/components/auth/SaveAccountPrompt.js'), { __esModule: true, default: () => null }],
   ]);
+  if (options.shippingCost) {
+    modules.set(abs('functions/lib/decantSale.mjs'), { cartDecantDelivery: () => ({
+      shippingCost: options.shippingCost, toFreeShipping: 0, belowMinimum: false,
+    }) });
+  }
   if (options.realShipping) modules.delete(abs(SHIPPING));
 
   // SSR does not run effects. Seed the form, loaded availability and saved order
@@ -1167,4 +1172,23 @@ test('un solo selector opcional incluso para dos perfumes; sorpresa primero', ()
   }
   const page=renderPage(CHECKOUT,{items:[line('stock_propio',45000,'bolso')],sampleOptions:[]});
   assert.doesNotMatch(page.html,/id="gift-decant"/);
+});
+
+test('checkout de decants bloquea el mínimo antes de pagar y muestra flete y faltante sin esperar la dirección', () => {
+  for (const method of ['sinpe', 'paypal', 'tilopay']) {
+    const { html } = renderPage(CHECKOUT, { items: [line('stock_propio', 7999, 'decant-boss-in-motion')],
+      paypalAvailable: true, tilopayAvailable: true, paymentMethod: method, realShipping: true });
+    contains(html, 'El pedido mínimo de solo decants');
+    contains(html, `Te faltan ${formatCRC(17001)} para envío gratis.`);
+    contains(html, formatCRC(2500));
+    assert.doesNotMatch(html, /data-testid="(?:paypal|tilopay)-panel"/);
+    if (method === 'sinpe') assert.match(html, /type="submit" disabled/);
+  }
+  for (const [price, shipping] of [[8000, 2500], [24999, 2500], [25000, 0]]) {
+    const { html } = renderPage(CHECKOUT, { items: [{ ...line('stock_propio', price), productKind: 'decant' }],
+      paymentMethod: 'sinpe', realShipping: true });
+    contains(html, `Confirmar Pedido · ${formatCRC(price + shipping)}`);
+    if (shipping) contains(html, `Te faltan ${formatCRC(25000 - price)} para envío gratis.`);
+    else assert.doesNotMatch(html, /Te faltan/);
+  }
 });

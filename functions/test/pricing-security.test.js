@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { computeTotalsCRC, shippingCostCRC, SHIPPING_INCLUDED } = require("../lib/pricing");
+const { computeTotalsCRC } = require("../lib/pricing");
 
 function fixture(overrides = {}) {
   const store = {
@@ -45,12 +45,12 @@ test("todas las lecturas usan la transacción suministrada", async () => {
 });
 
 test("envío incluido se conserva para cualquier zona y modalidad, sin leer tarifas", async () => {
-  assert.equal(SHIPPING_INCLUDED, true);
-  for (const canton of ["Grecia", "San José", "Puntarenas", ""]) {
-    for (const type of ["normal", "express"]) assert.equal(shippingCostCRC({ normalOutside: 99999, expressGrecia: 5000 }, canton, type), 0);
-  }
   const f = fixture();
-  await computeTotalsCRC(f.db, [item()], { canton: "Puntarenas" });
+  for (const canton of ["Grecia", "Puntarenas", ""]) {
+    for (const shippingType of ["normal", "express"]) {
+      assert.equal((await computeTotalsCRC(f.db, [item()], { canton, shippingType })).shippingCost, 0);
+    }
+  }
   assert.ok(!f.direct.includes("config/shipping"));
 });
 

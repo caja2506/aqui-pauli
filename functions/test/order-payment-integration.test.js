@@ -1575,3 +1575,58 @@ test("la misma solicitud de checkout recupera su pedido después de perder la re
   assert.equal(h.get(VARIANT).reservedStock,1);
   await assert.rejects(h.orders.createOrderWithReservation(cashRequest({...req.data,giftSample:{choice:"otra"}})));
 });
+
+test("decants: el servidor valida mínimo y cobra envío por el subtotal de catálogo antes del cupón", async () => {
+  for (const paymentMethod of ["sinpe", "transferencia", "contra_entrega", "paypal", "tilopay"]) {
+    for (const [price, shipping] of [[7999, null], [8000, 2500], [24999, 2500], [25000, 0]]) {
+      const seed = promoCatalog();
+      const product = seed["products/p1"];
+      product.productKind = "decant";
+      product.categoryRefs.push({ id: "decants" }); // una segunda categoría de colonia no concede una muestra
+      seed[VARIANT].price = price;
+      const h = loadHandlers(seed);
+      const req = cashRequest({ paymentMethod, includeTotals: true, shippingCost: 0, subtotal: 99999,
+        items: [{ productId: "p1", variantId: "v1", quantity: 1, productKind: "bottle", price: 99999 }],
+        giftSample: { choice: "moschino-toy-2" } });
+      if (shipping === null) {
+        await assert.rejects(h.orders.createOrderWithReservation(req), /pedido mínimo/);
+        assert.equal(h.get(VARIANT).reservedStock, 0);
+        continue;
+      }
+      const order = await h.orders.createOrderWithReservation(req);
+      assert.equal(order.shippingCost, shipping);
+      assert.equal(order.total, price + shipping);
+      assert.equal(order.giftSample, undefined);
+      assert.equal(h.get("orders/" + order.orderId).giftSample, undefined);
+      assert.equal(h.get("discountCodes/" + promoCode).used, false);
+    }
+  }
+});
+
+test("un AP existente descuenta solo productos y conserva envío gratis en el umbral", async () => {
+  for (const [price, shipping] of [[8000, 2500], [25000, 0]]) {
+    const seed = promoCatalog();
+    seed["products/p1"].categoryRefs = [{id: "decants"}];
+    seed[VARIANT].price = price;
+    const h = loadHandlers(seed);
+    const order = await h.orders.createOrderWithReservation(cashRequest({ discountCode: promoCode }));
+    assert.equal(order.discount.amount, price / 10);
+    assert.equal(order.amountDueOnDelivery, price * 0.9 + shipping);
+    assert.equal(order.giftSample, undefined);
+    assert.equal(h.get("discountCodes/" + promoCode).orderId, order.orderId);
+  }
+});
+
+test("un frasco más un decant conserva el envío incluido y una única muestra", async () => {
+  const seed = promoCatalog();
+  seed[VARIANT].price = 6000;
+  seed["products/d"] = { productKind: "decant", active: true, name: "Decant" };
+  seed["products/d/variants/s"] = { price: 1500, stock: 1 };
+  const h = loadHandlers(seed);
+  const result = await h.orders.createOrderWithReservation(cashRequest({ items: [
+    { productId: "p1", variantId: "v1", quantity: 1 }, { productId: "d", variantId: "s", quantity: 1 },
+  ] }));
+  assert.equal(result.shippingCost, 0);
+  assert.equal(result.total, 7500);
+  assert.equal(result.giftSample.size, "3 ml");
+});

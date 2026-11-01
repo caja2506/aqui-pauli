@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { isSaleDecant } from '../../functions/lib/decantSale.mjs';
 import { pilotStorageKey } from '../services/payments/tilopayPilot';
 
 const CartContext = createContext(null);
@@ -67,6 +68,7 @@ export function CartProvider({ children }) {
         productId: product.id,
         variantId: variant.id,
         productName: product.name,
+        productKind: isSaleDecant(product) ? 'decant' : 'other',
         variantName: variant.name,
         imageUrl: variant.imageUrl || (product.images && product.images[0]) || '',
         price: variant.price,

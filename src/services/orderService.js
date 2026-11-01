@@ -1,137 +1,20 @@
-import { collection, doc, setDoc, updateDoc, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
-import { generateOrderNumber } from '../utils/formatters';
-import { computeBackorder } from '../utils/backorder';
+import { collection, doc, updateDoc, getDocs } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../firebase';
 import { normalizeCustomerNotes } from '../../functions/lib/customerNotes.mjs';
 
-/**
- * Crea un pedido completo:
- * - Documento principal en orders/ con dirección, totales, cliente
- * - Sub-colección orders/{id}/items/ con cada producto
- * - Crea/actualiza contacto en crm_contacts/
- */
-export async function createOrder(orderData) {
-  if (orderData.discountCode || orderData.giftSample) {
-    const { httpsCallable } = await import('firebase/functions');
-    const { functions } = await import('../firebase');
-    const { data } = await httpsCallable(functions, 'createOrderWithReservation')({
-      ...orderData, items: orderData.items.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),
-    });
-    return data;
-  }
-  const customerNotes = normalizeCustomerNotes(orderData.customerNotes);
-  const orderId = doc(collection(db, 'orders')).id;
-  const orderNumber = generateOrderNumber();
-  const now = new Date().toISOString();
-  const batch = writeBatch(db);
-
-  // --- 1. Documento principal de la orden ---
-  const orderRef = doc(db, 'orders', orderId);
-  const total = (orderData.subtotal || 0) + (orderData.shippingCost || 0);
-
-  // Calcular si hay productos bajo pedido (backorder)
-  const hasBackorder = orderData.items.some(i => i.supplyType === 'bajo_pedido');
-  const backorderDeposit = computeBackorder(orderData.items, orderData.shippingCost).depositTotal;
-
-  batch.set(orderRef, {
-    orderNumber,
-    uid: orderData.uid || '',
-    customerName: orderData.customerName,
-    customerEmail: orderData.customerEmail,
-    customerPhone: orderData.customerPhone,
-    customerCedula: orderData.customerCedula || '',
-    isGuest: !!orderData.isGuest,
-    // --- DIRECCIÓN COMPLETA ---
-    shippingAddress: {
-      provincia: orderData.shippingAddress?.provincia || '',
-      canton: orderData.shippingAddress?.canton || '',
-      distrito: orderData.shippingAddress?.distrito || '',
-      codigoPostal: orderData.shippingAddress?.codigoPostal || '',
-      señas: orderData.shippingAddress?.señas || '',
-    },
-    // --- TOTALES ---
-    subtotal: orderData.subtotal,
-    shippingCost: orderData.shippingCost,
-    shippingType: orderData.shippingType || 'normal',
-    total,
-    // --- PAGO ---
-    paymentMethod: orderData.paymentMethod,
-    paymentPhone: orderData.paymentPhone || '',
-    paymentStatus: 'pendiente',
-    paymentProofUrl: '',
-    // --- BACKORDER ---
-    hasBackorder,
-    backorderDeposit,
-    // --- ESTADO ---
-    status: 'pendiente_pago',
-    customerNotes,
-    notes: '',
-    trackingNumber: '',
-    trackingUrl: '',
-    // --- ITEMS RESUMEN (para mostrar en la tabla sin sub-query) ---
-    itemsSummary: orderData.items.map(i => ({
-      productId: i.productId,
-      variantId: i.variantId,
-      productName: i.productName,
-      variantName: i.variantName,
-      imageUrl: i.imageUrl || '',
-      price: i.price,
-      quantity: i.quantity,
-      supplyType: i.supplyType || 'stock_propio',
-      lineTotal: i.price * i.quantity,
-    })),
-    itemCount: orderData.items.reduce((sum, i) => sum + i.quantity, 0),
-    // --- TIMESTAMPS ---
-    createdAt: now,
-    updatedAt: now,
+export async function createOrder(order) {
+  const { data } = await httpsCallable(functions, 'createOrderWithReservation')({
+    includeTotals: true, paymentMethod: order.paymentMethod, paymentPhone: order.paymentPhone || '',
+    customerName: order.customerName, customerEmail: order.customerEmail, customerPhone: order.customerPhone,
+    customerCedula: order.customerCedula || '', customerNotes: normalizeCustomerNotes(order.customerNotes),
+    shippingAddress: order.shippingAddress, shippingType: order.shippingType,
+    ...(order.giftSample && { giftSample: order.giftSample }),
+    ...(order.discountCode && { discountCode: order.discountCode, expectedDiscountAmount: order.expectedDiscountAmount,
+      promotionRequestId: order.promotionRequestId }),
+    items: order.items.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),
   });
-
-  // --- 2. Sub-colección de items (para queries detallados) ---
-  orderData.items.forEach((item, index) => {
-    const itemRef = doc(db, 'orders', orderId, 'items', `item_${index}`);
-    batch.set(itemRef, {
-      productId: item.productId,
-      variantId: item.variantId,
-      productName: item.productName,
-      variantName: item.variantName,
-      imageUrl: item.imageUrl || '',
-      price: item.price,
-      quantity: item.quantity,
-      supplyType: item.supplyType || 'stock_propio',
-      lineTotal: item.price * item.quantity,
-    });
-  });
-
-  // --- 3. Crear/actualizar contacto CRM ---
-  if (orderData.uid) {
-    const crmRef = doc(db, 'crm_contacts', orderData.uid);
-    batch.set(crmRef, {
-      uid: orderData.uid,
-      email: orderData.customerEmail,
-      displayName: orderData.customerName,
-      phone: orderData.customerPhone,
-      cedula: orderData.customerCedula || '',
-      lastAddress: {
-        provincia: orderData.shippingAddress?.provincia || '',
-        canton: orderData.shippingAddress?.canton || '',
-        distrito: orderData.shippingAddress?.distrito || '',
-        codigoPostal: orderData.shippingAddress?.codigoPostal || '',
-        señas: orderData.shippingAddress?.señas || '',
-      },
-      preferredPaymentMethod: orderData.paymentMethod || '',
-      paymentPhone: orderData.paymentPhone || '',
-      isGuest: !!orderData.isGuest,
-      source: orderData.isGuest ? 'guest_checkout' : 'checkout',
-      funnelStage: 'comprador',
-      lastOrderId: orderId,
-      lastOrderDate: now,
-      updatedAt: now,
-    }, { merge: true });
-  }
-
-  await batch.commit();
-
-  return { orderId, orderNumber };
+  return data;
 }
 
 /**

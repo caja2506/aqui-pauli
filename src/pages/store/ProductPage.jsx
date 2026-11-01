@@ -78,16 +78,16 @@ function ProductDetails({ productId }) {
   }
 
   const handleAddToCart = () => {
-    if (addToCartLock.current || !isPurchasableVariant(selectedVariant) || currentPrice === null) return;
+    if (addToCartLock.current || !isPurchasableVariant(selectedVariant, product, quantity) || currentPrice === null) return;
     addToCartLock.current = true;
     addItem(product, { ...selectedVariant, price: currentPrice }, quantity);
     setAddedToCart(true);
     setTimeout(() => { addToCartLock.current = false; setAddedToCart(false); }, 2000);
   };
 
-  const canBuy = isPurchasableVariant(selectedVariant) && currentPrice !== null;
+  const canBuy = isPurchasableVariant(selectedVariant, product, quantity) && currentPrice !== null;
   const hasPurchasableOption = !variantError && variants.some(variant =>
-    isPurchasableVariant(variant) && getVariantPrice(product, variant) !== null);
+    isPurchasableVariant(variant, product) && getVariantPrice(product, variant) !== null);
   const chooseVariant = () => {
     variantSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     variantSectionRef.current?.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
@@ -172,7 +172,7 @@ function ProductDetails({ productId }) {
                       ? 'bg-rose-600 text-white border-rose-600 shadow-md'
                       : 'bg-white text-slate-600 border-slate-200 hover:border-rose-300'
                     } ${normalizeCommercialStatus(v.commercialStatus) === 'agotado' ? 'opacity-50 line-through' : ''}`}
-                    disabled={!isPurchasableVariant(v) || getVariantPrice(product, v) === null}
+                    disabled={!isPurchasableVariant(v, product) || getVariantPrice(product, v) === null}
                   >
                     {v.name}
                   </button>
@@ -205,7 +205,7 @@ function ProductDetails({ productId }) {
                   <button type="button" aria-label="Disminuir cantidad" disabled={quantity <= 1}
                     onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-3 py-2 lg:px-4 lg:py-3 text-slate-500 hover:bg-slate-50 disabled:opacity-40 text-lg font-bold">−</button>
                   <span className="px-3 py-2 lg:px-4 lg:py-3 text-sm font-bold text-slate-900 min-w-[40px] text-center border-x border-slate-200" aria-live="polite">{quantity}</span>
-                  <button type="button" aria-label="Aumentar cantidad"
+                  <button type="button" aria-label="Aumentar cantidad" disabled={!isPurchasableVariant(selectedVariant, product, quantity + 1)}
                     onClick={() => setQuantity(q => q + 1)} className="px-3 py-2 lg:px-4 lg:py-3 text-slate-500 hover:bg-slate-50 text-lg font-bold">+</button>
                 </div>}
               </div>

@@ -57,13 +57,6 @@ export async function saveShippingPrices(prices) {
 }
 
 /**
- * Precios síncronos (usa cache o defaults)
- */
-function getPricesSync() {
-  return cachedPrices || DEFAULT_SHIPPING_PRICES;
-}
-
-/**
  * Determina si un cantón está dentro del GAM
  */
 export function isInGAM(canton) {
@@ -83,39 +76,19 @@ export function hasExpressAvailable(canton) {
   );
 }
 
-/**
- * Calcula el costo de envío según cantón y tipo
- */
-// Envío INCLUIDO en el precio (decisión de Carlos): no se cobra envío aparte.
-// Normal / Express quedan solo como elección de tiempo de entrega.
-export const SHIPPING_INCLUDED = true;
-
-export function calculateShippingCost(canton, shippingType = 'normal') {
-  if (SHIPPING_INCLUDED) return 0;
-  const prices = getPricesSync();
-
-  if (shippingType === 'express' && hasExpressAvailable(canton)) {
-    return prices.expressGrecia;
-  }
-
-  if (isInGAM(canton)) {
-    return prices.normalGAM;
-  }
-
-  return prices.normalOutside;
-}
+// La tienda usa una política nacional fija; las tarifas por cantón están inactivas.
+export const REGIONAL_PRICES_DISABLED = true;
 
 /**
  * Retorna las opciones de envío disponibles para un cantón
  */
-export function getShippingOptions(canton) {
-  const prices = getPricesSync();
+export function getShippingOptions(canton, shippingCost = 0) {
   const options = [
     {
       type: 'normal',
       label: 'Envío Normal',
       description: 'Mensajería local o Correos de Costa Rica, según tu zona.',
-      price: SHIPPING_INCLUDED ? 0 : (isInGAM(canton) ? prices.normalGAM : prices.normalOutside),
+      price: shippingCost,
       estimatedDays: isInGAM(canton) ? SHIPPING_DELIVERY_TIMES.normalGAM : SHIPPING_DELIVERY_TIMES.normalOutside,
     },
   ];
@@ -124,7 +97,7 @@ export function getShippingOptions(canton) {
     options.unshift({
       type: 'express',
       label: 'Envío Express (Solo Grecia)',
-      price: SHIPPING_INCLUDED ? 0 : prices.expressGrecia,
+      price: shippingCost,
       estimatedDays: SHIPPING_DELIVERY_TIMES.expressGrecia,
     });
   }

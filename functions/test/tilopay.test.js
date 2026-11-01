@@ -1126,3 +1126,17 @@ test("Tilopay respeta el cupón consumido por el mismo pedido, también durante 
   assert.equal((await h.service.confirm(request())).result,"paid");
   assert.equal(h.order().priceCorrectedByServer,undefined);
 });
+
+test("Tilopay incluye el envío de decants en la cotización y el monto enviado a la pasarela simulada", async () => {
+  const h = harness({ extra: {
+    "products/p1": { name: "Decant", categoryRefs: [{ id: "decants" }], active: true },
+    "products/p1/variants/v1": { price: 4000, stock: 2, reservedStock: 0, active: true, supplyType: "stock_propio" },
+  } });
+  const below = quoteRequest([{ productId: "p1", variantId: "v1", quantity: 1 }]);
+  await assert.rejects(h.service.getQuote(below), { details: { reason: "DECANT_MINIMUM" } });
+  const quote = await h.service.getQuote(quoteRequest());
+  assert.equal(quote.crcShipping, 2500);
+  assert.equal(quote.crcPayNow, 10500);
+  await h.service.create({ ...request(), data: { orderId: ORDER, expectedQuote: quote } });
+  assert.equal(h.calls.pay[0].amount, "10500.00");
+});

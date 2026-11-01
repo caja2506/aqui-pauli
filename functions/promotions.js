@@ -2,7 +2,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { db } = require("./utils");
-const { computeTotalsCRC } = require("./lib/pricing");
+const { computeTotalsCRC, PricingError } = require("./lib/pricing");
 const { checkCode, discountedTotals, providerDeclined } = require("./lib/discounts");
 const { generateBatch, validateBatch } = require("./lib/cardBatches");
 const { releaseCancelledReservation } = require("./lib/orderFulfillment");
@@ -11,7 +11,12 @@ const opts = { cors: true, invoker: "public" };
 exports.validateDiscountCode = onCall(opts, async req => {
   const { code, message } = await checkCode(db, req.auth?.uid, req.data?.code);
   if (message) return { ok: false, percent: 0, amount: 0, message };
-  const totals = await computeTotalsCRC(db, req.data.items);
+  let totals;
+  try { totals = await computeTotalsCRC(db, req.data.items); }
+  catch (error) {
+    if (error instanceof PricingError) throw new HttpsError("failed-precondition", error.message);
+    throw error;
+  }
   return { ok: true, percent: 10, amount: discountedTotals(totals, code).discount.amount, message: "Código aplicado: −10%" };
 });
 exports.generateDiscountBatch = onCall(opts, async req => {
