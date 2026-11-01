@@ -1,10 +1,11 @@
-import React, { useLayoutEffect } from 'react';
+import React, { useEffect, useLayoutEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, matchPath } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { useRole } from './contexts/RoleContext';
 import { Loader2 } from 'lucide-react';
 
 // --- Layout Components ---
+import { trackPageView, trackWhatsAppClick } from './utils/pixel';
 import Navbar from './components/storefront/Navbar';
 import MobileCartBar from './components/storefront/MobileCartBar';
 import Footer from './components/storefront/Footer';
@@ -101,6 +102,16 @@ function AdminLayout() {
 // ========================================
 // App
 // ========================================
+function PixelNavigation() {
+  const { pathname, search, hash } = useLocation();
+  useLayoutEffect(() => { trackPageView(pathname + search + hash); }, [pathname, search, hash]);
+  useEffect(() => {
+    document.addEventListener('click', trackWhatsAppClick, true);
+    return () => document.removeEventListener('click', trackWhatsAppClick, true);
+  }, []);
+  return null;
+}
+
 function ScrollToTop() {
   const { pathname } = useLocation();
   useLayoutEffect(() => {
@@ -126,6 +137,7 @@ function GlobalMobileCartBar() {
 export default function App() {
   return (
     <BrowserRouter>
+      <PixelNavigation />
       <ScrollToTop />
       <Routes>
         {/* Auth */}

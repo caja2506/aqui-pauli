@@ -18,7 +18,9 @@ const CART = 'src/pages/store/CartPage.jsx';
 const DRAWER = 'src/components/storefront/CartDrawer.jsx';
 const TITLE = 'src/hooks/usePageTitle.js';
 const abs = relative => path.join(root, relative);
-const realFiles = ['src/hooks/usePricedCart.js','functions/lib/decantSale.mjs', 'src/components/checkout/DecantDeliveryNotice.jsx', APP, CART, DRAWER, TITLE, 'src/utils/backorder.js', 'src/utils/formatters.js'];
+const realFiles = [
+  'src/utils/pixel.js', 'functions/lib/catalogId.mjs',
+  'src/hooks/usePricedCart.js','functions/lib/decantSale.mjs', 'src/components/checkout/DecantDeliveryNotice.jsx', APP, CART, DRAWER, TITLE, 'src/utils/backorder.js', 'src/utils/formatters.js'];
 const compiled = new Map(await Promise.all(realFiles.map(async relative => {
   const filename = abs(relative);
   const { code } = await transformWithEsbuild(await readFile(filename, 'utf8'), filename, {

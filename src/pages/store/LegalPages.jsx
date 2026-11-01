@@ -2,7 +2,7 @@
 // Páginas legales de la tienda: términos, devoluciones, envíos y privacidad.
 // ==============================================
 import { Link } from 'react-router-dom';
-import LegalLayout, { CONTACT, LAST_UPDATED, Section } from '../../components/legal/LegalLayout';
+import LegalLayout, { CONTACT, Section } from '../../components/legal/LegalLayout';
 import { SHIPPING_DELIVERY_TIMES } from '../../utils/shippingDelivery';
 
 const UPDATED = '30 de octubre de 2026';
@@ -165,7 +165,7 @@ export function EnviosPage() {
 
 export function PrivacidadPage() {
   return (
-    <LegalLayout title="Política de privacidad" updated={LAST_UPDATED}>
+    <LegalLayout title="Política de privacidad" updated="1 de noviembre de 2026">
       <Section title="1. Responsable de los datos">
         <p>El responsable de la base de datos es {CONTACT.owner}, cédula de identidad {CONTACT.cedula}, persona física, titular de Aquí Pauli (aquipauli.com), con domicilio en Grecia, Alajuela, Costa Rica.</p>
         <p>
@@ -194,7 +194,7 @@ export function PrivacidadPage() {
       <Section title="4. Con quién los compartimos">
         <p>Solo con los proveedores que necesitamos para operar (encargados del tratamiento):</p>
         <ul className="list-disc pl-5 space-y-1">
-          <li>Meta / WhatsApp, para atenderte y comunicarnos contigo.</li>
+          <li>Meta, para medir nuestros anuncios y atenderte por WhatsApp.</li>
           <li>PayPal y Tilopay, para procesar los pagos.</li>
           <li>Firebase / Google, donde se aloja la tienda y se guardan los pedidos.</li>
           <li>La empresa de mensajería que entrega tu pedido (nombre, teléfono y dirección).</li>
@@ -208,7 +208,7 @@ export function PrivacidadPage() {
         <p>Guardamos tus datos el tiempo que la ley exija. La tienda usa conexión cifrada (HTTPS) y acceso restringido a la información.</p>
       </Section>
       <Section title="7. Cookies y almacenamiento local">
-        <p>Usamos el almacenamiento de tu navegador para mantener tu carrito y tu sesión. No usamos herramientas de publicidad ni de análisis de terceros en la tienda.</p>
+        <p>Usamos el almacenamiento de tu navegador para mantener tu carrito y tu sesión. Usamos el píxel de Meta para medir el resultado de nuestros anuncios. Meta puede usar cookies y recibir la página visitada, los productos vistos o agregados al carrito, los contactos por WhatsApp y el importe de los pedidos registrados.</p>
       </Section>
       <Section title="8. Cambios">
         <p>Si cambiamos esta política, publicaremos la nueva versión en esta página con su fecha.</p>

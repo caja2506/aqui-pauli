@@ -20,6 +20,8 @@ import { computeBackorder, BACKORDER_DEPOSIT_LABEL, BACKORDER_BALANCE_TIMING } f
 import { SINPE_INFO } from '../../utils/constants';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
+import { track, cartEvent } from '../../utils/pixel';
+import { readPixelVariant } from '../../services/pixelCatalog';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import usePageTitle from '../../hooks/usePageTitle';
 import { GIVEAWAY_PHONE_ERROR, isValidGiveawayPhone } from '../../../functions/lib/giveawayPhone.mjs';
@@ -43,6 +45,15 @@ export default function CheckoutPage() {
   const { user, loading: authLoading, ensureGuestSession } = useAuth();
   const [guestError, setGuestError] = useState(null);
   const { items, itemCount, subtotal, clearCart, delivery } = usePricedCart();
+  const checkoutTracked = useRef(false);
+  useEffect(() => {
+    if (checkoutTracked.current || !items.length || typeof window === 'undefined' || typeof window.fbq !== 'function') return;
+    let active = true;
+    cartEvent(items, subtotal, readPixelVariant).then(data => {
+      if (active && data && !checkoutTracked.current) checkoutTracked.current = track('InitiateCheckout', data);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [items, subtotal]);
   const navigate = useNavigate();
 
   const [form, setForm] = useState({

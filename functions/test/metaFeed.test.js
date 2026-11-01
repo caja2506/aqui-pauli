@@ -7,6 +7,8 @@ const { buildRows, rowToBatchItem } = require("../lib/metaFeed");
 test("functions-metafeed/feed.js es copia idéntica de functions/lib/metaFeed.js", () => {
   const a = fs.readFileSync(path.join(__dirname, "../lib/metaFeed.js"), "utf8");
   const b = fs.readFileSync(path.join(__dirname, "../../functions-metafeed/feed.js"), "utf8");
+  assert.equal(fs.readFileSync(path.join(__dirname, "../lib/catalogId.mjs"), "utf8"),
+    fs.readFileSync(path.join(__dirname, "../../functions-metafeed/catalogId.mjs"), "utf8"));
   assert.equal(a, b, "Copiá functions/lib/metaFeed.js a functions-metafeed/feed.js");
 });
 

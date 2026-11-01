@@ -18,6 +18,7 @@ const CONFIRMATION = 'src/pages/store/OrderConfirmation.jsx';
 const PROMPT = 'src/components/auth/SaveAccountPrompt.jsx';
 const TITLE = 'src/hooks/usePageTitle.js';
 const compiled = new Map(await Promise.all([
+  'src/utils/pixel.js', 'functions/lib/catalogId.mjs', 'src/services/pixelCatalog.js',
   CONFIRMATION, PROMPT, TITLE, 'src/components/checkout/OrderPromotion.jsx', 'src/components/auth/FacebookIcon.jsx',
   'src/components/ui/CopyButton.jsx', 'src/utils/formatters.js',
   'src/utils/constants.js', 'src/utils/backorder.js', 'src/services/payments/paypalQuote.js', 'src/services/payments/tilopayQuote.js',

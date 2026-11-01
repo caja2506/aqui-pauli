@@ -12,6 +12,7 @@ import StatusBadge from '../../components/ui/StatusBadge';
 import { normalizeCommercialStatus } from '../../utils/constants';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import { getVariantPrice, getProductPriceSummary, isActiveVariant, isPurchasableVariant } from '../../utils/productPrice';
+import { track, productEvent } from '../../utils/pixel';
 import usePageTitle from '../../hooks/usePageTitle';
 
 export default function ProductPage() {
@@ -61,6 +62,14 @@ function ProductDetails({ productId }) {
     return () => { active = false; unsub(); };
   }, [productId]);
 
+  const viewed = useRef(false);
+  useEffect(() => {
+    if (viewed.current || loading || variantError || !product?.active || product.deleted || product.unlisted) return;
+    const { price, mainVariant } = getProductPriceSummary(product, variants);
+    if (price === null) return;
+    viewed.current = track('ViewContent', { ...productEvent(product, mainVariant, price), content_name: product.name });
+  }, [loading, variantError, product, variants]);
+
   if (loading) return <><LoadingSpinner message="Cargando producto..." /><MobileCartBar /></>;
   if (!product || product.active === false || product.deleted) return (
     <div className="max-w-7xl mx-auto px-4 py-20 text-center">
@@ -83,6 +92,7 @@ function ProductDetails({ productId }) {
     if (addToCartLock.current || !isPurchasableVariant(selectedVariant, product, quantity) || currentPrice === null) return;
     addToCartLock.current = true;
     addItem(product, { ...selectedVariant, price: currentPrice }, quantity);
+    if (!product.unlisted) track('AddToCart', productEvent(product, selectedVariant, currentPrice, quantity));
     setAddedToCart(true);
     setTimeout(() => { addToCartLock.current = false; setAddedToCart(false); }, 2000);
   };
