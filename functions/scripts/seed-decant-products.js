@@ -12,16 +12,16 @@ const catalog = [
   ["boss-in-motion", "Boss In Motion", [2300, 3200, 4700]],
 ];
 
-function documents(categoryRef, now) {
+function documents(categoryRef, now, fragrances = catalog) {
   const rows = [[`categories/${DECANT_CATEGORY}`, {
     name: "Decants", slug: DECANT_CATEGORY, parentId: null, active: true, order: 0, createdAt: now,
   }]];
-  for (const [slug, fragrance, prices] of catalog) {
+  for (const [slug, fragrance, prices, image] of fragrances) {
     const id = "decant-" + slug;
     const path = "products/" + id;
     rows.push([path, { name: fragrance + " · Decant", slug: id, productKind: "decant",
       description: "Decant de fragancia disponible en 2 ml, 3 ml y 5 ml.", categoryRefs: [categoryRef],
-      images: [], basePrice: prices[0], active: true, deleted: false, createdAt: now, updatedAt: now }]);
+      images: image ? [image] : [], basePrice: prices[0], active: true, deleted: false, createdAt: now, updatedAt: now }]);
     for (const [order, ml] of [2, 3, 5].entries()) {
       rows.push([path + "/variants/" + ml + "ml", { name: ml + " ml", sku: (id + "-" + ml + "ML").toUpperCase(),
         price: prices[order], stock: 1, reservedStock: 0, active: true, supplyType: "stock_propio",
