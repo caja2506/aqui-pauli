@@ -12,6 +12,7 @@ export const LAST_UPDATED = '29 de octubre de 2026';
 
 export const CONTACT = {
   whatsappLabel: '+506 7161 3342',
+  whatsappUrl: 'https://wa.me/50671613342',
   email: 'hola@aquipauli.com',
   owner: 'Carlos Jiménez Arias',
   cedula: '5-0399-0516',

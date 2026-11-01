@@ -23,11 +23,12 @@ const CART = 'src/components/storefront/CartDrawer.jsx';
 const CONFIRMATION = 'src/pages/store/OrderConfirmation.jsx';
 const PAYPAL_PANEL = 'src/components/payments/PaypalPanel.jsx';
 const PRODUCT = 'src/pages/store/ProductPage.jsx';
+const WHATSAPP = 'src/components/storefront/WhatsAppButton.jsx';
 const SHIPPING = 'src/services/shippingService.js';
 const LEGAL = 'src/pages/store/LegalPages.jsx';
 const realFiles = ['src/hooks/usePricedCart.js',
   'functions/lib/decantSale.mjs', 'src/components/checkout/DecantDeliveryNotice.jsx',
-  CHECKOUT, CART, CONFIRMATION, 'src/components/checkout/OrderPromotion.jsx', PAYPAL_PANEL, PRODUCT, SHIPPING, LEGAL,
+  CHECKOUT, CART, CONFIRMATION, 'src/components/checkout/OrderPromotion.jsx', PAYPAL_PANEL, PRODUCT, WHATSAPP, SHIPPING, LEGAL,
   'src/components/checkout/CheckoutPromotion.jsx', 'functions/lib/promotions.mjs',
   'src/utils/backorder.js', 'src/utils/constants.js', 'src/utils/formatters.js',
   'src/services/payments/registry.js', 'src/data/costaRicaTerritorial.js',
@@ -267,7 +268,9 @@ function renderPage(relative, options = {}) {
   const defaultPath = confirmation ? '/orden-confirmada/order-render' : product ? '/producto/versace-eros' : '/checkout';
   const location = new URL(options.url || defaultPath, 'https://render.example.invalid');
   const routePath = confirmation ? '/orden-confirmada/:orderId' : product ? '/producto/:productId' : '*';
-  const element = React.createElement(Component, options.componentProps);
+  const element = React.createElement(React.Fragment, null,
+    React.createElement(Component, options.componentProps),
+    options.withWhatsapp ? React.createElement(load(abs(WHATSAPP)).default) : null);
   const html = renderToStaticMarkup(React.createElement(MemoryRouter, {
     initialEntries: [{ pathname: location.pathname, search: location.search, hash: location.hash, state: options.locationState || null }],
   }, React.createElement(Routes, null, React.createElement(Route, {
@@ -376,7 +379,13 @@ test('confirmación SINPE recargada calcula el apartado desde el pedido guardado
   contains(html, '8310-0015');
   contains(html, 'Carlos Jiménez Arias');
   assert.match(html, /aria-label="Copiar monto"/);
-  assertNoWhatsAppAction(html);
+  const whatsappHref = html.match(/href="(https:\/\/wa\.me\/[^"]+)"/)?.[1];
+  assert.ok(whatsappHref, 'Missing WhatsApp proof link');
+  const message = new URL(whatsappHref.replaceAll('&amp;', '&')).searchParams.get('text');
+  assert.ok(message.includes(`Pagué *${formatCRC(23500)}*`), 'WhatsApp must show the agreed payment amount');
+  assert.ok(message.includes('apartado, 50% de los productos bajo pedido'));
+  assert.ok(message.includes('AP-RENDER'));
+  assert.ok(!message.includes('25%'));
 });
 
 test('PayPal elegido explícitamente muestra apartado más stock y envío del servidor en el pedido mixto', () => {
@@ -1011,7 +1020,7 @@ test('pedido PayPal antiguo cobrado completo no vuelve a mostrar un saldo del 50
 });
 
 
-test('la confirmación conserva el apartado guardado del 25% en pedidos anteriores', () => {
+test('confirmación y WhatsApp conservan el apartado guardado del 25% en pedidos anteriores', () => {
   for (const field of ['backorderDeposit', 'depositTotal']) {
     const { html } = renderPage(CONFIRMATION, { savedOrder: {
       orderNumber: 'AP-ANTERIOR', total: 47000, paymentMethod: 'sinpe', shippingCost: 0,
@@ -1024,7 +1033,11 @@ test('la confirmación conserva el apartado guardado del 25% en pedidos anterior
     contains(html, `Saldo restante: ${formatCRC(35250)}`);
     contains(html, '25% de los productos bajo pedido');
     assert.doesNotMatch(html, /50%/);
-    assertNoWhatsAppAction(html);
+    const href = html.match(/href="(https:\/\/wa\.me\/[^"]+)"/)[1].replace(/&amp;/g, '&');
+    const message = new URL(href).searchParams.get('text');
+    assert.ok(message.includes(formatCRC(11750)));
+    assert.ok(message.includes('25% de los productos bajo pedido'));
+    assert.ok(message.includes('AP-ANTERIOR'));
   }
 });
 
@@ -1045,36 +1058,53 @@ function classesIn(tag) {
   return new Set((tag.match(/\bclass="([^"]*)"/)?.[1] || '').split(/\s+/));
 }
 
-function assertNoWhatsAppAction(html) {
-  assert.doesNotMatch(html, /href="(?:whatsapp:|(?:https?:)?\/\/(?:wa\.me|wa\.link|(?:[a-z0-9-]+\.)*whatsapp\.com)(?:[/?#"]|$))/i);
-  assert.doesNotMatch(html, /<(?:button|a)\b[^>]*(?:aria-label|title)="[^"]*WhatsApp/i);
+function floatingWhatsappClasses(html) {
+  const tag = html.match(/<a\b[^>]*aria-label="Chatea con nosotros por WhatsApp"[^>]*>/)?.[0];
+  assert.ok(tag, 'The real floating WhatsApp component must render its accessible link');
+  assert.match(tag, /href="https:\/\/wa\.me\/50671613342\?text=/);
+  return classesIn(tag);
 }
 
-test('las páginas legales conservan el correo sin enlaces de WhatsApp', () => {
-  for (const exportName of ['TerminosPage', 'DevolucionesPage', 'EnviosPage', 'PrivacidadPage']) {
-    const { html } = renderPage(LEGAL, { exportName });
-    assertNoWhatsAppAction(html);
-    contains(html, 'hola@aquipauli.com');
+function assertMobileHidden(html) {
+  const classes = floatingWhatsappClasses(html);
+  assert.ok(classes.has('hidden'), 'The floating link must not cover mobile purchase controls');
+  assert.ok(classes.has('lg:block'), 'Desktop retains the floating link; mobile landscape stays protected');
+}
+
+for (const url of ['/', '/?categoria=perfumes', '/catalogo', '/catalogo/?marca=versace',
+  '/producto/versace-eros', '/producto/versace-eros/?variante=100ml#comprar',
+  '/checkout', '/checkout/?metodo=paypal', '/carrito', '/carrito/']) {
+  test(`WhatsApp se oculta solo en móvil en la ruta de compra ${url}`, () => {
+    assertMobileHidden(renderPage(WHATSAPP, { url }).html);
+  });
+}
+
+test('WhatsApp sigue visible en rutas sin tarjetas o controles de compra', () => {
+  for (const url of ['/terminos', '/orden-confirmada/AP-1', '/checkout-ayuda']) {
+    const classes = floatingWhatsappClasses(renderPage(WHATSAPP, { url }).html);
+    assert.ok(classes.has('block'), `WhatsApp remains visible on ${url}`);
+    assert.ok(!classes.has('hidden'), `A non-purchase route must not hide WhatsApp: ${url}`);
   }
 });
 
-test('el carrito permite continuar al checkout sin ofrecer WhatsApp', () => {
+test('el carrito oculta WhatsApp móvil y al cerrarlo respeta la visibilidad de la ruta', () => {
   for (const url of ['/', '/catalogo', '/terminos']) {
-    const open = renderPage(CART, { url, cartOpen: true, items: [line('stock_propio', 47000)] });
-    assertNoWhatsAppAction(open.html);
+    const open = renderPage(CART, { url, cartOpen: true, items: [line('stock_propio', 47000)], withWhatsapp: true });
+    assertMobileHidden(open.html);
     contains(open.html, 'Proceder al Checkout');
     assert.match(open.html, /href="\/checkout"/);
-    const closed = renderPage(CART, { url, cartOpen: false });
-    assertNoWhatsAppAction(closed.html);
+    const closed = renderPage(CART, { url, cartOpen: false, withWhatsapp: true });
+    if (url === '/terminos') assert.ok(!floatingWhatsappClasses(closed.html).has('hidden'), 'Closing the drawer restores normal visibility');
+    else assertMobileHidden(closed.html);
     assert.ok(!text(closed.html).includes('Mi Carrito'));
   }
 });
 
 test('la ficha conserva Agregar al Carrito y espacio inferior seguro sin WhatsApp móvil encima', () => {
   for (const supplyType of ['stock_propio', 'bajo_pedido']) {
-    const { html } = renderPage(PRODUCT, {
+    const { html } = renderPage(PRODUCT, { withWhatsapp: true,
       variant: { supplyType, commercialStatus: supplyType === 'bajo_pedido' ? 'bajo_pedido' : 'disponible' } });
-    assertNoWhatsAppAction(html);
+    assertMobileHidden(html);
     contains(html, 'Versace Eros EDT 100 ml');
     const addButton = [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)]
       .map(([button]) => button).find((button) => text(button).includes('Agregar al Carrito'));
@@ -1090,8 +1120,9 @@ test('la ficha conserva Agregar al Carrito y espacio inferior seguro sin WhatsAp
 test('checkout deja espacio inferior y conserva código postal, SINPE y panel PayPal sin el flotante móvil', () => {
   for (const paymentMethod of ['sinpe', 'paypal']) {
     const { html } = renderPage(CHECKOUT, { items: [line('bajo_pedido', 32000)], paymentMethod,
-      paypalAvailable: true, paypalQuote: serverQuote({ total: 32000, balance: 16000, deposit: 16000, backorder: 32000 }) });
-    assertNoWhatsAppAction(html);
+      paypalAvailable: true, paypalQuote: serverQuote({ total: 32000, balance: 16000, deposit: 16000, backorder: 32000 }),
+      withWhatsapp: true });
+    assertMobileHidden(html);
     contains(html, 'Código Postal (auto-llena dirección)');
     assert.match(html, /<input\b[^>]*placeholder="Ej: 10301"[^>]*>/);
     const page = classesIn(html.match(/<div\b[^>]*class="[^"]*max-w-4xl[^"\n]*"[^>]*>/)?.[0]);
@@ -1112,8 +1143,8 @@ test('checkout deja espacio inferior y conserva código postal, SINPE y panel Pa
 
 test('carrito conserva lista desplazable y pie de compra con espacio para el área segura', () => {
   const { html } = renderPage(CART, { url: '/', cartOpen: true,
-    items: Array.from({ length: 8 }, (_, index) => line('stock_propio', 47000, `stock-${index}`)) });
-  assertNoWhatsAppAction(html);
+    items: Array.from({ length: 8 }, (_, index) => line('stock_propio', 47000, `stock-${index}`)), withWhatsapp: true });
+  assertMobileHidden(html);
   const divs = [...html.matchAll(/<div\b[^>]*>/g)].map(([tag]) => classesIn(tag));
   assert.ok(divs.some((classes) => classes.has('h-dvh') && classes.has('max-h-full')),
     'The drawer follows the dynamic viewport and stays within its overlay');

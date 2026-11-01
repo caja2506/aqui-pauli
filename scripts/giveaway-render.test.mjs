@@ -88,7 +88,7 @@ function runtime(options = {}) {
       return { data: [], loading: false, error: false, retry: () => {}, ...options.collection };
     } }],
     ...['ProductCard', 'LoadError', 'EmptyState'].map((name) => [abs(`src/components/${name === 'ProductCard' ? 'storefront' : 'ui'}/${name}.js`), { __esModule: true, default: () => null }]),
-    ...['Navbar', 'Footer', 'CartDrawer', 'MobileCartBar'].map((name) => [abs(`src/components/storefront/${name}.js`), { __esModule: true, default: () => null }]),
+    ...['Navbar', 'Footer', 'CartDrawer', 'WhatsAppButton', 'MobileCartBar'].map((name) => [abs(`src/components/storefront/${name}.js`), { __esModule: true, default: () => null }]),
     ...['ProductPage', 'CartPage', 'CheckoutPage', 'OrderConfirmation', 'TilopayReturnPage', 'MyOrdersPage', 'NotFoundPage']
       .map((name) => [abs(`src/pages/store/${name}.js`), { __esModule: true, default: () => React.createElement('div', null, name) }]),
     ...['DashboardPage', 'BrandsPage', 'CategoriesPage', 'ProductsPage', 'OrdersPage', 'CrmPage', 'DiscountCardsPage', 'ShippingPage', 'TilopayPilotPage']

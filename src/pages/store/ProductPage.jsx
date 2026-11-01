@@ -149,6 +149,14 @@ function ProductDetails({ productId }) {
           {variants.length === 0 && (
             <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
               <p className="text-sm font-bold text-amber-700">{variantError ? 'No pudimos cargar las tallas/opciones. Recargá la página para consultar el precio.' : 'Este producto no tiene tallas/opciones disponibles por el momento.'}</p>
+              <a
+                href={`https://wa.me/50671613342?text=${encodeURIComponent(`¡Hola! Me interesa ${product.name}. ¿Tienen disponibilidad?`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-bold text-rose-600 hover:text-rose-700 mt-2 inline-block"
+              >
+                Consultanos por WhatsApp →
+              </a>
             </div>
           )}
 
