@@ -1,6 +1,7 @@
 // FUENTE ÚNICA del feed de Meta. Lo usan: metaFeed (functions-metafeed/feed.js es una COPIA
 // idéntica, ver functions-metafeed/README.md; un test verifica que no se desvíen) y el botón
 // "Sync WhatsApp" (syncCatalogBatch). IDs = SKU de variante (o ID de producto sin variantes).
+const { getCatalogId } = require("./catalogId.mjs");
 const SITE = "https://aqui-pauli.web.app";
 const HEAD = ["id","item_group_id","title","description","availability","condition","price","link","image_link","additional_image_link","brand","google_product_category","product_type","custom_label_0","custom_label_1"];
 const esc = v => { v = (v ?? "").toString().replace(/\r?\n/g," ").trim(); return /[",]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; };
@@ -41,11 +42,11 @@ function buildRows(products, variants, brands, cats = {}) {
     const ci = catInfo(p, cats);
     const base = { ...ci, title: p.name, description: cleanDesc(p.description) || `${p.name} - ${brand}. Disponible en Aquí Pauli, Costa Rica.`,
       condition: "new", link: `${SITE}/producto/${p.id}`, brand };
-    const list = vs.length ? vs.map(v => ({ ...base, id: v.sku || `${p.id}-${v.id}`, item_group_id: vs.length>1 ? p.id : "",
+    const list = vs.length ? vs.map(v => ({ ...base, id: getCatalogId(p.id, v), item_group_id: vs.length>1 ? p.id : "",
         title: vs.length>1 && v.name ? `${p.name} - ${v.name}` : p.name,
         availability: avail(v), price: v.price || p.basePrice, image_link: v.imageUrl || imgs[0], additional_image_link: imgs.filter(u=>u!==(v.imageUrl||imgs[0])).slice(0,10).join(",") }))
       // Sin variantes no se puede comprar: fuera de stock (no mostrar como disponible en Meta/WhatsApp)
-      : [{ ...base, id: p.id, item_group_id: "", availability: "out of stock", price: p.basePrice, image_link: imgs[0], additional_image_link: imgs.slice(1,11).join(",") }];
+      : [{ ...base, id: getCatalogId(p.id), item_group_id: "", availability: "out of stock", price: p.basePrice, image_link: imgs[0], additional_image_link: imgs.slice(1,11).join(",") }];
     for (const r of list) {
       const miss = ["id","title","description","availability","price","link","image_link","brand"].filter(k => !r[k]);
       if (!(Number(r.price) > 0)) miss.push("price");

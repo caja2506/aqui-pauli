@@ -25,6 +25,7 @@ const variant = (id, price, extra = {}) => ({ id, name: id, price,
   active: true, commercialStatus: 'disponible', supplyType: 'stock_propio', ...extra });
 const options = [variant('Negro 35', 100000), variant('Rojo 34', 119000)];
 const compiled = new Map(await Promise.all([
+  'src/utils/pixel.js', 'functions/lib/catalogId.mjs',
   CARD, PAGE, 'functions/lib/decantSale.mjs', 'src/utils/productPrice.js', 'functions/lib/catalogPrice.mjs', 'src/utils/constants.js',
   'src/utils/formatters.js', 'src/utils/backorder.js', 'src/utils/shippingText.js',
   'src/components/ui/StatusBadge.jsx', 'src/components/ui/LoadingSpinner.jsx',

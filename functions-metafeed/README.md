@@ -12,3 +12,5 @@ Availability: made-to-order (`bajo_pedido`) variants are emitted as `in stock` b
 `feed.js` es una COPIA de `functions/lib/metaFeed.js` (fuente única; mismos IDs/disponibilidad/precio/texto que empuja `syncCatalogBatch`).
 Editá siempre `functions/lib/metaFeed.js` y luego `cp functions/lib/metaFeed.js functions-metafeed/feed.js`
 (el test `functions/test/metaFeed.test.js` falla si difieren).
+
+`catalogId.mjs` también se copia desde `functions/lib/`. El Pixel y ambos productores del catálogo usan esa misma regla de ID.

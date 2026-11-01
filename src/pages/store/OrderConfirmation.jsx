@@ -1,11 +1,13 @@
 import OrderPromotion from '../../components/checkout/OrderPromotion';
 import { useEffect, useState } from 'react';
 import { useParams, useLocation, Link } from 'react-router-dom';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { formatCRC } from '../../utils/formatters';
 import { SINPE_INFO } from '../../utils/constants';
 import { computeBackorder, BACKORDER_DEPOSIT_PERCENT, BACKORDER_DEPOSIT_LABEL, BACKORDER_BALANCE_TIMING } from '../../utils/backorder';
+import { trackPurchase } from '../../utils/pixel';
+import { readPixelVariant, readPixelOrderItems } from '../../services/pixelCatalog';
 import CopyButton from '../../components/ui/CopyButton';
 import { CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -51,10 +53,17 @@ export default function OrderConfirmation() {
   useEffect(() => {
     if (!user || !orderId) return undefined;
     let cancelled = false;
-    getDoc(doc(db, 'orders', orderId))
-      .then(snap => { if (!cancelled && snap.exists()) setSavedOrder(snap.data()); })
-      .catch(() => { /* sin acceso: se usa lo que vino del checkout */ });
-    return () => { cancelled = true; };
+    let revision = 0;
+    const unsubscribe = onSnapshot(doc(db, 'orders', orderId), { includeMetadataChanges: true }, snap => {
+      const current = ++revision;
+      if (cancelled || !snap.exists()) return;
+      const order = snap.data();
+      setSavedOrder(order);
+      if (!snap.metadata.fromCache && !snap.metadata.hasPendingWrites) {
+        trackPurchase(orderId, order, readPixelVariant, () => !cancelled && revision === current, readPixelOrderItems).catch(() => {});
+      }
+    }, () => { /* sin acceso: se usa lo que vino del checkout */ });
+    return () => { cancelled = true; unsubscribe(); };
   }, [user, orderId]);
 
   const orderNumber = savedOrder?.orderNumber || location.state?.orderNumber || orderId;

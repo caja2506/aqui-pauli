@@ -34,6 +34,12 @@ function withoutGiveawayExport(source) {
 }
 
 export function firebaseDeployTargets(changedPaths, indexBefore = '', indexAfter = '') {
+  const catalogFiles = ['functions/lib/catalogId.mjs', 'functions/lib/metaFeed.js', 'functions/test/metaFeed.test.js'];
+  const backendPaths = changedPaths.filter(path => path.startsWith('functions/') || path === 'firestore.rules');
+  if (backendPaths.length && backendPaths.every(path => catalogFiles.includes(path))) {
+    return 'functions:default:syncCatalogBatch';
+  }
+  const hasCatalogChanges = backendPaths.some(path => catalogFiles.includes(path));
   const hasGiveawayChanges = changedPaths.some((path) => giveawayFiles.has(path));
   const hasOrderChanges = changedPaths.some((path) => orderFiles.has(path));
   const hasManualPaymentChanges = changedPaths.some((path) => manualPaymentFiles.has(path));
@@ -46,6 +52,7 @@ export function firebaseDeployTargets(changedPaths, indexBefore = '', indexAfter
       ...(hasManualPaymentChanges ? ['submitPaymentProof', 'approvePaymentManually'] : []),
       ...(hasGiveawayChanges ? ['enterGiveaway'] : [])]
     : [...existingFunctions, 'enterGiveaway'];
+  if (hasCatalogChanges) names.push('syncCatalogBatch');
   return ['firestore:rules', ...names.map((name) => `functions:default:${name}`)].join(',');
 }
 

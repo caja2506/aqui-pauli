@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { getCatalogId } from '../../functions/lib/catalogId.mjs';
 import { isSaleDecant } from '../../functions/lib/decantSale.mjs';
 import { pilotStorageKey } from '../services/payments/tilopayPilot';
 
@@ -59,6 +60,7 @@ export function CartProvider({ children }) {
         const updated = [...prev];
         updated[existingIndex] = {
           ...updated[existingIndex],
+          catalogId: getCatalogId(product.id, variant),
           quantity: updated[existingIndex].quantity + quantity,
         };
         return updated;
@@ -66,6 +68,7 @@ export function CartProvider({ children }) {
 
       return [...prev, {
         productId: product.id,
+        catalogId: getCatalogId(product.id, variant),
         variantId: variant.id,
         productName: product.name,
         productKind: isSaleDecant(product) ? 'decant' : 'other',

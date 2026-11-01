@@ -83,3 +83,11 @@ test('las promociones se publican y el emisor de correo queda excluido aun si ca
     assert.ok(targets.includes('functions:default:' + name));
   }
 });
+
+test('extraer la regla de ID del catálogo solo publica su consumidor de Firebase', () => {
+  const files = ['functions/lib/catalogId.mjs', 'functions/lib/metaFeed.js', 'functions/test/metaFeed.test.js', 'src/utils/pixel.js'];
+  assert.equal(firebaseDeployTargets(files), 'functions:default:syncCatalogBatch');
+  const mixed = firebaseDeployTargets([...files, 'functions/orders.js']);
+  assert(mixed.includes('functions:default:syncCatalogBatch'));
+  assert(mixed.includes('functions:default:createOrderWithReservation'));
+});
