@@ -19,7 +19,7 @@ jobs:
           from urllib.error import HTTPError
 
           project = 'aqui-pauli'
-          names = ('GMAIL_SMTP_USER', 'GMAIL_SMTP_PASS')
+          names = ('GMAIL_SMTP_USER', 'GMAIL_SMTP_APP_PASSWORD')
           with tempfile.NamedTemporaryFile(dir=os.environ['RUNNER_TEMP']) as f:
               raw = os.environ.pop('FIREBASE_SERVICE_ACCOUNT')
               if json.loads(raw)['project_id'] != project:
