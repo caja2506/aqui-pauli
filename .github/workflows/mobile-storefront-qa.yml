@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: d81f6ee91153a8466bd112754dde7520ca8e025f
+          ref: b601e6c59994460f9ee4a3386319cf2021b5cb60
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -22,13 +22,23 @@ jobs:
       - run: npm install --prefix "$RUNNER_TEMP/mobile-qa" playwright-core@1.56.1 --no-audit --no-fund
       - name: Exercise real product data without submitting orders
         env:
-          TEST_SITE: http://127.0.0.1:4173
+          TEST_SITE: https://aquipauli.com
         run: |
           set -eu
           npm run preview -- --host 127.0.0.1 --port 4173 >/tmp/mobile-preview.log 2>&1 &
           preview=$!
           trap 'kill "$preview" || true' EXIT
           for try in $(seq 1 30); do if curl -fsS http://127.0.0.1:4173/ >/dev/null; then break; fi; sleep 1; done
+          node <<'RELEASE'
+          (async()=>{
+            for(let attempt=0;attempt<40;attempt++){
+              const url='https://aquipauli.com/deployment.json?mobile='+Date.now();
+              try {const r=await fetch(url,{signal:AbortSignal.timeout(8000)});if(r.ok && (await r.json()).commit==='b601e6c59994460f9ee4a3386319cf2021b5cb60'){console.log('PUBLIC_RELEASE b601e6c59994460f9ee4a3386319cf2021b5cb60');return}}catch{}
+              await new Promise(q=>setTimeout(q,4000));
+            }
+            throw Error('The public domain does not yet serve the expected commit');
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          RELEASE
           cd "$RUNNER_TEMP/mobile-qa"
           node <<'JS'
           const {chromium}=require('playwright-core');
