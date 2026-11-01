@@ -1,0 +1,54 @@
+name: Check SMTP metadata for PR 29
+on:
+  push:
+    branches: [ops/pr29-smtp-metadata]
+    paths: ['.github/workflows/pr29-smtp-metadata.yml']
+permissions: {}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read only the two SMTP secret names and latest version states
+        shell: python
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI }}
+        run: |
+          import json, os, subprocess, tempfile
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+
+          project = 'aqui-pauli'
+          names = ('GMAIL_SMTP_USER', 'GMAIL_SMTP_PASS')
+          with tempfile.NamedTemporaryFile(dir=os.environ['RUNNER_TEMP']) as f:
+              raw = os.environ.pop('FIREBASE_SERVICE_ACCOUNT')
+              if json.loads(raw)['project_id'] != project:
+                  raise SystemExit('Unexpected project')
+              f.write(raw.encode())
+              f.flush()
+              env = dict(os.environ, CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=f.name)
+              token = subprocess.check_output(['gcloud', 'auth', 'print-access-token', '--quiet'], env=env, text=True).strip()
+          def metadata(path):
+              url = 'https://secretmanager.googleapis.com/v1/projects/' + project + '/secrets' + path
+              try:
+                  with urlopen(Request(url, headers={'Authorization': 'Bearer ' + token}), timeout=20) as response:
+                      return response.status, json.load(response)
+              except HTTPError as exc:
+                  return exc.code, {}
+          unresolved = []
+          for name in names:
+              status, details = metadata('/' + name)
+              if status == 200:
+                  status, version = metadata('/' + name + '/versions/latest')
+                  print(name, 'EXISTS', 'latest=' + (version.get('state', str(status))))
+              elif status == 404:
+                  print(name, 'ABSENT (404)')
+              else:
+                  unresolved.append(name)
+                  print(name, 'metadata HTTP', status)
+          for name in unresolved:
+              status, result = metadata('?filter=name%3A' + name)
+              if status != 200 or result.get('nextPageToken'):
+                  raise SystemExit('Secret metadata could not be verified. List HTTP ' + str(status))
+              exists = any(s['name'].split('/')[-1] == name for s in result.get('secrets', []))
+              print(name, 'EXISTS (list)' if exists else 'ABSENT (list)')
