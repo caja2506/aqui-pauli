@@ -40,8 +40,8 @@ const plain = html => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 const money = amount => plain(formatCRC(amount));
 const childrenText = node => typeof node === 'string' ? node
   : Array.isArray(node) ? node.map(childrenText).join('') : childrenText(node?.props?.children || '');
-function render(relative, { item = product, variants = options, selected = null, quantity = 1, loading = false, error = false } = {}) {
-  const states = relative === CARD ? [variants, loading, error]
+function render(relative, { item = product, variants = options, selected = null, quantity = 1, loading = false, error = false, failedImages = [] } = {}) {
+  const states = relative === CARD ? [variants, loading, error, failedImages]
     : [item, variants, selected, quantity, loading, false, 0, error];
   let slot = 0;
   const titles = [];
@@ -66,6 +66,7 @@ function render(relative, { item = product, variants = options, selected = null,
     return jsx[key](type, props, ...rest);
   }])) };
   const mocks = new Map([
+    [abs('src/components/storefront/MobileCartBar.js'), { __esModule: true, default: () => null }],
     [abs('src/firebase.js'), { db: {} }],
     [abs('src/contexts/CartContext.js'), { useCart: () => ({ addItem: (...args) => cartAdds.push(args) }) }],
     [abs('src/hooks/usePageTitle.js'), { __esModule: true, default: title => titles.push(title) }],
@@ -356,4 +357,14 @@ test('el decant vendido solo admite unidades disponibles para entrega inmediata'
   assert.equal(isPurchasableVariant(vial, decant, 2), false);
   assert.equal(isPurchasableVariant({ ...vial, stock: 0 }, decant), false);
   assert.equal(isPurchasableVariant({ ...vial, supplyType: 'bajo_pedido' }, decant), false);
+});
+
+test('destacados y catálogo usan las fotos configuradas y recuperan una imagen fallida', () => {
+  const decant = { ...product, id: 'decant-moschino-toy-2-pearl', images: ['', '/custom.jpg', '/second.jpg'] };
+  const backup = '/img/decants/moschino-toy-2-pearl.jpg?v=1';
+  for (const [failedImages, expected] of [[[], '/custom.jpg'], [['/custom.jpg'], '/second.jpg'],
+    [['/custom.jpg', '/second.jpg'], backup]]) {
+    assert.ok(render(CARD, { item: decant, failedImages }).html.includes('src="' + expected + '"'));
+  }
+  assert.ok(render(CARD, { item: { ...decant, images: [] } }).html.includes('src="' + backup + '"'));
 });

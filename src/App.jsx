@@ -1,11 +1,12 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
+import React, { useLayoutEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, matchPath } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { useRole } from './contexts/RoleContext';
 import { Loader2 } from 'lucide-react';
 
 // --- Layout Components ---
 import Navbar from './components/storefront/Navbar';
+import MobileCartBar from './components/storefront/MobileCartBar';
 import Footer from './components/storefront/Footer';
 import CartDrawer from './components/storefront/CartDrawer';
 import WhatsAppButton from './components/storefront/WhatsAppButton';
@@ -90,7 +91,7 @@ function AdminLayout() {
   return (
     <div className="h-screen flex flex-col md:flex-row bg-slate-50 text-slate-900 font-sans overflow-hidden">
       <AdminSidebar />
-      <main className="flex-1 overflow-y-auto p-4 md:p-8">
+      <main id="admin-content" className="flex-1 overflow-y-auto p-4 md:p-8">
         <Outlet />
       </main>
     </div>
@@ -100,9 +101,32 @@ function AdminLayout() {
 // ========================================
 // App
 // ========================================
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useLayoutEffect(() => {
+    const previous = window.history.scrollRestoration;
+    window.history.scrollRestoration = 'manual';
+    return () => { window.history.scrollRestoration = previous; };
+  }, []);
+  useLayoutEffect(() => {
+    const top = { top: 0, left: 0, behavior: 'instant' };
+    window.scrollTo(top);
+    document.getElementById('admin-content')?.scrollTo(top);
+  }, [pathname]);
+  return null;
+}
+
+function GlobalMobileCartBar() {
+  const { pathname } = useLocation();
+  // Estas páginas integran la acción con el precio del checkout o la compra de la ficha.
+  if (matchPath('/producto/:productId', pathname) || matchPath('/checkout', pathname)) return null;
+  return <MobileCartBar />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <Routes>
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
@@ -143,6 +167,7 @@ export default function App() {
         </Route>
 
       </Routes>
+      <GlobalMobileCartBar />
     </BrowserRouter>
   );
 }

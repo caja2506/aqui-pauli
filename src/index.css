@@ -54,3 +54,9 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+@media (width < 64rem) {
+  body:has([data-mobile-cart-dock]) #admin-content {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+}

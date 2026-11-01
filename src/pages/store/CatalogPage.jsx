@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { useCollection } from '../../hooks/useCollection';
+import { matchesCategory } from '../../utils/storeCategories';
 import ProductCard from '../../components/storefront/ProductCard';
 import EmptyState from '../../components/ui/EmptyState';
 import LoadError from '../../components/ui/LoadError';
@@ -26,7 +27,13 @@ export default function CatalogPage() {
     setSearchParams(next, { replace: true });
   };
   const [selectedBrand, setSelectedBrand] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const selectedCategory = searchParams.get('categoria') || '';
+  const setSelectedCategory = id => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set('categoria', id);
+    else next.delete('categoria');
+    setSearchParams(next, { replace: true });
+  };
   const [showFilters, setShowFilters] = useState(false);
 
   const brandNames = useMemo(() => Object.fromEntries(brands.map(b => [b.id, b.name])), [brands]);
@@ -48,17 +55,18 @@ export default function CatalogPage() {
         matchesSearch = tokens.every(t => hay.includes(t));
       }
       const matchesBrand = !selectedBrand || (p.brandRef && p.brandRef.id === selectedBrand);
-      const matchesCategory = !selectedCategory || (p.categoryRefs || []).some(ref => ref.id === selectedCategory);
-      return matchesSearch && matchesBrand && matchesCategory;
+      return matchesSearch && matchesBrand && matchesCategory(p, selectedCategory, categoryById);
     });
   }, [products, search, selectedBrand, selectedCategory, brandNames, categoryById]);
 
   const hasActiveFilters = search || selectedBrand || selectedCategory;
 
   const clearFilters = () => {
-    setSearch('');
+    const next = new URLSearchParams(searchParams);
+    next.delete('q');
+    next.delete('categoria');
+    setSearchParams(next, { replace: true });
     setSelectedBrand('');
-    setSelectedCategory('');
   };
 
   return (

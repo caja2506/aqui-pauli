@@ -8,6 +8,19 @@ import StatusBadge from '../ui/StatusBadge';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 
+// Fotos locales publicadas junto con el catálogo inicial de decants. El admin
+// puede reemplazarlas: las URLs actuales del producto y sus variantes van primero.
+const decantPhotos = {
+  'decant-stronger-with-you-intensely': 'stronger-with-you-intensely',
+  'decant-212-vip-rose-i-love-ny': '212-vip-rose-i-ny',
+  'decant-al-haramain-amber-oud-gold': 'amber-oud-gold',
+  'decant-moschino-toy-2-pearl': 'moschino-toy-2-pearl',
+  'decant-lacoste-l1212-blanc': 'lacoste-l1212-blanc',
+  'decant-armaf-odyssey-homme-white': 'odyssey-homme-white',
+  'decant-lattafa-badee-al-oud-honor-glory': 'badee-honor-glory',
+  'decant-boss-in-motion': 'boss-in-motion',
+};
+
 export default function ProductCard({ product }) {
   return <ProductCardDetails key={product.id} product={product} />;
 }
@@ -17,6 +30,7 @@ function ProductCardDetails({ product }) {
   const [variants, setVariants] = useState([]);
   const [loadingVariant, setLoadingVariant] = useState(true);
   const [variantError, setVariantError] = useState(false);
+  const [failedImages, setFailedImages] = useState([]);
 
   useEffect(() => {
     let active = true;
@@ -37,7 +51,13 @@ function ProductCardDetails({ product }) {
   }, [product.id]);
 
   const { price, isFrom, mainVariant } = getProductPriceSummary(product, variants);
-  const imageUrl = (product.images && product.images[0]) || mainVariant?.imageUrl || '';
+  const localPhoto = decantPhotos[product.id];
+  const candidates = [
+    ...(Array.isArray(product.images) ? product.images : []), mainVariant?.imageUrl, product.imageUrl,
+    ...variants.map(v => v.imageUrl), localPhoto && `/img/decants/${localPhoto}.jpg?v=1`,
+  ];
+  const imageUrl = candidates.filter(url => typeof url === 'string').map(url => url.trim())
+    .find(url => url && !failedImages.includes(url));
   const purchasableVariant = variants.find(variant => isPurchasableVariant(variant, product)
     && getVariantPrice(product, variant) !== null);
   const commercialStatus = normalizeCommercialStatus((purchasableVariant || mainVariant || variants[0])?.commercialStatus);
@@ -61,7 +81,8 @@ function ProductCardDetails({ product }) {
             src={imageUrl}
             alt={product.name}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-            onError={e => { e.target.style.display = 'none'; }}
+            key={imageUrl}
+            onError={() => setFailedImages(previous => previous.includes(imageUrl) ? previous : [...previous, imageUrl])}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-200">

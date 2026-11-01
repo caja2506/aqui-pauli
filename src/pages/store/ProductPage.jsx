@@ -7,6 +7,7 @@ import { formatCRC } from '../../utils/formatters';
 import { BACKORDER_DEPOSIT_LABEL } from '../../utils/backorder';
 import { useCart } from '../../contexts/CartContext';
 import { cleanShippingPromise } from '../../utils/shippingText';
+import MobileCartBar from '../../components/storefront/MobileCartBar';
 import StatusBadge from '../../components/ui/StatusBadge';
 import { normalizeCommercialStatus } from '../../utils/constants';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -60,11 +61,12 @@ function ProductDetails({ productId }) {
     return () => { active = false; unsub(); };
   }, [productId]);
 
-  if (loading) return <LoadingSpinner message="Cargando producto..." />;
+  if (loading) return <><LoadingSpinner message="Cargando producto..." /><MobileCartBar /></>;
   if (!product || product.active === false || product.deleted) return (
     <div className="max-w-7xl mx-auto px-4 py-20 text-center">
       <h2 className="text-xl font-black text-slate-900">{product ? 'Producto no disponible' : 'Producto no encontrado'}</h2>
       <Link to="/catalogo" className="text-sm font-bold text-rose-600 mt-4 inline-block">← Volver al catálogo</Link>
+      <MobileCartBar />
     </div>
   );
 
@@ -209,29 +211,34 @@ function ProductDetails({ productId }) {
                     onClick={() => setQuantity(q => q + 1)} className="px-3 py-2 lg:px-4 lg:py-3 text-slate-500 hover:bg-slate-50 text-lg font-bold">+</button>
                 </div>}
               </div>
-              <button
-                type="button"
-                onClick={canBuy ? handleAddToCart : chooseVariant}
-                disabled={addedToCart || (!!selectedVariant && !canBuy)}
-                aria-controls={!selectedVariant ? 'product-variants' : undefined}
-                className={`w-full lg:flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm transition-all shadow-lg active:scale-95 disabled:opacity-70 ${
-                  addedToCart
-                    ? 'bg-green-500 text-white'
-                    : 'bg-rose-600 hover:bg-rose-700 text-white'
-                }`}
-              >
-                {addedToCart ? (
-                  <><Check className="w-5 h-5" /> ¡Agregado!</>
-                ) : !selectedVariant ? (
-                  'Elegí una variante'
-                ) : !canBuy ? (
-                  'Opción no disponible'
-                ) : (
-                  <><ShoppingCart className="w-5 h-5" /> Agregar al Carrito</>
-                )}
-              </button>
+              <div className="grid gap-2 has-[[data-mobile-cart-link]]:grid-cols-2 lg:flex lg:flex-1">
+                <button
+                  type="button"
+                  onClick={canBuy ? handleAddToCart : chooseVariant}
+                  disabled={addedToCart || (!!selectedVariant && !canBuy)}
+                  aria-controls={!selectedVariant ? 'product-variants' : undefined}
+                  className={`w-full lg:flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm transition-all shadow-lg active:scale-95 disabled:opacity-70 ${
+                    addedToCart
+                      ? 'bg-green-500 text-white'
+                      : 'bg-rose-600 hover:bg-rose-700 text-white'
+                  }`}
+                >
+                  {addedToCart ? (
+                    <><Check className="w-5 h-5" /> ¡Agregado!</>
+                  ) : !selectedVariant ? (
+                    'Elegí una variante'
+                  ) : !canBuy ? (
+                    'Opción no disponible'
+                  ) : (
+                    <><ShoppingCart className="w-5 h-5" /> Agregar al Carrito</>
+                  )}
+                </button>
+                <MobileCartBar inline />
+              </div>
             </section>
           )}
+
+          {!hasPurchasableOption && <MobileCartBar />}
 
           {/* Shipping note */}
           <div className="bg-slate-50 rounded-2xl p-4 flex items-center gap-3">

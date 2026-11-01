@@ -17,7 +17,7 @@ const HOME = 'src/pages/store/HomePage.jsx';
 const CATALOG = 'src/pages/store/CatalogPage.jsx';
 const TITLE = 'src/hooks/usePageTitle.js';
 const abs = (relative) => path.join(root, relative);
-const compiled = new Map(await Promise.all([HOME, CATALOG, TITLE].map(async (relative) => {
+const compiled = new Map(await Promise.all([HOME, CATALOG, TITLE, 'src/utils/storeCategories.js'].map(async (relative) => {
   const filename = abs(relative);
   const { code } = await transformWithEsbuild(await readFile(filename, 'utf8'), filename, {
     loader: filename.endsWith('.jsx') ? 'jsx' : 'js', jsx: 'automatic',
@@ -33,7 +33,7 @@ function renderPage(relative, options = {}) {
   const cache = new Map();
   const modules = new Map([
     [abs('src/hooks/useCollection.js'), { useCollection: (name) => ({
-      data: name === 'products' ? options.products || [] : [],
+      data: options[name] || [],
       loading: Boolean(options.loading), error: options.error || null,
       retry: () => { throw new Error('No data retries in a render test'); },
     }) }],
@@ -185,4 +185,25 @@ test('el hook de título no requiere document durante renderizado sin navegador'
   } finally {
     if (original) Object.defineProperty(globalThis, 'document', original);
   }
+});
+
+test('los chips usan categorías activas reales y el catálogo conserva el filtro de la URL', () => {
+  const categories = [
+    { id: 'p', name: 'Perfumes' }, { id: 'h', name: 'Hombres', parentId: 'p' },
+    { id: 'm', name: 'Mujeres', parentId: 'p' }, { id: 'decants', name: 'Decants' },
+    { id: 'u', name: 'Unisex', parentId: 'p', active: false },
+  ];
+  const products = [['h', 'Aroma H'], ['m', 'Aroma M'], ['decants', 'Aroma D']].map(([id, name]) => ({
+    id, name, active: true, categoryRefs: [{ id }],
+  }));
+  const home = renderPage(HOME, { categories, products });
+  assert.match(home.html, /href="\/catalogo\?categoria=h"[^>]*>Perfumes hombre/);
+  assert.doesNotMatch(home.html, /categoria=u/);
+  const men = renderPage(CATALOG, { path: '/catalogo?categoria=h&q=Aroma', categories, products });
+  assert.match(men.html, /Aroma H/);
+  assert.doesNotMatch(men.html, /Aroma M|Aroma D/);
+  const all = renderPage(CATALOG, { path: '/catalogo?categoria=p', categories, products });
+  assert.match(all.html, /Aroma H/);
+  assert.match(all.html, /Aroma M/);
+  assert.doesNotMatch(all.html, /Aroma D/);
 });
