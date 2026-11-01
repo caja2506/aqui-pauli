@@ -1,0 +1,129 @@
+name: Seed and verify the approved PR 30 decants
+on:
+  push:
+    branches: [ops/pr30-catalog-bootstrap]
+    paths: ['.github/workflows/pr30-catalog-bootstrap.yml']
+permissions:
+  contents: read
+concurrency:
+  group: pr30-catalog-bootstrap
+  cancel-in-progress: false
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 9924b742809f31c6535dfc4f4d7275349791160f
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22'
+      - run: npm ci --prefix functions
+      - name: Run only the reviewed create-only scripts for missing data
+        working-directory: functions
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI }}
+        run: |
+          set -eu
+          umask 077
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/pr30-seed.json"
+          trap 'rm -f -- "$GOOGLE_APPLICATION_CREDENTIALS"' EXIT
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          unset FIREBASE_SERVICE_ACCOUNT
+          node <<'JS'
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const { spawnSync } = require("node:child_process");
+          const { initializeApp } = require("firebase-admin/app");
+          const { getFirestore } = require("firebase-admin/firestore");
+          const { documents } = require("./scripts/seed-decant-products");
+          if (process.env.FIRESTORE_EMULATOR_HOST) throw Error("Unexpected emulator");
+          assert.equal(JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)).project_id, "aqui-pauli");
+          const db = getFirestore(initializeApp({projectId: "aqui-pauli"}));
+          const rows = documents(db.doc("categories/decants"), "preview");
+          const issues = [];
+          async function exists(path) {
+            const url = "https://firestore.googleapis.com/v1/projects/aqui-pauli/databases/(default)/documents/" + path;
+            const r = await fetch(url, {signal: AbortSignal.timeout(20000)});
+            if (r.status === 404) return false;
+            if (r.status === 200) return true;
+            return (await db.doc(path).get()).exists;
+          }
+          function authorizedSeed(file) {
+            const ret = spawnSync(process.execPath, ["scripts/" + file, "--commit"], {stdio: "inherit"});
+            if (ret.error || ret.status !== 0) throw Error(file + " returned " + ret.status);
+          }
+          async function run() {
+            try {
+              const present = await Promise.all(rows.map(([p]) => exists(p)));
+              console.log("Catalog documents before " + present.filter(Boolean).length + "/" + rows.length);
+              if (present.every(x=>!x)) authorizedSeed("seed-decant-products.js");
+              else if (!present.every(Boolean)) throw Error("Partial existing catalog. No overwrite.");
+              else console.log("Existing catalog retained.");
+            } catch (err) { issues.push("Catalog: " + err.message); }
+            try {
+              if (await exists("config/decants")) console.log("Gift configuration already present; retained.");
+              else authorizedSeed("init-decants.js");
+            } catch (err) { issues.push("Gift: " + err.message); }
+            await db.terminate();
+            if (issues.length) throw Error(issues.join(" / "));
+          }
+          run().catch(e=>{ console.error(e.message); process.exitCode=1; });
+          JS
+      - name: Verify the public storefront, prices and gift configuration
+        if: ${{ !cancelled() }}
+        working-directory: functions
+        run: |
+          node <<'JS'
+          const assert = require("node:assert/strict");
+          const { documents } = require("./scripts/seed-decant-products");
+          const project = "projects/aqui-pauli/databases/(default)/documents/";
+          const root = "https://firestore.googleapis.com/v1/" + project;
+          async function fields(path) {
+            const r = await fetch(root + path, {signal: AbortSignal.timeout(20000)});
+            if (r.status === 404) return null;
+            assert.equal(r.status, 200, path);
+            return (await r.json()).fields;
+          }
+          async function main() {
+            const rows = documents("categories/decants", "");
+            const docs = new Map(await Promise.all(rows.map(async ([p])=>[p,await fields(p)])));
+            console.log("Public documents present " + [...docs.values()].filter(Boolean).length + "/33");
+            const promo = await fields("config/decants");
+            console.log("Public gift config " + (promo ? "active=" + promo.promoActive?.booleanValue + " options=" + (promo.options?.arrayValue?.values || []).filter(x=>x.mapValue?.fields?.active?.booleanValue).length : "absent"));
+            const release = await fetch("https://aquipauli.com/deployment.json?pr30=9924b742809f31c6535dfc4f4d7275349791160f", {signal: AbortSignal.timeout(20000)});
+            assert.equal((await release.json()).commit, "9924b742809f31c6535dfc4f4d7275349791160f");
+            assert.equal(docs.get("categories/decants")?.name?.stringValue, "Decants");
+            for (const [p,v] of rows.filter(([p])=>p.startsWith("products/"))) {
+              const f=docs.get(p);
+              assert.ok(f, p);
+              assert.equal(f.active.booleanValue, true, p);
+              if (v.productKind) {
+                assert.equal(f.productKind.stringValue,"decant",p);
+                assert.equal(f.categoryRefs.arrayValue.values[0].referenceValue, project+"categories/decants",p);
+                assert.equal(f.name.stringValue,v.name,p);
+                const url="https://aquipauli.com/producto/" + p.split("/")[1];
+                const r=await fetch(url, {signal: AbortSignal.timeout(20000)});
+                assert.equal(r.status,200,url);
+                assert.match(await r.text(), /id=["']root["']/);
+                console.log("PRODUCT " + p.split("/")[1] + " " + url);
+              } else {
+                assert.equal(Number(f.price.integerValue ?? f.price.doubleValue),v.price,p);
+                assert.equal(f.supplyType.stringValue,"stock_propio",p);
+                assert.ok(Number.isInteger(Number(f.stock.integerValue)) && Number(f.stock.integerValue)>=0,p);
+                console.log("VARIANT " + p + " price=" + v.price + " stock=" + f.stock.integerValue);
+              }
+            }
+            assert.ok(promo,"Gift configuration is missing");
+            for (const [sizes,amount,fee,minimum] of [[["2ml"],3500,2500,true],[["2ml","3ml"],8200,2500,false]]) {
+              const resp=await fetch("https://us-central1-aqui-pauli.cloudfunctions.net/quoteCartDelivery",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:{items:sizes.map(variantId=>({productId:"decant-stronger-with-you-intensely",variantId,quantity:1}))}}),signal:AbortSignal.timeout(25000)});
+              assert.equal(resp.status,200);
+              const {result}=await resp.json();
+              assert.equal(result.subtotal,amount);assert.equal(result.delivery.shippingCost,fee);assert.equal(result.delivery.belowMinimum,minimum);
+              console.log("QUOTE subtotal="+result.subtotal+" shipping="+fee+" belowMinimum="+minimum);
+            }
+          }
+          main().catch(e=>{console.error(e.message);process.exitCode=1;});
+          JS
