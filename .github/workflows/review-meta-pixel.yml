@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: c110a81513d8cd6828690e147ffa0c0085feba34
+          ref: f7ed7164ca26d31fdbf4b8dc37fd6df05108605d
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -111,7 +111,7 @@ jobs:
            const helperInfo=await helper.evaluate(()=>({name:chrome.i18n.getMessage('extensionName'),version:chrome.runtime.getManifest().version,id:chrome.runtime.id})); console.log('OFFICIAL HELPER',helperInfo);assert.equal(helperInfo.id,'fdgfkebogiimcoedlicjlajpkdmockpc');
            const wires=[];
            await page.exposeFunction('observePixelCall', call => {
-             const [verb,ev,data,opt]=call;if(verb!=='track')return;const row={ev,id:'1636839314476198',eid:opt?.eventID};
+             let [verb,ev,data,opt]=call;if(verb==='trackSingle' && ev==='1636839314476198'){ev=data;data=opt;opt=undefined;}else if(verb!=='track')return;const row={ev,id:'1636839314476198',eid:opt?.eventID};
              for(const [k,v] of Object.entries(data||{}))row['cd['+k+']']=typeof v==='object'?JSON.stringify(v):String(v);
              events.push(row);console.log('SDK INPUT',ev,JSON.stringify(data||{}),opt?.eventID||'');
            });
