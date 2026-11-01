@@ -76,9 +76,10 @@ test('la preparación Tilopay publica la cotización y el cron junto con todos l
   }
 });
 
-test('el cambio de plantilla publica su emisor y las funciones de promoción', () => {
+test('las promociones se publican y el emisor de correo queda excluido aun si cambia la plantilla', () => {
   const targets = firebaseDeployTargets(['functions/lib/orderEmail.js', 'functions/promotions.js']);
-  for (const name of ['onOrderStatusChange', 'validateDiscountCode', 'generateDiscountBatch', 'releaseOrderDiscount']) {
+  assert.ok(!targets.includes('functions:default:onOrderStatusChange'));
+  for (const name of ['validateDiscountCode', 'generateDiscountBatch', 'releaseOrderDiscount']) {
     assert.ok(targets.includes('functions:default:' + name));
   }
 });

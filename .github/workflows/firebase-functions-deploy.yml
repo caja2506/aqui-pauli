@@ -108,7 +108,7 @@ jobs:
           NODE
 
       # Explicit codebase and endpoint selectors prevent unrelated Functions deployments.
-      # A paid-email template change also publishes its existing sender and requires the configured SMTP secrets.
+      # The paid-order email sender stays outside this deploy until its SMTP secrets are configured.
       - name: Deploy only Firestore Rules and the selected Functions
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-aqui-pauli-functions-service-account.json

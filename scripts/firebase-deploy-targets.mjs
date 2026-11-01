@@ -46,8 +46,6 @@ export function firebaseDeployTargets(changedPaths, indexBefore = '', indexAfter
       ...(hasManualPaymentChanges ? ['submitPaymentProof', 'approvePaymentManually'] : []),
       ...(hasGiveawayChanges ? ['enterGiveaway'] : [])]
     : [...existingFunctions, 'enterGiveaway'];
-  // Updating the paid-order template requires publishing its existing sender.
-  if (changedPaths.includes('functions/lib/orderEmail.js')) names.push('onOrderStatusChange');
   return ['firestore:rules', ...names.map((name) => `functions:default:${name}`)].join(',');
 }
 
