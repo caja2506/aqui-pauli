@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, CreditCard, ShoppingBag, ShieldCheck } from 'lucide-react';
+import MobileCartBar from '../../components/storefront/MobileCartBar';
 import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePricedCart } from '../../hooks/usePricedCart';
@@ -139,10 +140,11 @@ export default function CheckoutPage() {
           <h2 className="text-xl font-black text-slate-900 mb-2">No pudimos iniciar el checkout</h2>
           <p className="text-sm text-slate-400 mb-6">{guestError}</p>
           <button onClick={() => { setGuestError(null); ensureGuestSession().catch(() => setGuestError('Seguimos sin conexión. Intentá de nuevo en unos minutos.')); }} className="px-6 py-3 bg-rose-600 text-white font-bold rounded-xl text-sm">Reintentar</button>
+          <MobileCartBar />
         </div>
       );
     } else {
-      return <LoadingSpinner />;
+      return <><LoadingSpinner /><MobileCartBar /></>;
     }
   }
 
@@ -598,7 +600,7 @@ export default function CheckoutPage() {
         {/* Summary */}
         <div className="lg:col-span-1">
           <div className="sticky top-24 bg-white rounded-2xl border border-slate-100 p-6 shadow-sm space-y-4">
-            <h2 className="font-black text-lg text-slate-900">Resumen</h2>
+            <h2 id="checkout-summary" className="scroll-mt-20 font-black text-lg text-slate-900">Resumen</h2>
             <p className="text-xs text-slate-500" data-testid="checkout-cart-count">
               {itemCount} {itemCount === 1 ? 'unidad' : 'unidades'} · {items.length} {items.length === 1 ? 'variante' : 'variantes'}
             </p>
@@ -687,6 +689,7 @@ export default function CheckoutPage() {
           </div>
         </div>
       </form>
+      <MobileCartBar total={serverQuoteSelected && activeServerQuote ? activeServerQuote.crcTotal : total} />
     </div>
   );
 }

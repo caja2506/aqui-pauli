@@ -30,7 +30,7 @@ const PHONE_POLICY = 'functions/lib/giveawayPhone.mjs';
 const PAGE_TITLE = 'src/hooks/usePageTitle.js';
 const CATALOG_PRICE = 'functions/lib/catalogPrice.mjs';
 const files = [SERVICE, HOOK, BANNER, PAGE, BASES, LOGIN, HOME, CATALOG, ADMIN, APP, SIDEBAR,
-  POLICY, PHONE_POLICY, CATALOG_PRICE, 'src/utils/giveawayExport.js', 'src/utils/formatters.js',
+  POLICY, PHONE_POLICY, CATALOG_PRICE, 'src/utils/storeCategories.js', 'src/utils/giveawayExport.js', 'src/utils/formatters.js',
   'src/components/legal/LegalLayout.jsx', 'src/components/auth/FacebookIcon.jsx', PAGE_TITLE];
 const config = JSON.parse(await readFile(path.join(root, CONFIG), 'utf8'));
 const compiled = new Map(await Promise.all(files.map(async (relative) => {
@@ -88,7 +88,7 @@ function runtime(options = {}) {
       return { data: [], loading: false, error: false, retry: () => {}, ...options.collection };
     } }],
     ...['ProductCard', 'LoadError', 'EmptyState'].map((name) => [abs(`src/components/${name === 'ProductCard' ? 'storefront' : 'ui'}/${name}.js`), { __esModule: true, default: () => null }]),
-    ...['Navbar', 'Footer', 'CartDrawer', 'WhatsAppButton'].map((name) => [abs(`src/components/storefront/${name}.js`), { __esModule: true, default: () => null }]),
+    ...['Navbar', 'Footer', 'CartDrawer', 'WhatsAppButton', 'MobileCartBar'].map((name) => [abs(`src/components/storefront/${name}.js`), { __esModule: true, default: () => null }]),
     ...['ProductPage', 'CartPage', 'CheckoutPage', 'OrderConfirmation', 'TilopayReturnPage', 'MyOrdersPage', 'NotFoundPage']
       .map((name) => [abs(`src/pages/store/${name}.js`), { __esModule: true, default: () => React.createElement('div', null, name) }]),
     ...['DashboardPage', 'BrandsPage', 'CategoriesPage', 'ProductsPage', 'OrdersPage', 'CrmPage', 'DiscountCardsPage', 'ShippingPage', 'TilopayPilotPage']

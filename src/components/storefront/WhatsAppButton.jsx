@@ -10,9 +10,9 @@ const WA_MESSAGE = '¡Hola! 👋 Me gustaría saber más sobre sus productos.';
 
 export default function WhatsAppButton() {
   const { pathname } = useLocation();
-  const { isCartOpen } = useCart();
+  const { isCartOpen, itemCount } = useCart();
   // En móvil, los controles de compra tienen prioridad sobre el acceso flotante.
-  const hideOnMobile = isCartOpen || ['/', '/catalogo', '/producto/:productId', '/carrito', '/checkout']
+  const hideOnMobile = isCartOpen || itemCount > 0 || ['/', '/catalogo', '/producto/:productId', '/carrito', '/checkout']
     .some((route) => matchPath({ path: route, end: true }, pathname));
   const waLink = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(WA_MESSAGE)}`;
 

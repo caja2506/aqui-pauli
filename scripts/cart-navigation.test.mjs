@@ -53,7 +53,7 @@ function renderSource(relative, options = {}) {
     [abs('src/pages/store/LegalPages.js'), Object.fromEntries(['TerminosPage', 'DevolucionesPage', 'EnviosPage', 'PrivacidadPage'].map(name => [name, () => null]))],
   ]);
   for (const relative of [
-    'components/storefront/Navbar', 'components/storefront/Footer', 'components/storefront/WhatsAppButton',
+    'components/storefront/MobileCartBar', 'components/storefront/Navbar', 'components/storefront/Footer', 'components/storefront/WhatsAppButton',
     'components/admin/AdminSidebar', 'components/auth/LoginPage',
     ...['HomePage', 'CatalogPage', 'ProductPage', 'CheckoutPage', 'OrderConfirmation', 'TilopayReturnPage', 'MyOrdersPage', 'NotFoundPage', 'GiveawayPage', 'GiveawayRulesPage'].map(name => `pages/store/${name}`),
     ...['DashboardPage', 'BrandsPage', 'CategoriesPage', 'ProductsPage', 'OrdersPage', 'CrmPage', 'DiscountCardsPage', 'ShippingPage', 'TilopayPilotPage', 'GiveawayAdminPage'].map(name => `pages/admin/${name}`),

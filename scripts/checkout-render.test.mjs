@@ -103,6 +103,7 @@ function renderPage(relative, options = {}) {
     },
   };
   const modules = new Map([
+    [abs('src/components/storefront/MobileCartBar.js'), { __esModule: true, default: () => null }],
     [abs('src/contexts/AuthContext.js'), { useAuth: () => ({ user, loading: false, ensureGuestSession: forbidden('anonymous auth') }) }],
     [abs('src/contexts/CartContext.js'), { useCart: () => ({
       items, subtotal, itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
