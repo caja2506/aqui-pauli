@@ -119,6 +119,9 @@ exports.createOrderWithReservation = onCall(
         }
         const card = code ? await reservationForCode(db, transaction, code) : null;
         totals = discountedTotals(totals, code);
+        if (data.expectedTotal !== undefined && data.expectedTotal !== totals.total) {
+          throw new HttpsError("failed-precondition", "El importe cambió. Volvé a abrir el carrito para actualizarlo.");
+        }
         if (code && data.expectedDiscountAmount !== undefined && data.expectedDiscountAmount !== totals.discount.amount) {
           throw new HttpsError("failed-precondition", "El descuento cambió. Volvé a aplicar el código.");
         }

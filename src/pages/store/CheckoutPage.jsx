@@ -3,11 +3,11 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, CreditCard, ShoppingBag, ShieldCheck } from 'lucide-react';
 import SaveAccountPrompt from '../../components/auth/SaveAccountPrompt';
 import { useAuth } from '../../contexts/AuthContext';
-import { useCart } from '../../contexts/CartContext';
+import { usePricedCart } from '../../hooks/usePricedCart';
 import { formatCRC } from '../../utils/formatters';
 import { listPaymentMethods, getPaymentMethod, isOnlineMethod, isCashOnDeliveryEligible, ONLINE_PROVIDERS } from '../../services/payments/registry';
 import { getProvincias, getCantones, getDistritos, buscarPorCodigoPostal, codigoPostalDeDireccion } from '../../data/costaRicaTerritorial';
-import { cartDecantDelivery, MINIMUM_MESSAGE } from '../../../functions/lib/decantSale.mjs';
+import { MINIMUM_MESSAGE } from '../../../functions/lib/decantSale.mjs';
 import DecantDeliveryNotice from '../../components/checkout/DecantDeliveryNotice';
 import { getShippingOptions } from '../../services/shippingService';
 import { createOrder } from '../../services/orderService';
@@ -41,7 +41,7 @@ export default function CheckoutPage() {
   usePageTitle('Checkout | Aquí Pauli');
   const { user, loading: authLoading, ensureGuestSession } = useAuth();
   const [guestError, setGuestError] = useState(null);
-  const { items, itemCount, subtotal, clearCart } = useCart();
+  const { items, itemCount, subtotal, clearCart, delivery } = usePricedCart();
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -156,7 +156,6 @@ export default function CheckoutPage() {
     );
   }
 
-  const delivery = cartDecantDelivery(items, subtotal);
   const { shippingCost } = delivery;
   const total = subtotal + shippingCost - (applied?.amount || 0);
   // "Bajo pedido": se aparta con el 50% de esas líneas; stock y envío se pagan completos.
@@ -285,6 +284,7 @@ export default function CheckoutPage() {
     paymentMethod,
     paymentPhone: form.paymentPhone,
     subtotal,
+    expectedTotal: Math.round(total * 100) / 100,
     shippingCost,
     shippingType: form.shippingType,
     shippingAddress: {

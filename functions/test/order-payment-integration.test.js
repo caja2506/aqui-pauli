@@ -21,7 +21,8 @@ function loadHandlers(seed, options = {}) {
   const dependencies = {
     "firebase-functions/v2/https": { onCall: wrap, HttpsError },
     "firebase-functions/v2/firestore": { onDocumentUpdated: (config, handler) => {
-      effects.triggerOptions = config; return handler;
+      if (config.secrets) effects.triggerOptions = config;
+      return handler;
     } },
     "firebase-functions/v2/scheduler": { onSchedule: wrap },
     "firebase-functions/params": {
@@ -77,7 +78,7 @@ function loadHandlers(seed, options = {}) {
     return module.exports;
   }
   return { ...memory, effects, orders: load(path.join(ROOT, "orders.js")),
-    payments: load(path.join(ROOT, "payments.js")), paypal: load(path.join(ROOT, "paypal.js")),
+    promos: load(path.join(ROOT, "promotions.js")), payments: load(path.join(ROOT, "payments.js")), paypal: load(path.join(ROOT, "paypal.js")),
     schedulers: load(path.join(ROOT, "schedulers.js")) };
 }
 
@@ -1629,4 +1630,21 @@ test("un frasco más un decant conserva el envío incluido y una única muestra"
   assert.equal(result.shippingCost, 0);
   assert.equal(result.total, 7500);
   assert.equal(result.giftSample.size, "3 ml");
+});
+
+test("cotización pública del carrito usa catálogo y muestra el faltante sin reservar ni habilitar pedidos bajo mínimo", async () => {
+  const seed = promoCatalog();
+  seed["products/p1"].productKind = "decant";
+  seed[VARIANT].price = 4700;
+  const h = loadHandlers(seed);
+  const items = [{ productId: "p1", variantId: "v1", quantity: 1, price: 25000, productKind: "other" }];
+  const quote = await h.promos.quoteCartDelivery({ data: { items, subtotal: 25000 } });
+  assert.deepEqual(quote, { subtotal: 4700, delivery: { belowMinimum: true, shippingCost: 2500, toFreeShipping: 20300 },
+    lines: [{ price: 4700, supplyType: "stock_propio", productKind: "decant" }] });
+  assert.equal(h.get(VARIANT).reservedStock, 0);
+  await assert.rejects(h.orders.createOrderWithReservation(cashRequest({ items, previewDelivery: true })), /pedido mínimo/);
+  await assert.rejects(h.orders.createOrderWithReservation(cashRequest({ items: [{ ...items[0], quantity: 2 }],
+    expectedTotal: 9400, discountCode: promoCode })), /importe cambió/);
+  assert.equal(h.get("discountCodes/" + promoCode).used, false);
+  assert.equal(h.get(VARIANT).reservedStock, 0);
 });

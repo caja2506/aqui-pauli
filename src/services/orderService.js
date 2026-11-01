@@ -9,6 +9,7 @@ export async function createOrder(order) {
     customerName: order.customerName, customerEmail: order.customerEmail, customerPhone: order.customerPhone,
     customerCedula: order.customerCedula || '', customerNotes: normalizeCustomerNotes(order.customerNotes),
     shippingAddress: order.shippingAddress, shippingType: order.shippingType,
+    ...(order.expectedTotal !== undefined && { expectedTotal: order.expectedTotal }),
     ...(order.giftSample && { giftSample: order.giftSample }),
     ...(order.discountCode && { discountCode: order.discountCode, expectedDiscountAmount: order.expectedDiscountAmount,
       promotionRequestId: order.promotionRequestId }),

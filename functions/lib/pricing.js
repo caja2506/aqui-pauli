@@ -51,7 +51,7 @@ function catalogText(value, max = 300) {
  * availability here would incorrectly exclude an existing order's own reservation.
  * When transaction is present, every catalog read belongs to that transaction.
  */
-async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
+async function computeTotalsCRC(db, items, ship, { transaction, previewDelivery = false } = {}) {
   if (!Array.isArray(items) || items.length === 0 || items.length > 50) {
     throw new PricingError("INVALID_ITEM_COUNT", "Items inválidos: se requieren entre 1 y 50 líneas");
   }
@@ -115,6 +115,7 @@ async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
     const imageUrl = catalogText(variant.imageUrl || firstProductImage || product.imageUrl, 2048);
     lines.push({
       productId: item.productId, variantId: item.variantId, quantity: item.quantity,
+      ...(decant && { productKind: "decant" }),
       name: productName, productName, variantName, imageUrl, supplyType,
       unitPrice: minorToCRC(unitPriceMinor), lineTotal: minorToCRC(lineTotalMinor),
       unitPriceMinor, lineTotalMinor,
@@ -122,10 +123,11 @@ async function computeTotalsCRC(db, items, ship, { transaction } = {}) {
   }
 
   const delivery = decantDelivery(onlyDecants, minorToCRC(subtotalMinor));
-  if (delivery.belowMinimum) throw new PricingError("DECANT_MINIMUM", MINIMUM_MESSAGE);
+  if (!previewDelivery && delivery.belowMinimum) throw new PricingError("DECANT_MINIMUM", MINIMUM_MESSAGE);
   const shippingCostMinor = parseMinorCRC(delivery.shippingCost, { allowZero: true });
   const totalMinor = safeInteger(subtotalMinor + shippingCostMinor, "Total");
   return {
+    ...(previewDelivery && { delivery }),
     lines, subtotal: minorToCRC(subtotalMinor), shippingCost: minorToCRC(shippingCostMinor), total: minorToCRC(totalMinor),
     subtotalMinor, shippingCostMinor, totalMinor,
   };

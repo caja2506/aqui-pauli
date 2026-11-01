@@ -6,7 +6,8 @@ export const DECANT_SHIPPING = 2500;
 export const MINIMUM_MESSAGE = 'El pedido mínimo de solo decants es de ₡8.000.';
 
 export function isSaleDecant(product) {
-  return product?.productKind === 'decant' || product?.categoryRefs?.some(ref => (ref?.id || ref) === DECANT_CATEGORY) === true;
+  return product?.productKind === 'decant' || (Array.isArray(product?.categoryRefs)
+    && product.categoryRefs.some(ref => (ref?.id || ref) === DECANT_CATEGORY));
 }
 
 export function decantDelivery(onlyDecants, subtotal) {

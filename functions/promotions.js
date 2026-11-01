@@ -8,15 +8,25 @@ const { generateBatch, validateBatch } = require("./lib/cardBatches");
 const { releaseCancelledReservation } = require("./lib/orderFulfillment");
 
 const opts = { cors: true, invoker: "public" };
-exports.validateDiscountCode = onCall(opts, async req => {
-  const { code, message } = await checkCode(db, req.auth?.uid, req.data?.code);
-  if (message) return { ok: false, percent: 0, amount: 0, message };
-  let totals;
-  try { totals = await computeTotalsCRC(db, req.data.items); }
+async function cartTotals(items, options) {
+  try { return await computeTotalsCRC(db, items, undefined, options); }
   catch (error) {
     if (error instanceof PricingError) throw new HttpsError("failed-precondition", error.message);
     throw error;
   }
+}
+
+// Cotización pública de datos del catálogo. No crea pedidos ni reserva inventario.
+exports.quoteCartDelivery = onCall({ ...opts, maxInstances: 10 }, async req => {
+  const totals = await cartTotals(req.data?.items, { previewDelivery: true });
+  return { subtotal: totals.subtotal, delivery: totals.delivery,
+    lines: totals.lines.map(line => ({ price: line.unitPrice, supplyType: line.supplyType, productKind: line.productKind || "other" })) };
+});
+
+exports.validateDiscountCode = onCall(opts, async req => {
+  const { code, message } = await checkCode(db, req.auth?.uid, req.data?.code);
+  if (message) return { ok: false, percent: 0, amount: 0, message };
+  const totals = await cartTotals(req.data.items);
   return { ok: true, percent: 10, amount: discountedTotals(totals, code).discount.amount, message: "Código aplicado: −10%" };
 });
 exports.generateDiscountBatch = onCall(opts, async req => {

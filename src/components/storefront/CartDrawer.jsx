@@ -1,15 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { X, Minus, Plus, ShoppingBag, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useCart } from '../../contexts/CartContext';
+import { usePricedCart } from '../../hooks/usePricedCart';
 import { formatCRC } from '../../utils/formatters';
 
-import { cartDecantDelivery } from '../../../functions/lib/decantSale.mjs';
 import DecantDeliveryNotice from '../checkout/DecantDeliveryNotice';
 
 export default function CartDrawer() {
-  const { items, isCartOpen, setIsCartOpen, removeItem, updateQuantity, subtotal, itemCount } = useCart();
-  const delivery = cartDecantDelivery(items, subtotal);
+  const { items, isCartOpen, setIsCartOpen, removeItem, updateQuantity, subtotal, itemCount, delivery } = usePricedCart(true);
   const drawerRef = useRef(null);
   const closeRef = useRef(null);
 

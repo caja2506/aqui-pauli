@@ -26,7 +26,7 @@ const PRODUCT = 'src/pages/store/ProductPage.jsx';
 const WHATSAPP = 'src/components/storefront/WhatsAppButton.jsx';
 const SHIPPING = 'src/services/shippingService.js';
 const LEGAL = 'src/pages/store/LegalPages.jsx';
-const realFiles = [
+const realFiles = ['src/hooks/usePricedCart.js',
   'functions/lib/decantSale.mjs', 'src/components/checkout/DecantDeliveryNotice.jsx',
   CHECKOUT, CART, CONFIRMATION, 'src/components/checkout/OrderPromotion.jsx', PAYPAL_PANEL, PRODUCT, WHATSAPP, SHIPPING, LEGAL,
   'src/components/checkout/CheckoutPromotion.jsx', 'functions/lib/promotions.mjs',

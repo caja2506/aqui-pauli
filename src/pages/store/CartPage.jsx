@@ -1,17 +1,15 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Minus, Plus, ShoppingBag, Trash2 } from 'lucide-react';
-import { useCart } from '../../contexts/CartContext';
+import { usePricedCart } from '../../hooks/usePricedCart';
 import { formatCRC } from '../../utils/formatters';
 import { computeBackorder, BACKORDER_DEPOSIT_LABEL } from '../../utils/backorder';
 import usePageTitle from '../../hooks/usePageTitle';
 
-import { cartDecantDelivery } from '../../../functions/lib/decantSale.mjs';
 import DecantDeliveryNotice from '../../components/checkout/DecantDeliveryNotice';
 
 export default function CartPage() {
   usePageTitle('Mi carrito | Aquí Pauli');
-  const { items, subtotal, itemCount, removeItem, updateQuantity } = useCart();
-  const delivery = cartDecantDelivery(items, subtotal);
+  const { items, subtotal, itemCount, removeItem, updateQuantity, delivery } = usePricedCart();
   const summary = computeBackorder(items, delivery.shippingCost);
 
   return (
