@@ -261,16 +261,17 @@ async function releaseCancelledReservation({ db, orderId }) {
     if (!snap.exists) return { kind: "missing" };
     const order = snap.data();
     const terminal = ["cancelado", "expirado"].includes(order.status);
-    if (!terminal && !(order.discount && order.paymentStatus === "rechazado")) return { kind: "noop" };
-    // External attempts with an unknown outcome must first be reconciled.
-    if (order.discount && (order.paypal || order.tilopay?.attemptCount)
-        && !["rechazado", "expirado"].includes(order.paymentStatus)) return { kind: "noop" };
+    const { providerDeclined, releaseCode } = require("./discounts");
+    const decline = order.discount && providerDeclined(order);
+    if (!terminal && !(order.discount && (order.paymentStatus === "rechazado" || decline))) return { kind: "noop" };
+    if (order.discount && (order.paypal || order.tilopay?.attemptCount) && !decline) return { kind: "noop" };
+    if (order.discount && (isPaidState(order) || ["parcial", "test_paid"].includes(order.paymentStatus))) return { kind: "noop" };
     if (order.fulfillment?.state === "applied") return { kind: "noop" };
     const hasStock = order.inventoryReservation?.state === "reserved";
     if (!hasStock && !order.discount) return { kind: "noop" };
     const variants = hasStock ? await reservationReleasePlan({ db, transaction, order }) : [];
     const now = new Date().toISOString();
-    const released = await require("./discounts").releaseCode(db, transaction, orderId, order, now);
+    const released = await releaseCode(db, transaction, orderId, order, now);
     if (!hasStock && !released) return { kind: "noop" };
     for (const variant of variants) transaction.update(variant.ref, { reservedStock: variant.reservedStock - variant.line.quantity });
     transaction.update(ref, { ...(hasStock && { inventoryReservation: { ...order.inventoryReservation, state: "released", releasedAt: now } }),

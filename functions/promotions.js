@@ -3,7 +3,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { db } = require("./utils");
 const { computeTotalsCRC } = require("./lib/pricing");
-const { checkCode, discountedTotals } = require("./lib/discounts");
+const { checkCode, discountedTotals, providerDeclined } = require("./lib/discounts");
 const { generateBatch, validateBatch } = require("./lib/cardBatches");
 const { releaseCancelledReservation } = require("./lib/orderFulfillment");
 
@@ -26,8 +26,9 @@ exports.generateDiscountBatch = onCall(opts, async req => {
 // Independiente del trigger de correos y de la configuración SMTP.
 exports.releaseOrderDiscount = onDocumentUpdated({ document: "orders/{orderId}", retry: true }, async event => {
   const before = event.data.before.data(), after = event.data.after.data();
-  if (after.discount && (before.status !== after.status || before.paymentStatus !== after.paymentStatus)
-      && (["cancelado", "expirado"].includes(after.status) || after.paymentStatus === "rechazado")) {
+  const terminal = ["cancelado", "expirado"].includes(after.status) || after.paymentStatus === "rechazado";
+  if (after.discount && !after.discountReleasedAt && ((terminal && (before.status !== after.status || before.paymentStatus !== after.paymentStatus))
+      || (providerDeclined(after) && !providerDeclined(before)))) {
     await releaseCancelledReservation({ db, orderId: event.params.orderId });
   }
 });

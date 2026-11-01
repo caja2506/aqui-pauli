@@ -13,12 +13,12 @@ export default function DiscountCardsPage() {
   const [filter, setFilter] = useState(states[0]), [loaded, setLoaded] = useState(null);
   const [batchId, setBatchId] = useState(''), [count, setCount] = useState(10);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
-  const lot = selected || lots[0]?.id || '';
+  const lot = selected;
   useEffect(() => onSnapshot(query(collection(db,'discountBatches'),orderBy('createdAt','desc')),
     s => setLots(s.docs.map(d => ({id:d.id,...d.data()}))), () => setMessage('No pudimos cargar los lotes.')), []);
   useEffect(() => {
-    if (!lot) return;
-    return onSnapshot(query(collection(db,'discountCodes'),where('batchId','==',lot)),
+    const cards = collection(db,'discountCodes');
+    return onSnapshot(lot ? query(cards,where('batchId','==',lot)) : cards,
       s => setLoaded({ lot, rows:s.docs.map(d=>d.data()).sort((a,b)=>a.code.localeCompare(b.code)) }),
       () => { setLoaded(null); setMessage('No pudimos cargar los códigos.'); });
   }, [lot]);
@@ -39,7 +39,7 @@ export default function DiscountCardsPage() {
   const download = () => perform(async () => {
     const { cardPdf } = await import('../../utils/cardPdf.mjs');
     const url = URL.createObjectURL(new Blob([await cardPdf(pending)],{type:'application/pdf'}));
-    const a = document.createElement('a'); a.href=url; a.download='tarjetitas_'+lot+'.pdf'; a.click();
+    const a = document.createElement('a'); a.href=url; a.download='tarjetitas_'+(lot || 'pendientes')+'.pdf'; a.click();
     setTimeout(()=>URL.revokeObjectURL(url),60000);
     setMessage('PDF descargado. Cuando tengás las tarjetas en papel, marcalas como impresas.');
   });
@@ -48,7 +48,7 @@ export default function DiscountCardsPage() {
     const markedAt = new Date().toISOString();
     const changed = await runTransaction(db, async tx => {
       const docs = await Promise.all(cards.map(c=>tx.get(doc(db,'discountCodes',c.code))));
-      const ready = docs.filter(s=>s.exists() && s.data().batchId===lot && cardState(s.data())==='Por imprimir');
+      const ready = docs.filter(s=>s.exists() && (!lot || s.data().batchId===lot) && cardState(s.data())==='Por imprimir');
       for (const s of ready) tx.update(s.ref,{printed:true,printedAt:markedAt});
       return ready.length;
     });
@@ -64,16 +64,16 @@ export default function DiscountCardsPage() {
       <button className={button} disabled={busy}>Generar códigos</button>
     </form>
     <label className="block font-bold">Ver lote <select className="rounded border p-2" value={lot} onChange={e=>setSelected(e.target.value)}>
-      {!lots.length && <option value="">Todavía no hay lotes</option>}{lots.map(b=><option key={b.id}>{b.id}</option>)}
+      <option value="">Todos los lotes</option>{lots.map(b=><option key={b.id}>{b.id}</option>)}
     </select></label>
     <div className="flex flex-wrap gap-2">{states.map(s=><button key={s} aria-pressed={s===filter}
       className={'rounded-xl border px-3 py-2 '+(s===filter?'bg-rose-100 font-bold':'bg-white')} onClick={()=>setFilter(s)}>{s} ({rows.filter(r=>cardState(r)===s).length})</button>)}</div>
     <div className="flex flex-wrap gap-2"><button className={button} disabled={busy || !pending.length} onClick={download}>Descargar PDF para imprimir</button>
-      <button className="rounded-xl border bg-white px-4 py-2 disabled:opacity-50" disabled={busy || !pending.length} onClick={()=>mark(pending)}>Marcar pendientes del lote como impresos</button></div>
+      <button className="rounded-xl border bg-white px-4 py-2 disabled:opacity-50" disabled={busy || !lot || !pending.length} onClick={()=>mark(pending)}>Marcar pendientes del lote como impresos</button></div>
     {message && <p role="status" className="rounded-xl bg-rose-50 p-3">{message}</p>}
-    {lot && loaded?.lot!==lot ? <p>Cargando códigos…</p> : !visible.length ? <p>No hay códigos en este filtro.</p> :
+    {loaded?.lot!==lot ? <p>Cargando códigos…</p> : !visible.length ? <p>No hay códigos en este filtro.</p> :
       <ul className="grid gap-3 sm:grid-cols-2">{visible.map(c=><li key={c.code} className="rounded-xl border bg-white p-4">
-        <b className="font-mono text-lg">{c.code}</b><p>{cardState(c)} · Vence {date(c.expiresAt)}</p>
+        <b className="font-mono text-lg">{c.code}</b><p>Lote {c.batchId} · {cardState(c)} · Vence {date(c.expiresAt)}</p>
         {c.printedAt && <p>Impreso el {date(c.printedAt)}</p>}
         {c.used && <p>Usado el {date(c.usedAt)} · Pedido {c.orderId}</p>}
         {filter==='Por imprimir' && <button disabled={busy} className="my-2 text-rose-700 underline" onClick={()=>mark([c])}>Marcar como impreso</button>}

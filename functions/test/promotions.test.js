@@ -60,3 +60,14 @@ test("generar un lote escribe todo o nada y no regenera el mismo lote", async()=
   await assert.rejects(generateBatch(db,args),/ya existe/);
   assert.equal(docs.size,4);
 });
+
+test("una captura pendiente no libera la tarjeta aunque cambie el estado local", async()=>{
+  const { releaseCancelledReservation } = require("../lib/orderFulfillment");
+  const [card]=makeCards({lote:"QA",n:1});
+  for (const captureStatus of ["PENDING","DENIED"]) {
+    const {db,get}=createMemoryFirestore({["discountCodes/"+card.code]:{...card,used:true,orderId:"order1"},
+      "orders/order1":{status:"cancelado",paymentStatus:"rechazado",paypal:{captureStatus},discount:{code:card.code}}});
+    await releaseCancelledReservation({db,orderId:"order1"});
+    assert.equal(get("discountCodes/"+card.code).used,captureStatus==="PENDING");
+  }
+});

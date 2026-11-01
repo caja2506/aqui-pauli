@@ -82,9 +82,17 @@ async function reservedTotals(db, tx, orderId, order, gross) {
   return totals;
 }
 
+function providerDeclined(order) {
+  if (order.paypal) return ["DENIED", "DECLINED", "FAILED", "VOIDED", "EXPIRED"].includes(order.paypal.captureStatus || order.paypal.status);
+  const attempts = Object.values(order.tilopay?.attemptsById || {});
+  return attempts.length > 0 && !order.tilopay.reconciliationNeedsReview && !order.tilopay.duplicatePaymentNeedsReview
+    && attempts.every(a => a.status === "declined" && a.lastObservedState === "declined" && !a.financialEvidence && !a.reconciliationNeedsReview);
+}
+
 async function releaseCode(db, tx, orderId, order, now) {
   if (!order.discount || order.discountReleasedAt || order.fulfillment?.state === "applied"
       || ["pagado", "verificado", "parcial", "test_paid"].includes(order.paymentStatus)) return false;
+  if ((order.paypal || order.tilopay?.attemptCount) && !providerDeclined(order)) return false;
   const ref = db.collection("discountCodes").doc(order.discount.code);
   const card = (await tx.get(ref)).data();
   if (!card?.used || card.orderId !== orderId || !(Date.parse(card.expiresAt) > Date.parse(now))) return false;
@@ -103,4 +111,4 @@ async function giftForOrder(db, tx, items, choice) {
   return { size: "3 ml", choice: selected?.id || "sorpresa", name: selected?.name || "Sorpresa", chosenByCustomer: !!selected };
 }
 
-module.exports = { checkCode, allowedCode, discountedTotals, reservationForCode, reservedTotals, releaseCode, giftForOrder };
+module.exports = { checkCode, allowedCode, discountedTotals, reservationForCode, reservedTotals, releaseCode, giftForOrder, providerDeclined };
