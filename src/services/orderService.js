@@ -11,6 +11,14 @@ import { normalizeCustomerNotes } from '../../functions/lib/customerNotes.mjs';
  * - Crea/actualiza contacto en crm_contacts/
  */
 export async function createOrder(orderData) {
+  if (orderData.discountCode || orderData.giftSample) {
+    const { httpsCallable } = await import('firebase/functions');
+    const { functions } = await import('../firebase');
+    const { data } = await httpsCallable(functions, 'createOrderWithReservation')({
+      ...orderData, items: orderData.items.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),
+    });
+    return data;
+  }
   const customerNotes = normalizeCustomerNotes(orderData.customerNotes);
   const orderId = doc(collection(db, 'orders')).id;
   const orderNumber = generateOrderNumber();

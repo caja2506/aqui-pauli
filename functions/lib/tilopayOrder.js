@@ -46,14 +46,16 @@ function canonicalLine(line) {
   if (![line.itemId, line.productId, line.variantId].every(validDocumentId)) throw new Error("Identificador de item inválido.");
   if (!Number.isSafeInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) throw new Error("Cantidad inválida.");
   const unitPriceMinor = parseMinorCRC(line.unitPrice ?? line.price);
-  const lineTotalMinor = unitPriceMinor * line.quantity;
+  const cut = line.discountMinor ?? 0;
+  if (!Number.isSafeInteger(cut) || cut < 0) throw new Error("Descuento de línea inválido.");
+  const lineTotalMinor = unitPriceMinor * line.quantity - cut;
   if (!Number.isSafeInteger(lineTotalMinor)) throw new Error("Importe de item fuera de rango.");
-  if (line.lineTotal !== undefined && parseMinorCRC(line.lineTotal) !== lineTotalMinor) throw new Error("Importe de item inconsistente.");
+  if (line.lineTotal !== undefined && parseMinorCRC(line.lineTotal, { allowZero: true }) !== lineTotalMinor) throw new Error("Importe de item inconsistente.");
   if (!["stock_propio", "bajo_pedido"].includes(line.supplyType)) throw new Error("Tipo de suministro inválido.");
   return {
     itemId: line.itemId, productId: line.productId, variantId: line.variantId,
     quantity: line.quantity, unitPrice: minorToCRC(unitPriceMinor), lineTotal: minorToCRC(lineTotalMinor),
-    unitPriceMinor, lineTotalMinor, supplyType: line.supplyType,
+    ...(line.discountMinor !== undefined && { discountMinor: cut }), unitPriceMinor, lineTotalMinor, supplyType: line.supplyType,
     productName: cleanText(line.productName ?? line.name, 300),
     variantName: cleanText(line.variantName, 300), imageUrl: cleanText(line.imageUrl, 2048),
   };
@@ -104,6 +106,7 @@ function canonicalItem(line) {
   return {
     productId: line.productId, variantId: line.variantId, quantity: line.quantity,
     productName: line.productName, variantName: line.variantName, imageUrl: line.imageUrl,
+    ...(line.discountMinor !== undefined && { discountMinor: line.discountMinor }),
     supplyType: line.supplyType, price: line.unitPrice, lineTotal: line.lineTotal,
   };
 }

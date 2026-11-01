@@ -13,6 +13,8 @@ export async function createCashOnDeliveryOrder(order) {
   }
   const payload = {
     paymentMethod: 'contra_entrega',
+    ...(order.giftSample && { giftSample: order.giftSample }),
+    ...(order.discountCode && { discountCode: order.discountCode, expectedDiscountAmount: order.expectedDiscountAmount, promotionRequestId: order.promotionRequestId }),
     customerName: order.customerName,
     customerEmail: order.customerEmail,
     customerPhone: normalizeGiveawayPhone(order.customerPhone),

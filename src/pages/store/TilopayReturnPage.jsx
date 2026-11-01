@@ -61,6 +61,7 @@ export default function TilopayReturnPage() {
           state: {
             orderNumber: res.orderNumber || pending?.orderNumber, total: res.crcTotal ?? pending?.total,
             paymentMethod: 'tilopay', online: true, paid: true, onlineLabel: 'tarjeta',
+            ...(res.giftSample && { giftSample: res.giftSample }), ...(res.discount && { discount: res.discount }),
             partial: res.partial === true, tilopayQuote: tilopayQuoteAmounts(res),
           },
         });

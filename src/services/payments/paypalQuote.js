@@ -3,8 +3,8 @@
 const FIELDS = ['crcTotal', 'crcPayNow', 'crcBalanceDue', 'crcBackorderSubtotal',
   'crcDepositTotal', 'hasBackorder', 'depositPercent', 'usdTotal', 'fxRate', 'fxBufferPct', 'currency'];
 
-export function paypalQuoteKey(items, canton, shippingType) {
-  return JSON.stringify([items.map(({ productId, variantId, quantity }) => [productId, variantId, quantity]), canton, shippingType]);
+export function paypalQuoteKey(items, canton, shippingType, discountCode) {
+  return JSON.stringify([items.map(({ productId, variantId, quantity }) => [productId, variantId, quantity]), canton, shippingType, ...(discountCode ? [discountCode] : [])]);
 }
 
 export function isPayablePaypalQuote(quote) {

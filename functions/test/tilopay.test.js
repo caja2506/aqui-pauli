@@ -1114,3 +1114,15 @@ test('preparación y aprobación vencida nunca crean ni vinculan una sesión pri
     assert.equal((await h.service.getConfig(req())).enabled,false);assert.equal(h.get('_ops/tilopay-live-pilot'),undefined);
   }
 });
+
+test("Tilopay respeta el cupón consumido por el mismo pedido, también durante la conciliación", async () => {
+  const code="AP-7K3M9P", discount={code,type:"percent",value:10,amount:9000};
+  const h=harness({extra:{[`discountCodes/${code}`]:{code,used:true,usedByUid:"user1",orderId:ORDER},
+    [`orders/${ORDER}`]:{...orderData(),discount,subtotalBeforeDiscount:90000,subtotal:81000,total:81000}}});
+  const form=await h.service.create(request());
+  assert.equal(form.crcTotal,81000);
+  assert.equal(h.calls.pay[0].amount,"81000.00");
+  h.bank.set(h.att().orderNumber,[h.payment()]);
+  assert.equal((await h.service.confirm(request())).result,"paid");
+  assert.equal(h.order().priceCorrectedByServer,undefined);
+});

@@ -40,9 +40,13 @@ function buildPaidOrderEmail(order, items, { test = false, requiresReview = fals
   const reviewText = requiresReview
     ? `Motivo: ${reason}\nTransacción: ${order.paymentTransactionId || "—"}\nRevisá el pedido en el admin antes de prepararlo o enviarlo.\n\n` : "";
   const testNote = test ? "ESTE ES UN CORREO DE PRUEBA (pedido de prueba). No requiere acción.\n\n" : "";
+  const promotion = [];
+  if (order.giftSample) promotion.push("🎁 Muestra de regalo (3 ml): " + (order.giftSample.choice === "sorpresa" ? "Sorpresa (elegila vos)" : order.giftSample.name));
+  if (order.discount) promotion.push(`Código usado: ${order.discount.code} (−${crc(order.discount.amount)})`);
   const text = `${testNote}${title}\n\n${reviewText}` +
     `Pedido: ${num}\nCliente: ${order.customerName || "—"}\n` +
     `Productos:\n${lines.map((l) => l.text).join("\n") || "—"}\n\n` +
+    promotion.map(line => line + "\n").join("") +
     `Total: ${crc(order.total)}\nMétodo de pago: ${method}\n\n` +
     `Ver en el admin: ${ADMIN_ORDERS_URL} (buscá el pedido ${num})\n\n— Aquí Pauli (aviso automático)`;
   const html = `<div style="font-family:Arial,sans-serif;max-width:520px">` +
@@ -52,6 +56,7 @@ function buildPaidOrderEmail(order, items, { test = false, requiresReview = fals
       `<b>Transacción:</b> ${esc(order.paymentTransactionId || "—")}<br>Revisá el pedido en el admin antes de prepararlo o enviarlo.</p>` : "") +
     `<p><b>Pedido:</b> ${esc(num)}<br><b>Cliente:</b> ${esc(order.customerName || "—")}<br>` +
     `<b>Total:</b> ${esc(crc(order.total))}<br><b>Método de pago:</b> ${esc(method)}</p>` +
+    promotion.map(line => `<p>${esc(line)}</p>`).join("") +
     `<p><b>Productos:</b></p><ul>${lines.map((l) => `<li>${esc(l.text.slice(2))}</li>`).join("") || "<li>—</li>"}</ul>` +
     `<p><a href="${ADMIN_ORDERS_URL}" style="background:#111;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">Abrir pedidos en el admin</a><br>` +
     `<small>Buscá el pedido ${esc(num)}</small></p>` +

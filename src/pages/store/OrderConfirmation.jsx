@@ -1,3 +1,4 @@
+import OrderPromotion from '../../components/checkout/OrderPromotion';
 import { useEffect, useState } from 'react';
 import { useParams, useLocation, Link } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
@@ -117,6 +118,7 @@ export default function OrderConfirmation() {
       <p className="text-sm text-slate-500 mb-6">
         Guardá este número para cualquier consulta sobre tu compra.
       </p>
+      <OrderPromotion order={savedOrder || location.state} />
       {online && (
         <p className={`text-sm font-bold mb-6 ${paid ? 'text-green-700' : 'text-amber-700'}`}>
           {paid ? ((isPaypal && hasDeposit) || (isTilopay && (hasDeposit || tilopayPartial))

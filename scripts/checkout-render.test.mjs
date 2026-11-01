@@ -27,7 +27,8 @@ const WHATSAPP = 'src/components/storefront/WhatsAppButton.jsx';
 const SHIPPING = 'src/services/shippingService.js';
 const LEGAL = 'src/pages/store/LegalPages.jsx';
 const realFiles = [
-  CHECKOUT, CART, CONFIRMATION, PAYPAL_PANEL, PRODUCT, WHATSAPP, SHIPPING, LEGAL,
+  CHECKOUT, CART, CONFIRMATION, 'src/components/checkout/OrderPromotion.jsx', PAYPAL_PANEL, PRODUCT, WHATSAPP, SHIPPING, LEGAL,
+  'src/components/checkout/CheckoutPromotion.jsx', 'functions/lib/promotions.mjs',
   'src/utils/backorder.js', 'src/utils/constants.js', 'src/utils/formatters.js',
   'src/services/payments/registry.js', 'src/data/costaRicaTerritorial.js',
   'functions/lib/costaRicaTerritorial.mjs',
@@ -215,6 +216,8 @@ function renderPage(relative, options = {}) {
     const module = { exports: {} };
     cache.set(filename, module);
     const localRequire = (name) => {
+      if (name.endsWith('/useCheckoutPromotion')) return { useCheckoutPromotion: () => options.sampleOptions || [] };
+      if (name === 'firebase/functions') return { httpsCallable: forbidden('coupon validation') };
       if (name === 'react' && filename === abs('src/hooks/usePageTitle.js')) return {
         ...React,
         useEffect(effect, dependencies) { titleEffects.push(effect); return React.useEffect(effect, dependencies); },
@@ -1151,4 +1154,17 @@ test('resumen distingue tres unidades de una sola variante y permite editar cant
   const page = renderPage(CHECKOUT, { items: [{ ...line('stock_propio', 1000), quantity: 3 }] });
   contains(page.html, '3 unidades · 1 variante');
   assert.match(page.html, /href="\/carrito"[^>]*>Editar cantidades/);
+});
+
+test('un solo selector opcional incluso para dos perfumes; sorpresa primero', () => {
+  const options=[{id:'moschino-toy-2',name:'Moschino Toy 2',active:true,order:1}];
+  for (const n of [1,2]) {
+    const items=Array.from({length:n},(_,i)=>line('stock_propio',44900,'perfume'+i));
+    const page=renderPage(CHECKOUT,{items,sampleOptions:options});
+    assert.equal((page.html.match(/id="gift-decant"/g)||[]).length,1);
+    assert.match(page.html,/value="sorpresa" selected/);
+    assert.match(page.html,/Moschino Toy 2/);
+  }
+  const page=renderPage(CHECKOUT,{items:[line('stock_propio',45000,'bolso')],sampleOptions:[]});
+  assert.doesNotMatch(page.html,/id="gift-decant"/);
 });

@@ -34,6 +34,7 @@ import BrandsPage from './pages/admin/BrandsPage';
 import CategoriesPage from './pages/admin/CategoriesPage';
 import ProductsPage from './pages/admin/ProductsPage';
 import OrdersPage from './pages/admin/OrdersPage';
+import DiscountCardsPage from './pages/admin/DiscountCardsPage';
 import CrmPage from './pages/admin/CrmPage';
 import ShippingPage from './pages/admin/ShippingPage';
 import GiveawayAdminPage from './pages/admin/GiveawayAdminPage';
@@ -135,6 +136,7 @@ export default function App() {
           <Route path="productos" element={<ProductsPage />} />
           <Route path="pedidos" element={<OrdersPage />} />
           <Route path="crm" element={<CrmPage />} />
+          <Route path="crm/tarjetitas" element={<DiscountCardsPage />} />
           <Route path="envios" element={<ShippingPage />} />
           <Route path="sorteo" element={<GiveawayAdminPage />} />
           <Route path="prueba-tilopay" element={<TilopayPilotPage />} />

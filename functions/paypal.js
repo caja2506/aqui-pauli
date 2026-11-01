@@ -52,6 +52,7 @@ function assertPaypalOrder(order, uid, paypalOrderId) {
   if (order.paymentMethod !== "paypal" || hasTilopay(order)) {
     throw new HttpsError("failed-precondition", "Este pedido no pertenece al flujo PayPal. Los intentos Tilopay se confirman exclusivamente con Tilopay.");
   }
+  if (order.discountReleasedAt) throw new HttpsError("failed-precondition", "El código de este pedido se liberó. Creá un nuevo pedido.");
   if (isTerminalOrder(order)) throw new HttpsError("failed-precondition", "El pedido está cerrado; el pago requiere conciliación.");
   if (paypalOrderId && order.paypal?.orderId !== paypalOrderId) {
     throw new HttpsError("failed-precondition", "La orden PayPal cambió; confirma el intento correcto.");
@@ -73,6 +74,8 @@ async function fxRate() {
   try { return await getFxRate(db); }
   catch { throw new HttpsError("unavailable", "No hay tipo de cambio disponible. Intenta más tarde."); }
 }
+
+const { allowedCode, discountedTotals, reservedTotals } = require("./lib/discounts");
 
 async function price(items, ship, transaction) {
   try { return await computeTotalsCRC(db, items, ship, { transaction }); }
@@ -130,7 +133,7 @@ function canonicalItems(totals, itemDocs) {
       itemId: doc.id, productId: line.productId, variantId: line.variantId,
       productName: line.productName || line.name || "", variantName: line.variantName || "",
       imageUrl: line.imageUrl || "", price: line.unitPrice, quantity: line.quantity,
-      subtotal: line.lineTotal, lineTotal: line.lineTotal, supplyType: line.supplyType,
+      ...(line.discountMinor !== undefined && { discountMinor: line.discountMinor }), subtotal: line.lineTotal, lineTotal: line.lineTotal, supplyType: line.supplyType,
       depositAmount: backorder.depositByLine[index], depositPaid: false, remainingPaid: false,
     } };
   });
@@ -150,7 +153,8 @@ exports.paypalGetQuote = onCall({ ...OPTS, secrets: [] }, async (request) => {
   const { items, canton, shippingType } = request.data || {};
   if (!Array.isArray(items)) throw new HttpsError("invalid-argument", "items requerido.");
   const totals = await price(items, { canton, shippingType });
-  return paymentQuote(totals, await fxRate());
+  const code = request.data?.discountCode ? await allowedCode(db, request.auth?.uid, request.data.discountCode) : null;
+  return paymentQuote(discountedTotals(totals, code), await fxRate());
 });
 
 exports.paypalCreateOrder = onCall({ ...OPTS, secrets: [PAYPAL_SECRET] }, async (request) => {
@@ -181,9 +185,10 @@ exports.paypalCreateOrder = onCall({ ...OPTS, secrets: [PAYPAL_SECRET] }, async 
       return order.paypal;
     }
     const itemSnap = await transaction.get(ref.collection("items"));
-    const totals = await price(itemSnap.docs.map((doc) => doc.data()), {
+    const gross = await price(itemSnap.docs.map((doc) => doc.data()), {
       canton: order.shippingAddress?.canton, shippingType: order.shippingType,
     }, transaction);
+    const totals = await reservedTotals(db, transaction, orderId, order, gross);
     const quote = paymentQuote(totals, fx);
     assertDisplayedQuote(expectedQuote, quote);
     assertReservation(order, totals.lines);

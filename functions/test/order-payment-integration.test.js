@@ -1503,3 +1503,75 @@ test("PayPal capture representation without purchase-unit binding is consulted b
   assert.equal(h.get(`orders/${created.orderId}`).paymentAmount, 16000);
   assert.equal(h.get(`orders/${created.orderId}`).remainingTotal, 16000);
 });
+
+const promoCode = "AP-7K3M9P";
+function promoCatalog() {
+  const seed = catalog();
+  seed["products/p1"].categoryRefs = [{ id: "perfume-child" }];
+  seed["categories/perfume-child"] = { parentId: "tEunA0AXM35keXWWcz2P" };
+  seed[VARIANT].price = 44900;
+  seed["config/decants"] = { promoActive: true, options: [{ active: true, id: "moschino-toy-2", name: "Moschino Toy 2", order: 1 }] };
+  seed["discountCodes/" + promoCode] = { code: promoCode, used: false, type: "percent", value: 10, appliesTo: "products",
+    expiresAt: new Date(Date.now() + 86400000).toISOString() };
+  seed["users_roles/admin"] = { role:"admin" };
+  return seed;
+}
+test("tarjetita: compra atómica, precio real y una muestra, incluso con peticiones simultáneas", async () => {
+  const h = loadHandlers(promoCatalog());
+  const req = cashRequest({ discountCode: " ap 7k3m9p ", total: 1, subtotal: 1, giftSample: { choice: "moschino-toy-2" } });
+  const results = await Promise.allSettled([h.orders.createOrderWithReservation(req), h.orders.createOrderWithReservation(req)]);
+  assert.equal(results.filter(r=>r.status==="fulfilled").length, 1);
+  assert.match(results.find(r=>r.status==="rejected").reason.message,/usado/);
+  const order = results.find(r=>r.status==="fulfilled").value;
+  assert.equal(order.total, 40410);
+  assert.equal(order.discount.amount, 4490);
+  assert.equal(order.subtotalBeforeDiscount, 44900);
+  assert.deepEqual(order.giftSample, {size:"3 ml",choice:"moschino-toy-2",name:"Moschino Toy 2",chosenByCustomer:true});
+  assert.equal(h.get("discountCodes/"+promoCode).orderId, order.orderId);
+  await h.orders.manageCashOnDeliveryOrder(request({orderId:order.orderId,action:"cancel"},"admin"));
+  assert.equal(h.get("discountCodes/"+promoCode).used,false);
+  assert.equal(h.get(VARIANT).reservedStock,0);
+});
+test("muestra: sorpresa, agotada, promoción apagada y carrito sin perfume", async () => {
+  for (const scenario of ["sorpresa","agotada","apagada","cartera","sin config"]) {
+    const seed=promoCatalog();
+    if (scenario==="agotada") seed["config/decants"].options[0].active=false;
+    if (scenario==="apagada") seed["config/decants"].promoActive=false;
+    if (scenario==="cartera") seed["products/p1"].categoryRefs=[{id:"bolsos"}];
+    if (scenario==="sin config") delete seed["config/decants"];
+    const h=loadHandlers(seed);
+    const result=await h.orders.createOrderWithReservation(cashRequest({giftSample:{choice:"inventada"}}));
+    const sample=h.get("orders/"+result.orderId).giftSample;
+    if (scenario==="sorpresa") assert.equal(sample.choice,"sorpresa");
+    else assert.equal(sample,undefined,scenario);
+  }
+});
+test("tarjetita: códigos inválidos, vencidos y falta de inventario no consumen el código", async () => {
+  for (const scenario of ["stock","vencido","falso"]) {
+    const seed=promoCatalog();
+    if (scenario==="stock") seed[VARIANT].stock=0;
+    if (scenario==="vencido") seed["discountCodes/"+promoCode].expiresAt="2000-01-01T00:00:00Z";
+    const h=loadHandlers(seed);
+    await assert.rejects(h.orders.createOrderWithReservation(cashRequest({discountCode:scenario==="falso"?"AP-AAAAAA":promoCode})));
+    assert.equal(h.get("discountCodes/"+promoCode).used,false);
+  }
+});
+test("PayPal cotiza y crea el intento con el mismo descuento, sin corregir el precio", async () => {
+  const h=loadHandlers(promoCatalog());
+  const data={items:[{productId:"p1",variantId:"v1",quantity:1}],discountCode:promoCode,canton:"Grecia"};
+  const quote=await h.paypal.paypalGetQuote(request(data));
+  assert.equal(quote.crcPayNow,40410);
+  const {orderId}=await h.orders.createOrderWithReservation(cashRequest({...data,paymentMethod:"paypal"}));
+  const intent=await h.paypal.paypalCreateOrder(request({orderId,expectedQuote:quote}));
+  assert.equal(intent.crcTotal,40410);
+  assert.equal(h.get("orders/"+orderId).priceCorrectedByServer,undefined);
+});
+test("la misma solicitud de checkout recupera su pedido después de perder la respuesta",async()=>{
+  const h = loadHandlers(promoCatalog());
+  const req = cashRequest({discountCode:promoCode,promotionRequestId:"a".repeat(32)});
+  const [one,two] = await Promise.all([h.orders.createOrderWithReservation(req),h.orders.createOrderWithReservation(req)]);
+  assert.deepEqual(one,two);
+  assert.deepEqual(await h.orders.createOrderWithReservation(req),one);
+  assert.equal(h.get(VARIANT).reservedStock,1);
+  await assert.rejects(h.orders.createOrderWithReservation(cashRequest({...req.data,giftSample:{choice:"otra"}})));
+});

@@ -5,10 +5,10 @@ const AMOUNTS = ['crcTotal', 'crcSubtotal', 'crcShipping', 'crcPayNow',
 const FIELDS = ['currency', 'hasBackorder', ...AMOUNTS];
 const equalMoney = (left, right) => Math.abs(left - right) < 0.005;
 
-export function tilopayQuoteKey(items, canton, shippingType) {
+export function tilopayQuoteKey(items, canton, shippingType, discountCode) {
   return JSON.stringify([(Array.isArray(items) ? items : []).map(({ productId, variantId, quantity }) =>
     [String(productId ?? ''), String(variantId ?? ''), Number(quantity)]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-  canton || '', shippingType || 'normal']);
+  canton || '', shippingType || 'normal', ...(discountCode ? [discountCode] : [])]);
 }
 
 export function isPayableTilopayQuote(quote) {

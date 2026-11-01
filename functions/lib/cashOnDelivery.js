@@ -148,7 +148,8 @@ async function manageCashOnDeliveryOrder({ db, request, crmDefaults = {} }) {
         updatedAt: now,
       };
     } else {
-      update = { status: "cancelado", paymentStatus: "pendiente", paymentAmount: 0, remainingTotal: 0,
+      const released = await require("./discounts").releaseCode(db, transaction, orderId, order, now);
+      update = { ...(released && { discountReleasedAt: now }), status: "cancelado", paymentStatus: "pendiente", paymentAmount: 0, remainingTotal: 0,
         cashOnDelivery: { ...order.cashOnDelivery, state: "cancelled", cancelledBy: request.auth.uid, cancelledAt: now },
         inventoryReservation: { ...order.inventoryReservation, state: "released", releasedAt: now }, updatedAt: now };
     }

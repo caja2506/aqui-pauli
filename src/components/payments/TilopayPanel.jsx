@@ -37,7 +37,7 @@ function writePending(value) {
 }
 
 
-export default function TilopayPanel({ validateForm, createPendingOrder, canton, shippingType = 'normal', onQuote }) {
+export default function TilopayPanel({ discountCode, validateForm, createPendingOrder, canton, shippingType = 'normal', onQuote }) {
   const { user } = useAuth();
   const { items } = useCart();
   const navigate = useNavigate();
@@ -52,7 +52,7 @@ export default function TilopayPanel({ validateForm, createPendingOrder, canton,
   const latest = useRef({});
   const mounted = useRef(true);
   const uid = user?.uid;
-  const quoteKey = tilopayQuoteKey(items, canton, shippingType);
+  const quoteKey = tilopayQuoteKey(items, canton, shippingType, discountCode);
   const quote = quoted?.uid === uid && quoted.key === quoteKey && isPayableTilopayQuote(quoted.quote) ? quoted.quote : null;
   const error = quoteError?.uid === uid && quoteError.key === quoteKey ? quoteError.message : '';
   const visiblePending = pendingOrder?.uid === uid ? pendingOrder : null;
@@ -85,7 +85,7 @@ export default function TilopayPanel({ validateForm, createPendingOrder, canton,
     if (!uid || !canton || items.length === 0 || visiblePending || readPending(uid)) return undefined;
     tilopayGetQuote({
       items: items.map(({ productId, variantId, quantity }) => ({ productId, variantId, quantity })),
-      canton, shippingType,
+      canton, shippingType, ...(discountCode && { discountCode }),
     }).then(value => {
       if (cancelled || latest.current.uid !== uid || latest.current.quoteKey !== quoteKey) return;
       if (!isPayableTilopayQuote(value)) throw new Error('Cotización inválida.');

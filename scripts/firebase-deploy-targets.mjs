@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 const existingFunctions = [
   'tilopayGetConfig', 'tilopayGetQuote', 'tilopayCreatePayment', 'tilopayConfirm', 'tilopayReconcilePayments',
   'createOrderWithReservation', 'deleteOrder', 'manageCashOnDeliveryOrder', 'submitPaymentProof', 'approvePaymentManually',
+  'validateDiscountCode', 'generateDiscountBatch', 'releaseOrderDiscount',
   'paypalCreateOrder', 'paypalCaptureOrder', 'paypalGetQuote', 'cleanExpiredReservations',
 ];
 const giveawayFiles = new Set([

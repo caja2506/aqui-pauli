@@ -1,3 +1,4 @@
+import OrderPromotion from '../../components/checkout/OrderPromotion';
 import React, { useRef, useState } from 'react';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db, functions } from '../../firebase';
@@ -508,6 +509,7 @@ export default function OrdersPage() {
                         </div>
 
                         <div>
+                          <OrderPromotion order={order} packing />
                           {order.customerNotes && (
                             <section className="mb-4" aria-label="Notas del cliente">
                               <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Notas del cliente</h4>
