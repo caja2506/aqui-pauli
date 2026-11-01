@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 497e446ed069e47f65bc549095ce5c151b7a6399
+          ref: d81f6ee91153a8466bd112754dde7520ca8e025f
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -58,7 +58,7 @@ jobs:
               await desk.close();
               const compact=await browser.newPage({viewport:{width:320,height:568},isMobile:true});
               await metrics(compact,site);
-              const first=await box(card(compact,id));
+              const first=await box(card(compact,id)); console.log('SMALL_GEOMETRY',JSON.stringify(first));
               assert.ok(first.y+Math.min(first.width,145)<568,'products must be visible on 320x568: '+first.y);
               assert.equal(await compact.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
               console.log('SMALL',JSON.stringify(first));await compact.close();
