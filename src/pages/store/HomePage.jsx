@@ -22,8 +22,8 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen">
-      <GiveawayBanner />
+    <div className="flex min-h-screen flex-col md:block">
+      <GiveawayBanner compact />
       {/* Hero */}
       <section className="relative bg-gradient-to-b from-rose-200 via-rose-100 to-white overflow-hidden">
         <div className="absolute inset-0 opacity-30">
@@ -81,7 +81,7 @@ export default function HomePage() {
       </section>
 
       {/* Features */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-1 md:-mt-12 relative z-10">
+      <section className="order-last mb-5 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 md:mb-0 md:-mt-12 relative z-10">
         <div className="grid grid-cols-3 rounded-xl border border-slate-100 bg-white md:rounded-none md:border-0 md:bg-transparent md:gap-4">
           {[
             { icon: Truck, title: 'Envío Nacional', desc: 'Mensajería local o Correos, según la zona' },
@@ -102,7 +102,7 @@ export default function HomePage() {
       </section>
 
       {/* Featured Products */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-8 md:py-16">
+      <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-6 md:py-16">
         <div className="flex items-center justify-between mb-3 md:mb-8">
           <div>
             <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">Productos Destacados</h2>
