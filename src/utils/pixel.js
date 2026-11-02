@@ -1,6 +1,6 @@
 import { getCatalogId } from '../../functions/lib/catalogId.mjs';
 
-const PIXEL_ID = '1636839314476198';
+const PIXEL_ID = '1746566943106831';
 let lastPage;
 let initialized = false;
 const purchases = new Set();
