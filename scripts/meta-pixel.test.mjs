@@ -44,8 +44,8 @@ test('un PageView por navegación, un Purchase por orden aun con llamadas concur
     trackPageView('/'); trackPageView('/'); trackPageView('/catalogo'); trackPageView('/');
     assert.equal(calls.filter(c => c[0] === 'init').length, 1);
     assert.deepEqual(calls.filter(c => c.includes('PageView')), [
-      ['track', 'PageView'], ['trackSingle', '1636839314476198', 'PageView'],
-      ['trackSingle', '1636839314476198', 'PageView'],
+      ['track', 'PageView'], ['trackSingle', '1746566943106831', 'PageView'],
+      ['trackSingle', '1746566943106831', 'PageView'],
     ]);
     assert.equal(window.fbq.disablePushState, true);
     await Promise.all([1, 2].map(() => trackPurchase('order-one', order, variant, () => true)));
