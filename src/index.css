@@ -76,24 +76,24 @@ body {
 
   .benefits-track {
     display: flex;
-    width: max-content;
-    margin-inline: auto;
     white-space: nowrap;
   }
 
-  .benefits-viewport[data-overflow="true"] .benefits-track {
-    gap: 1.5rem;
+  /* Al salir una copia, las otras dos todavía cubren todo el ancho visible. */
+  .benefits-track > span {
+    flex: none;
+    min-width: 50%;
     padding-inline-end: 1.5rem;
-    animation: benefits-scroll 18s linear infinite;
+    animation: benefits-scroll 15s linear infinite;
   }
 
-  .benefits-viewport:focus .benefits-track {
+  .benefits-viewport:focus-visible .benefits-track > span {
     animation-play-state: paused;
   }
 }
 
 @keyframes benefits-scroll {
-  to { transform: translateX(-50%); }
+  to { transform: translateX(-100%); }
 }
 
 @media (width < 48rem) and (prefers-reduced-motion: reduce) {
@@ -102,7 +102,7 @@ body {
     scrollbar-width: none;
   }
 
-  .benefits-viewport[data-overflow="true"] .benefits-track {
+  .benefits-track > span {
     animation: none;
     padding: 0;
   }
