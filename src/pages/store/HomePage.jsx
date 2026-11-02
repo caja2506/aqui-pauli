@@ -36,14 +36,13 @@ export default function HomePage() {
               <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
               <span className="text-xs font-bold text-slate-600">Envío a todo Costa Rica 🇨🇷</span>
             </div>
-            <h1 className="text-xl md:text-6xl font-black tracking-tight leading-tight text-slate-900">
-              <span className="md:hidden">Descubrí Aquí Pauli</span>
-              <span className="hidden md:inline">Encuentra lo que<br /><span className="text-rose-500">necesitas aquí</span></span>
+            <h1 className="sr-only md:not-sr-only md:text-6xl font-black tracking-tight leading-tight text-slate-900">
+              Encuentra lo que<br /><span className="text-rose-500">necesitas aquí</span>
             </h1>
             <p className="hidden md:block text-lg text-slate-600 mt-6 leading-relaxed max-w-lg">
               Productos de calidad, con precios transparentes y envío seguro a todo el país. Compra fácil, rápido y sin complicaciones.
             </p>
-            <form role="search" aria-label="Buscar en la tienda" onSubmit={handleSearch} className="flex gap-2 md:gap-3 mt-3 md:mt-6 max-w-xl">
+            <form role="search" aria-label="Buscar en la tienda" onSubmit={handleSearch} className="flex gap-2 md:gap-3 md:mt-6 max-w-xl">
               <label htmlFor="home-product-search" className="sr-only">Buscar productos</label>
               <div className="relative flex-1 min-w-0">
                 <Search aria-hidden="true" className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
