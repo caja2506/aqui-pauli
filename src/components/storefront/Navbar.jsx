@@ -1,16 +1,28 @@
-import { useState, useRef, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingBag, ShoppingCart, User, LogOut, Shield, Menu, X, ClipboardList } from 'lucide-react';
+import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { ShoppingBag, ShoppingCart, User, LogOut, Shield, ClipboardList } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRole } from '../../contexts/RoleContext';
 import { useCart } from '../../contexts/CartContext';
+
+import MobileCategoryMenu from './MobileCategoryMenu';
+import MobileBenefitsBanner from './MobileBenefitsBanner';
+
+const mobileHeaderQuery = '(width < 48rem)';
+const mobileHeaderMatches = () => window.matchMedia(mobileHeaderQuery).matches;
+function subscribeToWidth(update) {
+  const query = window.matchMedia(mobileHeaderQuery);
+  query.addEventListener('change', update);
+  return () => query.removeEventListener('change', update);
+}
 
 export default function Navbar() {
   const { user, signOut } = useAuth();
   const { isAdmin } = useRole();
   const { itemCount, setIsCartOpen } = useCart();
   const navigate = useNavigate();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const location = useLocation();
+  const mobile = useSyncExternalStore(subscribeToWidth, mobileHeaderMatches, () => false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
 
@@ -37,10 +49,12 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100">
+      {mobile && <MobileBenefitsBanner />}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
+          {mobile && <MobileCategoryMenu key={location.key} isAdmin={isAdmin} user={user} />}
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 group">
+          <Link to="/" className="flex items-center gap-2 group max-md:mr-auto">
             <div className="w-9 h-9 bg-gradient-to-br from-rose-500 to-rose-600 rounded-xl flex items-center justify-center shadow-md group-hover:rotate-3 transition-transform">
               <ShoppingBag className="w-5 h-5 text-white" />
             </div>
@@ -143,38 +157,8 @@ export default function Navbar() {
                 <span className="hidden sm:inline">Ingresar</span>
               </Link>
             )}
-
-            {/* Mobile menu toggle */}
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-xl"
-            >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
           </div>
         </div>
-
-        {/* Mobile Nav */}
-        {mobileMenuOpen && (
-          <div className="md:hidden pb-4 border-t border-slate-100 pt-3 space-y-1 animate-in slide-in-from-top duration-200">
-            <Link to="/" onClick={() => setMobileMenuOpen(false)} className="block px-4 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-xl">
-              Inicio
-            </Link>
-            <Link to="/catalogo" onClick={() => setMobileMenuOpen(false)} className="block px-4 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-xl">
-              Catálogo
-            </Link>
-            {isAdmin && (
-              <Link to="/admin" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm font-bold text-rose-600 hover:bg-rose-50 rounded-xl">
-                <Shield className="w-4 h-4" /> Panel Admin
-              </Link>
-            )}
-            {user && (
-              <Link to="/mi-cuenta" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-xl">
-                <ClipboardList className="w-4 h-4" /> Mis Pedidos
-              </Link>
-            )}
-          </div>
-        )}
       </div>
     </header>
   );

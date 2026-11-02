@@ -47,7 +47,7 @@ import TilopayPilotPage from './pages/admin/TilopayPilotPage';
 // ========================================
 function StoreLayout() {
   return (
-    <div className="min-h-screen flex flex-col bg-white font-sans">
+    <div className="min-h-screen flex flex-col bg-white font-sans max-md:text-[15px]">
       <Navbar />
       <CartDrawer />
       <main className="flex-1">

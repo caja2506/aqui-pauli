@@ -36,7 +36,7 @@ export default function HomePage() {
               <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
               <span className="text-xs font-bold text-slate-600">Envío a todo Costa Rica 🇨🇷</span>
             </div>
-            <h1 className="text-2xl md:text-6xl font-black tracking-tight leading-tight text-slate-900">
+            <h1 className="text-xl md:text-6xl font-black tracking-tight leading-tight text-slate-900">
               <span className="md:hidden">Descubrí Aquí Pauli</span>
               <span className="hidden md:inline">Encuentra lo que<br /><span className="text-rose-500">necesitas aquí</span></span>
             </h1>
@@ -105,7 +105,7 @@ export default function HomePage() {
       <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-6 md:py-16">
         <div className="flex items-center justify-between mb-3 md:mb-8">
           <div>
-            <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">Productos Destacados</h2>
+            <h2 className="text-lg md:text-2xl font-black text-slate-900 tracking-tight">Productos Destacados</h2>
             <p className="hidden md:block text-sm text-slate-400 mt-1">Lo más nuevo en nuestra tienda</p>
           </div>
           <Link to="/catalogo" className="text-sm font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1">
