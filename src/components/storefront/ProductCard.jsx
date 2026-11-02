@@ -105,11 +105,11 @@ function ProductCardDetails({ product }) {
 
       {/* Info */}
       <div className="p-4 flex-1 flex flex-col">
-        <h3 className="font-bold text-slate-900 text-sm leading-tight line-clamp-2 group-hover:text-rose-600 transition-colors">
+        <h3 className="font-bold text-slate-900 text-[13px] leading-snug md:text-sm md:leading-tight line-clamp-2 group-hover:text-rose-600 transition-colors">
           {product.name}
         </h3>
         <div className="mt-auto pt-3">
-          <div className="text-xl font-black text-rose-600 tracking-tight" aria-live="polite" data-testid="product-price">
+          <div className="text-lg md:text-xl font-black text-rose-600 tracking-tight" aria-live="polite" data-testid="product-price">
             {loadingVariant ? 'Cargando precio…'
               : variantError ? 'Precio no disponible'
                 : price === null ? 'Sin opciones disponibles'

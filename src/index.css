@@ -64,3 +64,48 @@ body {
     padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
   }
 }
+
+@media (width < 48rem) {
+  html:has(#store-category-menu[open]) {
+    overflow: hidden;
+  }
+
+  .benefits-viewport {
+    overflow: hidden;
+  }
+
+  .benefits-track {
+    display: flex;
+    width: max-content;
+    margin-inline: auto;
+    white-space: nowrap;
+  }
+
+  .benefits-viewport[data-overflow="true"] .benefits-track {
+    gap: 1.5rem;
+    padding-inline-end: 1.5rem;
+    animation: benefits-scroll 18s linear infinite;
+  }
+
+  .benefits-viewport:focus .benefits-track {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes benefits-scroll {
+  to { transform: translateX(-50%); }
+}
+
+@media (width < 48rem) and (prefers-reduced-motion: reduce) {
+  .benefits-viewport {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .benefits-viewport[data-overflow="true"] .benefits-track {
+    animation: none;
+    padding: 0;
+  }
+
+  .benefits-track [aria-hidden] { display: none; }
+}

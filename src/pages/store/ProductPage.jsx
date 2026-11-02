@@ -158,7 +158,7 @@ function ProductDetails({ productId }) {
         {/* Details */}
         <div className="flex flex-col gap-6">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">{product.name}</h1>
+            <h1 className="text-[22px] max-md:leading-tight md:text-3xl font-black text-slate-900 tracking-tight">{product.name}</h1>
             {product.description && (
               <p className="text-sm text-slate-500 mt-3 leading-relaxed">{cleanShippingPromise(product.description)}</p>
             )}
@@ -166,8 +166,8 @@ function ProductDetails({ productId }) {
 
           {/* Price */}
           <div className="bg-rose-50 rounded-2xl p-5 border border-rose-100">
-            <div className="text-3xl font-black text-rose-600 tracking-tight" aria-live="polite" data-testid="product-price">
-              {currentPrice === null ? 'Precio no disponible' : <>{showFrom && <span className="text-lg">Desde </span>}{formatCRC(currentPrice)}</>}
+            <div className="text-2xl md:text-3xl font-black text-rose-600 tracking-tight" aria-live="polite" data-testid="product-price">
+              {currentPrice === null ? 'Precio no disponible' : <>{showFrom && <span className="text-base md:text-lg">Desde </span>}{formatCRC(currentPrice)}</>}
             </div>
             {currentPrice !== null && <p className="text-xs text-rose-400 mt-1">IVA incluido</p>}
           </div>
@@ -227,7 +227,7 @@ function ProductDetails({ productId }) {
             <section data-mobile-cart-dock aria-label="Compra de este producto" data-testid="product-purchase-bar"
               className="fixed inset-x-0 bottom-0 z-40 flex flex-col gap-3 border-t border-rose-100 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-[0_-4px_20px_rgba(15,23,42,0.08)] lg:static lg:inset-auto lg:z-auto lg:flex-row lg:flex-wrap lg:items-center lg:gap-4 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
               <div className="flex items-center justify-between gap-3 lg:shrink-0">
-                <p className="min-w-0 text-lg font-black text-rose-600 lg:hidden" data-testid="product-mobile-price">
+                <p className="min-w-0 text-base md:text-lg font-black text-rose-600 lg:hidden" data-testid="product-mobile-price">
                   {currentPrice === null ? 'Precio no disponible' : <>{showFrom && <span className="text-xs">Desde </span>}{formatCRC(currentPrice)}</>}
                 </p>
                 {canBuy && <div className="flex shrink-0 items-center border border-slate-200 rounded-xl overflow-hidden" aria-label="Cantidad">
