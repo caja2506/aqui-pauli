@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { doc, onSnapshot, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { ShoppingCart, ArrowLeft, Check, Package, Truck } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Check, MessageCircle, Package, Truck } from 'lucide-react';
 import { formatCRC } from '../../utils/formatters';
 import { BACKORDER_DEPOSIT_LABEL } from '../../utils/backorder';
 import { useCart } from '../../contexts/CartContext';
 import { cleanShippingPromise } from '../../utils/shippingText';
+import { CONTACT } from '../../components/legal/LegalLayout';
 import MobileCartBar from '../../components/storefront/MobileCartBar';
 import StatusBadge from '../../components/ui/StatusBadge';
 import { normalizeCommercialStatus } from '../../utils/constants';
@@ -98,15 +99,31 @@ function ProductDetails({ productId }) {
   };
 
   const canBuy = isPurchasableVariant(selectedVariant, product, quantity) && currentPrice !== null;
-  const hasPurchasableOption = !variantError && variants.some(variant =>
+  const purchaseOptions = variantError ? [] : variants.filter(variant =>
     isPurchasableVariant(variant, product) && getVariantPrice(product, variant) !== null);
+  const hasPurchasableOption = purchaseOptions.length > 0;
+  const canArrangeCash = purchaseOptions.some(variant =>
+    (!selectedVariant || variant.id === selectedVariant.id) &&
+    (variant.supplyType ?? product.supplyType ?? 'stock_propio') === 'stock_propio');
+  const productLink = `https://${CONTACT.site}/producto/${encodeURIComponent(productId)}`;
+  const description = [product.name, selectedVariant?.name, currentPrice === null ? 'precio por confirmar' : formatCRC(currentPrice)]
+    .filter(Boolean).join(' - ');
+  const message = `Hola, quiero comprar: ${description}. ${productLink}`;
+  const whatsAppButton = (
+    <a href={`${CONTACT.whatsappUrl}?text=${encodeURIComponent(message)}`}
+      target="_blank" rel="noopener noreferrer"
+      className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#25D366] px-4 py-3 text-sm font-black text-slate-950 hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-800">
+      <MessageCircle className="h-5 w-5" aria-hidden="true" />
+      Comprar por WhatsApp
+    </a>
+  );
   const chooseVariant = () => {
     variantSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     variantSectionRef.current?.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-[calc(10rem+env(safe-area-inset-bottom,0px))] lg:pb-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-[calc(14rem+env(safe-area-inset-bottom,0px))] lg:pb-8">
       <Link to="/catalogo" className="inline-flex items-center gap-1 text-sm font-bold text-rose-600 hover:text-rose-700 mb-6">
         <ArrowLeft className="w-4 h-4" /> Catálogo
       </Link>
@@ -160,7 +177,7 @@ function ProductDetails({ productId }) {
             <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
               <p className="text-sm font-bold text-amber-700">{variantError ? 'No pudimos cargar las tallas/opciones. Recargá la página para consultar el precio.' : 'Este producto no tiene tallas/opciones disponibles por el momento.'}</p>
               <a
-                href={`https://wa.me/50671613342?text=${encodeURIComponent(`¡Hola! Me interesa ${product.name}. ¿Tienen disponibilidad?`)}`}
+                href={`${CONTACT.whatsappUrl}?text=${encodeURIComponent(`¡Hola! Me interesa ${product.name}. ¿Tienen disponibilidad?`)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs font-bold text-rose-600 hover:text-rose-700 mt-2 inline-block"
@@ -208,7 +225,7 @@ function ProductDetails({ productId }) {
           {/* Un solo control de compra: fijo abajo en móvil y dentro de la ficha en escritorio. */}
           {hasPurchasableOption && (
             <section data-mobile-cart-dock aria-label="Compra de este producto" data-testid="product-purchase-bar"
-              className="fixed inset-x-0 bottom-0 z-40 flex flex-col gap-3 border-t border-rose-100 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-[0_-4px_20px_rgba(15,23,42,0.08)] lg:static lg:inset-auto lg:z-auto lg:flex-row lg:items-center lg:gap-4 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+              className="fixed inset-x-0 bottom-0 z-40 flex flex-col gap-3 border-t border-rose-100 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] shadow-[0_-4px_20px_rgba(15,23,42,0.08)] lg:static lg:inset-auto lg:z-auto lg:flex-row lg:flex-wrap lg:items-center lg:gap-4 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
               <div className="flex items-center justify-between gap-3 lg:shrink-0">
                 <p className="min-w-0 text-lg font-black text-rose-600 lg:hidden" data-testid="product-mobile-price">
                   {currentPrice === null ? 'Precio no disponible' : <>{showFrom && <span className="text-xs">Desde </span>}{formatCRC(currentPrice)}</>}
@@ -245,10 +262,11 @@ function ProductDetails({ productId }) {
                 </button>
                 <MobileCartBar inline />
               </div>
+              {whatsAppButton}
             </section>
           )}
 
-          {!hasPurchasableOption && <MobileCartBar />}
+          {!hasPurchasableOption && <>{whatsAppButton}<MobileCartBar /></>}
 
           {/* Shipping note */}
           <div className="bg-slate-50 rounded-2xl p-4 flex items-center gap-3">
@@ -256,6 +274,9 @@ function ProductDetails({ productId }) {
             <div>
               <p className="text-xs font-bold text-slate-700">Envío a todo Costa Rica</p>
               <p className="text-[10px] text-slate-400">Envío normal · Express en Grecia, cuando esté disponible</p>
+              {canArrangeCash && (
+                <p className="mt-1 text-xs text-slate-600">Podés coordinar el pago contra entrega por WhatsApp si todo tu pedido está en stock.</p>
+              )}
             </div>
             {!selectedVariant && priceSummary.price !== null && variants.length > 1 && (
               <p className="text-xs font-bold text-amber-600 mt-2 animate-pulse">⬆️ Seleccioná una variante para agregar al carrito</p>
