@@ -1121,7 +1121,7 @@ test('la ficha conserva Agregar al Carrito, espacio inferior y WhatsApp visible'
     assert.ok(addButton, 'The purchase button must still render');
     assert.doesNotMatch(addButton.split('>')[0], /\sdisabled(?:=|\s|$)/);
     const page = classesIn(html.match(/<div\b[^>]*class="[^"]*max-w-7xl[^"\n]*"[^>]*>/)?.[0]);
-    assert.ok(page.has('pb-[calc(10rem+env(safe-area-inset-bottom,0px))]'));
+    assert.ok(page.has('pb-[calc(14rem+env(safe-area-inset-bottom,0px))]'));
     assert.ok(page.has('lg:pb-8'), 'Desktop keeps the existing bottom spacing');
     if (supplyType === 'bajo_pedido') contains(html, 'Se aparta con el 50% de este producto');
   }

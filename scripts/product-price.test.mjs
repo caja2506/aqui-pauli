@@ -26,7 +26,7 @@ const variant = (id, price, extra = {}) => ({ id, name: id, price,
 const options = [variant('Negro 35', 100000), variant('Rojo 34', 119000)];
 const compiled = new Map(await Promise.all([
   'src/utils/pixel.js', 'functions/lib/catalogId.mjs',
-  CARD, PAGE, 'functions/lib/decantSale.mjs', 'src/utils/productPrice.js', 'functions/lib/catalogPrice.mjs', 'src/utils/constants.js',
+  CARD, PAGE, 'src/components/legal/LegalLayout.jsx', 'functions/lib/decantSale.mjs', 'src/utils/productPrice.js', 'functions/lib/catalogPrice.mjs', 'src/utils/constants.js',
   'src/utils/formatters.js', 'src/utils/backorder.js', 'src/utils/shippingText.js',
   'src/components/ui/StatusBadge.jsx', 'src/components/ui/LoadingSpinner.jsx',
 ].map(async relative => {
@@ -280,7 +280,7 @@ test('móvil tiene una sola barra fija con precio exacto, cantidad y espacio inf
   const page = render(PAGE, { selected: options[1], quantity: 2 });
   assert.equal((page.html.match(/data-testid="product-purchase-bar"/g) || []).length, 1);
   assert.match(page.html, /data-testid="product-purchase-bar" class="[^"]*fixed[^\"]*bottom-0[^\"]*lg:static/);
-  assert.ok(page.html.includes('pb-[calc(10rem+env(safe-area-inset-bottom,0px))]'));
+  assert.ok(page.html.includes('pb-[calc(14rem+env(safe-area-inset-bottom,0px))]'));
   assert.ok(page.html.includes('pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]'));
   assert.equal(page.mobilePrice, page.price);
   assert.equal(page.mobilePrice, money(119000));
@@ -328,6 +328,32 @@ test('los controles de cantidad tienen etiquetas y no permiten bajar de una unid
   assert.equal(page.stateUpdates.at(-1).value, 4);
   page.buttons.find(button => button['aria-label'] === 'Disminuir cantidad').onClick();
   assert.equal(page.stateUpdates.at(-1).value, 2);
+});
+
+function whatsAppPurchaseUrl(html) {
+  const links = [...html.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)]
+    .map(([tag]) => tag).filter(tag => tag.includes('Comprar por WhatsApp'));
+  assert.equal(links.length, 1);
+  return new URL(links[0].match(/href="([^"]+)"/)[1]);
+}
+
+test('WhatsApp usa el precio de la ficha, la variante elegida y el enlace público del producto', () => {
+  const item = { ...product, name: 'Perfume A & B' };
+  const sizes = [variant('2 ml', 2800), variant('5 ml', 5300, { name: '5 ml / especial +' })];
+  for (const [selected, expected] of [
+    [null, `Perfume A & B - ${formatCRC(2800)}`],
+    [sizes[1], `Perfume A & B - 5 ml / especial + - ${formatCRC(5300)}`],
+  ]) {
+    const { html } = render(PAGE, { item, variants: sizes, selected });
+    const url = whatsAppPurchaseUrl(html);
+    assert.equal(url.pathname, '/50671613342');
+    assert.equal(url.searchParams.get('text'), `Hola, quiero comprar: ${expected}. https://aquipauli.com/producto/tenis`);
+  }
+  const backorder = variant('Bajo pedido', 35000, { supplyType: 'bajo_pedido', commercialStatus: 'bajo_pedido' });
+  assert.doesNotMatch(render(PAGE, { variants: [backorder], selected: backorder }).text, /coordinar el pago contra entrega/);
+  assert.match(render(PAGE, { variants: sizes, selected: sizes[1] }).text, /coordinar el pago contra entrega/);
+  const noPrice = render(PAGE, { variants: [], error: true });
+  assert.match(whatsAppPurchaseUrl(noPrice.html).searchParams.get('text'), / - precio por confirmar\. /);
 });
 
 test('la barra no habilita compra para una consulta fallida o sin variantes comprables', () => {
