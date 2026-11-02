@@ -1,0 +1,74 @@
+name: Verify WhatsApp product purchase on live Hosting
+on:
+  push:
+    branches: [ops/validar-compra-whatsapp]
+    paths: [.github/workflows/check-whatsapp-purchase.yml]
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Open the product and verify the WhatsApp destination and Pixel contacts
+        env:
+          RELEASE_SHA: b0c3c7e3e1ef26cec7a2505ed4b2048b724353c3
+        run: |
+          npm install --prefix "$RUNNER_TEMP/wa-product" --no-package-lock playwright-core@1.56.1
+          cat > "$RUNNER_TEMP/wa-product/test.cjs" <<'NODE'
+          const {chromium}=require('playwright-core');
+          const fs=require('node:fs/promises'), path=require('node:path'), assert=require('node:assert/strict');
+          const live=true;
+          (async()=>{
+           const browser=await chromium.launch({executablePath:process.env.CHROME_BIN||'/tmp/chromium',headless:!live,args:['--no-sandbox','--disable-dev-shm-usage']});
+           try {
+           const ctx=await browser.newContext({viewport:{width:393,height:852}}), page=await ctx.newPage();
+           const contacts=[], waRequests=[], forbidden=[];
+           await ctx.route(/^https:\/\/wa\.me\//,async route=>{waRequests.push(route.request().url());await route.fulfill({body:'WA link intercepted',contentType:'text/html'});});
+           await ctx.route(/^https:\/\/(?:www\.)?facebook\.com\/tr\/?(?:[?#]|$)/,async route=>{
+             const req=route.request();const params=new URL(req.url()).searchParams;for(const [k,v] of new URLSearchParams(req.postData()||''))params.set(k,v);
+             if(params.get('ev')==='Contact') contacts.push({id:params.get('id'),value:params.get('cd[value]')});
+             if(params.get('ev')==='Purchase'||params.get('ev')==='AddToCart')forbidden.push(params.get('ev'));
+             await route.fulfill({status:200,body:'',headers:{'Access-Control-Allow-Origin':'*'}});
+           });
+           const pid='decant-invictus-edt', productURL='https://aquipauli.com/producto/'+pid;
+           const deployed=await (await fetch('https://aquipauli.com/deployment.json?check='+process.env.RELEASE_SHA)).json();assert.equal(deployed.commit,process.env.RELEASE_SHA);
+           await page.goto(productURL);const cta=page.getByRole('link',{name:'Comprar por WhatsApp',exact:true});
+           await cta.waitFor();assert.equal(await cta.count(),1);
+           const productName=await page.locator('main h1').innerText();
+           async function layout(width,height){
+             await page.setViewportSize({width,height});await cta.scrollIntoViewIfNeeded();
+             const v=await cta.evaluate(a=>{const r=a.getBoundingClientRect(),dock=a.closest('section'), b=dock.getBoundingClientRect(),style=getComputedStyle(dock);
+               const primary=dock.querySelector('button[aria-controls="product-variants"]')||[...dock.querySelectorAll('button')].at(-1);
+               return {width:r.width,usable:b.width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)-parseFloat(style.borderLeftWidth)-parseFloat(style.borderRightWidth),top:r.top,primaryBottom:primary.getBoundingClientRect().bottom,color:getComputedStyle(a).backgroundColor,hit:a.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))};});
+             assert(Math.abs(v.width-v.usable)<=1,JSON.stringify(v));assert(v.top>=v.primaryBottom-1,JSON.stringify(v));assert(v.hit);assert.equal(v.color,'rgb(37, 211, 102)');console.log('LAYOUT',width,v.width,v.color,'CTA below primary action');
+           }
+           for(const [w,h] of [[320,568],[393,852],[1440,900],[393,852]])await layout(w,h);
+           async function exercise(variant,price,num){
+             const href=new URL(await cta.getAttribute('href'));assert.equal(href.origin,'https://wa.me');assert.equal(href.pathname,'/50671613342');
+             const msg=href.searchParams.get('text');const expected='Hola, quiero comprar: '+productName+(variant?' - '+variant:'')+' - ₡'+price+'. '+productURL;
+             assert.equal(msg.replace(/₡\s*([0-9])(?:[\s.,](?=\d{3}\. ))?/g,'₡$1'),expected);
+             const popupPromise=ctx.waitForEvent('page');await cta.click();const popup=await popupPromise;await popup.waitForLoadState('domcontentloaded');assert.equal(waRequests.at(-1),href.href);await popup.close();
+             if(live){
+               for(let i=0;i<72&&contacts.length<num;i++)await new Promise(r=>setTimeout(r,180));
+               assert.equal(contacts.length,num,'Contact requests');
+               assert.deepEqual(contacts.at(-1),{id:'1746566943106831',value:null});
+             }else{
+               const events=await page.evaluate(()=>window.pixelCalls.filter(c=>c[0]==='track'&&c[1]==='Contact'));
+               assert.deepEqual(events,Array(num).fill(['track','Contact']));
+             }
+             console.log('WA',variant||'(no variant)',msg,'Contact count',num);
+           }
+           await exercise(null,2800,1);
+           await page.getByRole('button',{name:'5 ml',exact:true}).click();
+           await exercise('5 ml',5300,2);
+           await new Promise(r=>setTimeout(r,650));
+           if(live)assert.equal(contacts.length,2);
+           assert.equal(forbidden.length,0);
+           assert(await page.getByText('Podés coordinar el pago contra entrega por WhatsApp si todo tu pedido está en stock.').isVisible());
+           console.log('PASS: correct handoff, full-width layout, no duplicate Contact, no order or WhatsApp message sent.');
+           }finally{await browser.close();}
+          })().catch(e=>{console.error(e.stack);process.exitCode=1});
+          
+          NODE
+          CHROME_BIN="$(command -v google-chrome)" xvfb-run -a node "$RUNNER_TEMP/wa-product/test.cjs"
