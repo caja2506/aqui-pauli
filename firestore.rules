@@ -226,6 +226,17 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // El estándar de ganancia es interno; no se publica en config ni products.
+    match /admin_pricing/settings {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['markupPercent', 'roundingStep', 'updatedAt'])
+        && request.resource.data.markupPercent is number
+        && request.resource.data.markupPercent >= 0 && request.resource.data.markupPercent <= 1000
+        && request.resource.data.roundingStep in [1, 100, 500, 1000]
+        && request.resource.data.updatedAt == request.time;
+    }
+
     // --- Configuración (lectura pública, escritura admin) ---
     match /config/{configId} {
       allow read: if true;

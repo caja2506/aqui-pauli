@@ -93,7 +93,7 @@ function runtime(options = {}) {
     ...['Navbar', 'Footer', 'CartDrawer', 'WhatsAppButton', 'MobileCartBar'].map((name) => [abs(`src/components/storefront/${name}.js`), { __esModule: true, default: () => null }]),
     ...['ProductPage', 'CartPage', 'CheckoutPage', 'OrderConfirmation', 'TilopayReturnPage', 'MyOrdersPage', 'NotFoundPage']
       .map((name) => [abs(`src/pages/store/${name}.js`), { __esModule: true, default: () => React.createElement('div', null, name) }]),
-    ...['DashboardPage', 'BrandsPage', 'CategoriesPage', 'ProductsPage', 'OrdersPage', 'CrmPage', 'DiscountCardsPage', 'ShippingPage', 'TilopayPilotPage']
+    ...['DashboardPage', 'BrandsPage', 'CategoriesPage', 'ProductsPage', 'OrdersPage', 'CrmPage', 'DiscountCardsPage', 'ShippingPage', 'PricingPage', 'TilopayPilotPage']
       .map((name) => [abs(`src/pages/admin/${name}.js`), { __esModule: true, default: () => null }]),
     [abs('src/pages/store/LegalPages.js'), Object.fromEntries(['TerminosPage', 'DevolucionesPage', 'EnviosPage', 'PrivacidadPage'].map((name) => [name, () => null]))],
   ]);

@@ -59,7 +59,7 @@ test('otros cambios del entry point o historial incompleto no se confunden con e
       .includes('functions:default:paypalCreateOrder'));
   }
   assert.ok(firebaseDeployTargets([]).includes('functions:default:createOrderWithReservation'));
-  assert.ok(firebaseDeployTargets(['firestore.rules']).includes('functions:default:cleanExpiredReservations'));
+  assert.equal(firebaseDeployTargets(['firestore.rules', 'src/pages/admin/PricingPage.jsx', 'scripts/pricing-rules.emulator.test.cjs']), 'firestore:rules');
 });
 
 test('la preparación Tilopay publica la cotización y el cron junto con todos los consumidores compartidos', () => {
