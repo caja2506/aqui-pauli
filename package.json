@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:pricing": "node --test scripts/pricing-calculator.test.mjs",
     "build": "vite build",
     "test:checkout": "node --test scripts/checkout-render.test.mjs scripts/tilopay-render.test.mjs scripts/discount-cards.test.mjs scripts/meta-pixel.test.mjs",
     "test:giveaway": "node scripts/giveaway-render.test.mjs && node scripts/giveaway-export.test.mjs && node scripts/firebase-deploy-targets.test.mjs",

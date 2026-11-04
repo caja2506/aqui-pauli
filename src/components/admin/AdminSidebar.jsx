@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Tag, FolderTree, Package, ClipboardList,
-  Users, LogOut, Shield, ShoppingBag, ArrowLeft, Menu, X, Truck, Gift
+  Users, LogOut, Shield, ShoppingBag, ArrowLeft, Menu, X, Truck, Gift, Calculator
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRole } from '../../contexts/RoleContext';
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { to: '/admin/marcas', icon: Tag, label: 'Marcas' },
   { to: '/admin/categorias', icon: FolderTree, label: 'Categorías' },
   { to: '/admin/productos', icon: Package, label: 'Productos' },
+  { to: '/admin/precios', icon: Calculator, label: 'Precios' },
   { to: '/admin/pedidos', icon: ClipboardList, label: 'Pedidos' },
   { to: '/admin/crm', icon: Users, label: 'CRM' },
   { to: '/admin/envios', icon: Truck, label: 'Envíos' },

@@ -39,6 +39,8 @@ jobs:
       - name: Test variant prices and storefront page titles
         run: npm run test:store-audit
       - run: npm run build
+      - name: Verify admin pricing calculations and persistence
+        run: npm run test:pricing
 
       - name: Record the version to publish
         run: |

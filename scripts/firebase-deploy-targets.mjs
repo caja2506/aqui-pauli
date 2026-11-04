@@ -36,6 +36,10 @@ function withoutGiveawayExport(source) {
 export function firebaseDeployTargets(changedPaths, indexBefore = '', indexAfter = '') {
   const catalogFiles = ['functions/lib/catalogId.mjs', 'functions/lib/metaFeed.js', 'functions/test/metaFeed.test.js'];
   const backendPaths = changedPaths.filter(path => path.startsWith('functions/') || path === 'firestore.rules');
+  // Las reglas aisladas no requieren volver a publicar pasarelas ni pedidos.
+  if (backendPaths.length && backendPaths.every(path => path === 'firestore.rules')) {
+    return 'firestore:rules';
+  }
   if (backendPaths.length && backendPaths.every(path => catalogFiles.includes(path))) {
     return 'functions:default:syncCatalogBatch';
   }

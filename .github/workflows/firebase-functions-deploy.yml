@@ -72,7 +72,7 @@ jobs:
         run: >-
           firebase emulators:exec --only firestore
           --project demo-aqui-pauli-giveaway --config firebase.tilopay-emulator.json
-          "node functions/test/firestore-payments.emulator.test.js && node functions/test/firestore-giveaway.emulator.test.js"
+          "node functions/test/firestore-payments.emulator.test.js && node functions/test/firestore-giveaway.emulator.test.js && node scripts/pricing-rules.emulator.test.cjs"
 
       - name: Prepare Firebase application default credentials
         env:
