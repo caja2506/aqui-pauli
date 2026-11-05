@@ -63,7 +63,7 @@ const file = 'src/pages/admin/PricingPage.jsx';
 const compiled = await transformWithEsbuild(await readFile(new URL('../' + file, import.meta.url), 'utf8'), file,
   { loader: 'jsx', jsx: 'automatic', format: 'cjs', target: 'es2022' });
 
-function renderCalculator(values) {
+function renderView(exportName, props = {}, values = []) {
   let index = 0;
   const module = { exports: {} };
   function load(name) {
@@ -77,30 +77,54 @@ function renderCalculator(values) {
     throw Error('Unexpected import ' + name);
   }
   new Function('require', 'module', 'exports', compiled.code)(load, module, module.exports);
-  return renderToStaticMarkup(React.createElement(module.exports.PricingCalculator, { initialSettings: null, onSaveSettings: async value => value }));
+  return renderToStaticMarkup(React.createElement(module.exports[exportName], props));
 }
 
-test('primera apertura pide elegir una ganancia, sin inventar un estándar', () => {
-  const html = renderCalculator([]);
-  assert.match(html, /Ingresá la ganancia estándar/);
-  assert.match(html, /Definí tu porcentaje/);
-  assert.doesNotMatch(html, /data-copy=/);
+const defaults = calculator.DEFAULT_PRICING_SETTINGS;
+const product = { id: 'ls-0001', description: 'PERFUME PRUEBA 100ML', cashCRC: 10000, cardCRC: 11000, page: 1 };
+test('la política solicitada inicia en 20%, 2900 nacional y 7000 internacional y migra v1', () => {
+  assert.deepEqual(calculator.loadWorkbenchSettings(null), { version: 2, markupPercent: 20, roundingStep: 100, localShippingCRC: 2900, internationalShippingCRC: 7000 });
+  assert.deepEqual(calculator.loadWorkbenchSettings(settings), defaults);
+  assert.equal(calculator.loadWorkbenchSettings({ ...defaults, markupPercent: 25 }).markupPercent, 25);
+  for (const key of ['localShippingCRC', 'internationalShippingCRC']) {
+    assert.throws(() => calculator.validateWorkbenchSettings({ ...defaults, [key]: -1 }));
+  }
 });
-test('la vista muestra el desglose, precio copiable y estándar persistido', () => {
-  const html = renderCalculator([costs, settings, settings]);
-  assert.match(html, /data-copy="19500"/);
+test('búsqueda combina palabras sin tildes; conserva ambas columnas del proveedor', () => {
+  assert.equal(calculator.filterSupplierProducts([product], 'perfúme 100ml').length, 1);
+  assert.equal(calculator.filterSupplierProducts([product], 'perfume 50ml').length, 0);
+  assert.equal(calculator.supplierPrice(product, 'cash'), 10000);
+  assert.equal(calculator.supplierPrice(product, 'card'), 11000);
+  assert.throws(() => calculator.supplierPrice(product, 'other'));
+  const html = renderView('SupplierPricingDashboard', { catalog: { products: [product], sourceName: 'prueba.pdf' }, settings: defaults });
+  assert.match(html, /PERFUME PRUEBA 100ML/);
+  assert.match(html, /SINPE móvil o tarjeta/);
+  assert.match(html, /10[\s\u00a0]000/);
+  assert.match(html, /11[\s\u00a0]000/);
+});
+test('detalle abre con costo mayorista elegido, envío y ganancia; gráfico y precio copiable coinciden', () => {
+  const html = renderView('PricingCalculator', { product });
+  assert.match(html, /data-copy="15500"/);
+  assert.match(html, /value="2900"/);
+  assert.match(html, /value="20"/);
   assert.match(html, /Ganancia por unidad/);
-  assert.match(html, /23,1%/);
-  assert.match(html, /Estándar guardado/);
+  assert.match(html, /Distribución del precio/);
+  assert.match(html, /2[\s\u00a0]600/);
+  assert.match(renderView('PricingCalculator', { product, payment: 'card' }), /data-copy="16700"/);
 });
-test('un error de guardado queda visible y los datos del cálculo se conservan', () => {
-  const html = renderCalculator([costs, settings, null, false, { error: true, text: 'No se pudo guardar' }]);
-  assert.match(html, /role="alert"/);
-  assert.match(html, /No se pudo guardar/);
-  assert.match(html, /data-copy="19500"/);
+test('compra internacional usa solo traslado de 7000 y no cotiza sin costo o tipo de cambio', () => {
+  const empty = renderView('PricingCalculator', { mode: 'international' });
+  assert.match(empty, /value="7000"/);
+  assert.doesNotMatch(empty, /value="2900"|data-copy=/);
+  const costs = { currency: 'USD', baseCost: 40, exchangeRate: 520, inboundShipping: 7000, delivery: 0, otherCosts: 0 };
+  const html = renderView('PricingCalculator', { mode: 'international' }, [costs]);
+  assert.match(html, /data-copy="33400"/);
+  assert.match(html, /5[\s\u00a0]600/);
+  assert.match(html, /Amazon: enlace y precio manual/);
+  assert.doesNotMatch(renderView('PricingCalculator', { mode: 'international' }, [{ ...costs, exchangeRate: '' }]), /data-copy=/);
 });
 
-test('servicio guarda solo la configuración privada validada y la vuelve a cargar', async () => {
+test('servicio guarda solo estándares privados validados y carga los valores solicitados', async () => {
   const path = 'src/services/pricingCalculatorService.js';
   const source = await transformWithEsbuild(await readFile(new URL('../' + path, import.meta.url), 'utf8'), path, { format: 'cjs', target: 'es2022' });
   const module = { exports: {} };
@@ -115,18 +139,19 @@ test('servicio guarda solo la configuración privada validada y la vuelve a carg
   };
   new Function('require', 'module', 'exports', source.code)(name => {
     if (name === 'firebase/firestore') return sdk;
-    if (name === '../firebase') return { db: {} };
+    if (name === 'firebase/functions') return { httpsCallable: () => async () => ({ data: {} }) };
+    if (name === '../firebase') return { db: {}, functions: {} };
     if (name.includes('pricingCalculator')) return calculator;
     throw Error(name);
   }, module, module.exports);
   const service = module.exports;
-  assert.equal(await service.getPricingSettings(), null);
-  await service.savePricingSettings({ ...settings, baseCost: 10000, productName: 'No guardar' });
-  assert.deepEqual(stored, { ...settings, updatedAt: 'SERVER_TIME' });
-  assert.deepEqual(await service.getPricingSettings(), settings);
-  await assert.rejects(service.savePricingSettings({ ...settings, markupPercent: -10 }));
+  assert.deepEqual(await service.getPricingSettings(), defaults);
+  await service.savePricingSettings({ ...defaults, baseCost: 10000, productName: 'No guardar' });
+  assert.deepEqual(stored, { ...defaults, updatedAt: 'SERVER_TIME' });
+  assert.deepEqual(await service.getPricingSettings(), defaults);
+  await assert.rejects(service.savePricingSettings({ ...defaults, markupPercent: -10 }));
   readError = new Error('permission-denied');
   await assert.rejects(service.getPricingSettings(), /permission-denied/);
   writeError = new Error('unavailable');
-  await assert.rejects(service.savePricingSettings(settings), /unavailable/);
+  await assert.rejects(service.savePricingSettings(defaults), /unavailable/);
 });

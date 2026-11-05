@@ -6,6 +6,15 @@ const before = 'const orders = require("./orders");\nmodule.exports = {\n  ...or
 const after = 'const orders = require("./orders");\nconst giveaway = require("./giveaway");\nmodule.exports = {\n  ...orders,\n  ...giveaway,\n};\n';
 const isolated = 'firestore:rules,functions:default:enterGiveaway';
 
+test('precios y proveedor publican solo los tres callables administrativos y reglas', () => {
+  const base = 'module.exports = {\n  ...require("./promotions"),\n};\n';
+  const next = base.replace('};', '  ...require("./adminPricing"),\n};');
+  const files = ['functions/adminPricing.js', 'functions/lib/supplierPricing.js', 'functions/test/supplierPricing.test.js', 'firestore.rules', 'functions/index.js'];
+  assert.equal(firebaseDeployTargets(files, base, next), 'firestore:rules,functions:default:importSupplierCatalog,functions:default:lookupExternalPrice,functions:default:getPricingExchangeRate');
+  assert.ok(firebaseDeployTargets([...files, 'functions/paypal.js'], base, next).includes('functions:default:paypalCreateOrder'));
+  assert.ok(firebaseDeployTargets(files, base, next.replace('promotions', 'orders')).includes('functions:default:paypalCreateOrder'));
+});
+
 test('sorteo aislado publica únicamente su función y reglas aunque incluya frontend y workflow', () => {
   assert.equal(firebaseDeployTargets(['functions/giveaway.js', 'functions/lib/giveawayConfig.json',
     'functions/index.js', 'functions/test/giveaway.test.js', 'functions/test/firestore-giveaway.emulator.test.js',

@@ -230,12 +230,23 @@ service cloud.firestore {
     match /admin_pricing/settings {
       allow read: if isAdmin();
       allow create, update: if isAdmin()
-        && request.resource.data.keys().hasOnly(['markupPercent', 'roundingStep', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['version', 'markupPercent', 'roundingStep', 'localShippingCRC', 'internationalShippingCRC', 'updatedAt'])
+        && request.resource.data.version == 2
         && request.resource.data.markupPercent is number
         && request.resource.data.markupPercent >= 0 && request.resource.data.markupPercent <= 1000
         && request.resource.data.roundingStep in [1, 100, 500, 1000]
+        && request.resource.data.localShippingCRC is number
+        && request.resource.data.localShippingCRC >= 0 && request.resource.data.localShippingCRC <= 1000000000
+        && request.resource.data.internationalShippingCRC is number
+        && request.resource.data.internationalShippingCRC >= 0 && request.resource.data.internationalShippingCRC <= 1000000000
         && request.resource.data.updatedAt == request.time;
     }
+
+    match /admin_supplier_catalogs/{catalogId} {
+      allow read: if isAdmin();
+      allow write: if false; // Importación validada y atómica por callable.
+    }
+    match /admin_pricing_requests/{uid} { allow read, write: if false; }
 
     // --- Configuración (lectura pública, escritura admin) ---
     match /config/{configId} {

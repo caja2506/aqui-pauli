@@ -9,6 +9,7 @@ const existingFunctions = [
   'createOrderWithReservation', 'deleteOrder', 'manageCashOnDeliveryOrder', 'submitPaymentProof', 'approvePaymentManually',
   'quoteCartDelivery', 'validateDiscountCode', 'generateDiscountBatch', 'releaseOrderDiscount',
   'paypalCreateOrder', 'paypalCaptureOrder', 'paypalGetQuote', 'cleanExpiredReservations',
+  'importSupplierCatalog', 'lookupExternalPrice', 'getPricingExchangeRate',
 ];
 const giveawayFiles = new Set([
   'functions/giveaway.js', 'functions/lib/giveawayConfig.json',
@@ -36,6 +37,14 @@ function withoutGiveawayExport(source) {
 export function firebaseDeployTargets(changedPaths, indexBefore = '', indexAfter = '') {
   const catalogFiles = ['functions/lib/catalogId.mjs', 'functions/lib/metaFeed.js', 'functions/test/metaFeed.test.js'];
   const backendPaths = changedPaths.filter(path => path.startsWith('functions/') || path === 'firestore.rules');
+  const pricingFiles = ['functions/adminPricing.js', 'functions/lib/supplierPricing.js', 'functions/test/supplierPricing.test.js'];
+  const withoutPricingExport = source => source.replace(/^  \.\.\.require\("\.\/adminPricing"\),\r?\n/gm, '');
+  const isolatedPricingIndex = !changedPaths.includes('functions/index.js')
+    || (indexBefore && indexAfter && withoutPricingExport(indexBefore) === withoutPricingExport(indexAfter));
+  if (backendPaths.some(path => pricingFiles.includes(path)) && isolatedPricingIndex
+    && backendPaths.every(path => pricingFiles.includes(path) || ['firestore.rules', 'functions/index.js'].includes(path))) {
+    return 'firestore:rules,functions:default:importSupplierCatalog,functions:default:lookupExternalPrice,functions:default:getPricingExchangeRate';
+  }
   // Las reglas aisladas no requieren volver a publicar pasarelas ni pedidos.
   if (backendPaths.length && backendPaths.every(path => path === 'firestore.rules')) {
     return 'firestore:rules';
