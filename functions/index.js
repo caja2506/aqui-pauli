@@ -27,4 +27,5 @@ module.exports = {
   ...catalogBatch,
   ...giveaway,
   ...require("./promotions"),
+  ...require("./adminPricing"),
 };
