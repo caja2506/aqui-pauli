@@ -1640,11 +1640,32 @@ test("cotización pública del carrito usa catálogo y muestra el faltante sin r
   const items = [{ productId: "p1", variantId: "v1", quantity: 1, price: 25000, productKind: "other" }];
   const quote = await h.promos.quoteCartDelivery({ data: { items, subtotal: 25000 } });
   assert.deepEqual(quote, { subtotal: 4700, delivery: { belowMinimum: true, shippingCost: 2500, toFreeShipping: 20300 },
-    lines: [{ price: 4700, supplyType: "stock_propio", productKind: "decant" }] });
+    lines: [{ price: 4700, supplyType: "stock_propio", productKind: "decant", maxQuantity: 10 }] });
   assert.equal(h.get(VARIANT).reservedStock, 0);
   await assert.rejects(h.orders.createOrderWithReservation(cashRequest({ items, previewDelivery: true })), /pedido mínimo/);
   await assert.rejects(h.orders.createOrderWithReservation(cashRequest({ items: [{ ...items[0], quantity: 2 }],
     expectedTotal: 9400, discountCode: promoCode })), /importe cambió/);
   assert.equal(h.get("discountCodes/" + promoCode).used, false);
   assert.equal(h.get(VARIANT).reservedStock, 0);
+});
+
+test("colonia única: dos compras simultáneas reservan una sola unidad y el pago la lleva a cero una sola vez", async () => {
+  for (const paymentMethod of ["sinpe", "transferencia", "paypal", "contra_entrega"]) {
+    const seed = catalog(); seed['products/p1'].productKind = 'perfume'; seed[VARIANT].stock = 1;
+    const h = loadHandlers(seed);
+    const results = await Promise.allSettled([
+      h.orders.createOrderWithReservation(cashRequest({ paymentMethod }, 'u1')),
+      h.orders.createOrderWithReservation(cashRequest({ paymentMethod }, 'u2')),
+    ]);
+    assert.equal(results.filter(r => r.status === 'fulfilled').length, 1, paymentMethod);
+    assert.equal(h.get(VARIANT).reservedStock, 1);
+    const orderId = results.find(r => r.status === 'fulfilled').value.orderId;
+    await h.db.doc(`orders/${orderId}`).update({ status: 'pagado', paymentStatus: 'pagado' });
+    const { applyPaidOrder } = require('../lib/orderFulfillment');
+    await applyPaidOrder({ db: h.db, orderId });
+    await applyPaidOrder({ db: h.db, orderId });
+    assert.equal(h.get(VARIANT).stock, 0);
+    assert.equal(h.get(VARIANT).reservedStock, 0);
+    await assert.rejects(h.orders.createOrderWithReservation(cashRequest({ paymentMethod })), { code: 'failed-precondition' });
+  }
 });

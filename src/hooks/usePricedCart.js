@@ -17,8 +17,9 @@ export function usePricedCart(drawer = false) {
       try {
         const { data } = await httpsCallable(functions, 'quoteCartDelivery')({ items: JSON.parse(key) });
         if (active) setQuote({ key, data });
-      } catch {
-        if (active) setQuote(null);
+      } catch (error) {
+        if (active) setQuote({ key, error: error?.code === 'functions/failed-precondition'
+          ? error.message : 'No pudimos verificar precio y existencias. Volvé a abrir el carrito.' });
       }
     }, 200);
     return () => { active = false; clearTimeout(timer); };
@@ -26,6 +27,7 @@ export function usePricedCart(drawer = false) {
   if (!quote || quote.key !== key) {
     return { ...cart, delivery: { ...cartDecantDelivery(cart.items, cart.subtotal), estimated: true } };
   }
+  if (quote.error) return { ...cart, delivery: { ...cartDecantDelivery(cart.items, cart.subtotal), error: quote.error } };
   const { subtotal, delivery, lines } = quote.data;
   // El servidor conserva el orden de las líneas de la solicitud identificada por key.
   const items = cart.items.map((item, index) => ({ ...item, ...lines[index] }));

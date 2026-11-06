@@ -20,7 +20,7 @@ async function cartTotals(items, options) {
 exports.quoteCartDelivery = onCall({ ...opts, maxInstances: 10 }, async req => {
   const totals = await cartTotals(req.data?.items, { previewDelivery: true });
   return { subtotal: totals.subtotal, delivery: totals.delivery,
-    lines: totals.lines.map(line => ({ price: line.unitPrice, supplyType: line.supplyType, productKind: line.productKind || "other" })) };
+    lines: totals.lines.map(line => ({ price: line.unitPrice, supplyType: line.supplyType, productKind: line.productKind || "other", maxQuantity: line.maxQuantity })) };
 });
 
 exports.validateDiscountCode = onCall(opts, async req => {

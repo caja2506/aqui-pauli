@@ -4,8 +4,8 @@ const { computeTotalsCRC } = require("../lib/pricing");
 
 function fixture(overrides = {}) {
   const store = {
-    "products/p1": { name: "Perfume real", active: true, basePrice: 80, images: ["https://images.example/product.jpg"] },
-    "products/p1/variants/v1": { name: "50 ml", active: true, price: "12.34", supplyType: "stock_propio", stock: 20, reservedStock: 2 },
+    "products/p1": { name: "Perfume real", active: true, basePrice: 8000, images: ["https://images.example/product.jpg"] },
+    "products/p1/variants/v1": { name: "50 ml", active: true, price: "1234.56", supplyType: "stock_propio", stock: 20, reservedStock: 2 },
     ...overrides,
   };
   const direct = []; const transactional = [];
@@ -26,14 +26,14 @@ const item = (extra = {}) => ({ productId: "p1", variantId: "v1", quantity: 3, .
 test("precio y fulfillment canónicos: ignora precios, nombres, imágenes y abastecimiento del cliente", async () => {
   const f = fixture();
   const r = await computeTotalsCRC(f.db, [item({ price: 0.01, lineTotal: 0.03, name: "Falso", productName: "Falso", variantName: "Otro", imageUrl: "https://evil.example/x", supplyType: "bajo_pedido" })], { canton: "Grecia", shippingType: "express" });
-  assert.equal(r.totalMinor, 3702);
-  assert.equal(r.subtotal, 37.02);
+  assert.equal(r.totalMinor, 370368);
+  assert.equal(r.subtotal, 3703.68);
   assert.equal(r.shippingCost, 0);
   assert.deepEqual(r.lines[0], {
     productId: "p1", variantId: "v1", quantity: 3,
     name: "Perfume real", productName: "Perfume real", variantName: "50 ml",
     imageUrl: "https://images.example/product.jpg", supplyType: "stock_propio",
-    unitPrice: 12.34, lineTotal: 37.02, unitPriceMinor: 1234, lineTotalMinor: 3702,
+    unitPrice: 1234.56, lineTotal: 3703.68, unitPriceMinor: 123456, lineTotalMinor: 370368,
   });
 });
 
@@ -73,13 +73,13 @@ test("rechaza variantes duplicadas, evitando subvalidar una reserva fragmentada"
 test("un precio ausente hereda catálogo base; cero o precio malformado nunca oculta un error", async () => {
   const f = fixture();
   delete f.store["products/p1/variants/v1"].price;
-  assert.equal((await computeTotalsCRC(f.db, [item({ quantity: 1 })], {})).total, 80);
+  assert.equal((await computeTotalsCRC(f.db, [item({ quantity: 1 })], {})).total, 8000);
   for (const price of [0, -1, "", "1e3", "1,000.00", "12.345", NaN, Infinity]) {
     const g = fixture();
     g.store["products/p1/variants/v1"].price = price;
     if (price === "") {
       // Empty is the documented absence case, matching a blank catalog form.
-      assert.equal((await computeTotalsCRC(g.db, [item({ quantity: 1 })], {})).total, 80);
+      assert.equal((await computeTotalsCRC(g.db, [item({ quantity: 1 })], {})).total, 8000);
     } else await assert.rejects(computeTotalsCRC(g.db, [item()], {}), /precio válido/);
   }
 });
@@ -109,7 +109,7 @@ test("reservedStock heredado no rompe cotización ni modifica catálogo", async 
     f.store["products/p1/variants/v1"].reservedStock = reservedStock;
     const before = structuredClone(f.store);
     const result = await computeTotalsCRC(f.db, [item()], {}, { transaction: f.transaction });
-    assert.equal(result.totalMinor, 3702);
+    assert.equal(result.totalMinor, 370368);
     assert.deepEqual(f.store, before);
     assert.equal(f.direct.length, 0);
   }
@@ -119,7 +119,7 @@ test("una cotización no consume stock ni descuenta de nuevo la reserva del pedi
   const f = fixture();
   Object.assign(f.store["products/p1/variants/v1"], { stock: 3, reservedStock: 3 });
   const before = structuredClone(f.store);
-  assert.equal((await computeTotalsCRC(f.db, [item()], {})).totalMinor, 3702);
+  assert.equal((await computeTotalsCRC(f.db, [item()], {})).totalMinor, 370368);
   assert.deepEqual(f.store, before);
 });
 

@@ -1,3 +1,4 @@
+import { minimumCatalogPrice } from './catalogSafety.mjs';
 // Precio público del catálogo, compartido por la tienda y el sorteo.
 // La disponibilidad determina si una variante se puede comprar, no su precio.
 function priceMinor(value) {
@@ -16,7 +17,7 @@ export function getVariantPrice(product, variant) {
   const raw = variant.price === undefined || variant.price === null || variant.price === ''
     ? product?.basePrice : variant.price;
   const minor = priceMinor(raw);
-  if (minor === null) return null;
+  if (minor === null || minor < BigInt(minimumCatalogPrice(product) * 100)) return null;
   const amount = Number(`${minor / 100n}.${String(minor % 100n).padStart(2, '0')}`);
   return priceMinor(amount) === minor ? amount : null;
 }

@@ -397,6 +397,7 @@ export default function CheckoutPage() {
 
       <h1 className="text-2xl font-black text-slate-900 tracking-tight mb-8">Checkout</h1>
 
+      {delivery.error && <p role="alert" className="mb-6 rounded-2xl bg-red-50 p-4 text-sm font-bold text-red-600">{delivery.error}</p>}
       {errors.submit && (
         <div className="mb-6 bg-red-50 border border-red-200 rounded-2xl p-4 text-sm text-red-600 font-bold">{errors.submit}</div>
       )}
@@ -690,7 +691,7 @@ export default function CheckoutPage() {
             ) : (
             <button
               type="submit"
-              disabled={submitting || delivery.belowMinimum}
+              disabled={submitting || delivery.belowMinimum || Boolean(delivery.error)}
               className="w-full py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
               {submitting ? 'Procesando...' : cashOnDeliverySelected ? 'Confirmar pedido contra entrega'

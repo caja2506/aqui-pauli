@@ -39,7 +39,7 @@ const realFiles = [
   'src/services/payments/paypalQuote.js', 'src/services/payments/tilopayQuote.js',
   'src/components/ui/StatusBadge.jsx', 'src/utils/shippingText.js',
   'src/utils/shippingDelivery.js', 'src/utils/productPrice.js', 'src/hooks/usePageTitle.js',
-  'functions/lib/catalogPrice.mjs',
+  'functions/lib/catalogPrice.mjs', 'functions/lib/catalogSafety.mjs',
   'functions/lib/giveawayPhone.mjs',
   'src/components/legal/LegalLayout.jsx',
 ];
@@ -1113,7 +1113,7 @@ test('el panel del carrito conserva su prioridad y al cerrarlo vuelve WhatsApp',
 test('la ficha conserva Agregar al Carrito, espacio inferior y WhatsApp visible', () => {
   for (const supplyType of ['stock_propio', 'bajo_pedido']) {
     const { html } = renderPage(PRODUCT, { withWhatsapp: true,
-      variant: { supplyType, commercialStatus: supplyType === 'bajo_pedido' ? 'bajo_pedido' : 'disponible' } });
+      variant: { stock: 1, reservedStock: 0, supplyType, commercialStatus: supplyType === 'bajo_pedido' ? 'bajo_pedido' : 'disponible' } });
     assertMobileVisible(html);
     contains(html, 'Versace Eros EDT 100 ml');
     const addButton = [...html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)]

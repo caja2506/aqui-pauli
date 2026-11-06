@@ -22,11 +22,11 @@ const PAGE = 'src/pages/store/ProductPage.jsx';
 const abs = name => path.join(root, name);
 const product = { id: 'tenis', name: 'Tenis de prueba', basePrice: 138500, images: [] };
 const variant = (id, price, extra = {}) => ({ id, name: id, price,
-  active: true, commercialStatus: 'disponible', supplyType: 'stock_propio', ...extra });
+  stock: 10, reservedStock: 0, active: true, commercialStatus: 'disponible', supplyType: 'stock_propio', ...extra });
 const options = [variant('Negro 35', 100000), variant('Rojo 34', 119000)];
 const compiled = new Map(await Promise.all([
   'src/utils/pixel.js', 'functions/lib/catalogId.mjs',
-  CARD, PAGE, 'src/components/legal/LegalLayout.jsx', 'functions/lib/decantSale.mjs', 'src/utils/productPrice.js', 'functions/lib/catalogPrice.mjs', 'src/utils/constants.js',
+  CARD, PAGE, 'src/components/legal/LegalLayout.jsx', 'functions/lib/decantSale.mjs', 'src/utils/productPrice.js', 'functions/lib/catalogPrice.mjs', 'functions/lib/catalogSafety.mjs', 'src/utils/constants.js',
   'src/utils/formatters.js', 'src/utils/backorder.js', 'src/utils/shippingText.js',
   'src/components/ui/StatusBadge.jsx', 'src/components/ui/LoadingSpinner.jsx',
 ].map(async relative => {
@@ -153,6 +153,7 @@ test('la validación monetaria de presentación coincide con la del servidor', (
     let expected = null;
     try { expected = minorToCRC(parseMinorCRC(raw === null || raw === undefined || raw === '' ? product.basePrice : raw)); }
     catch { /* Invalid catalog amounts must not appear as purchasable prices. */ }
+    if (expected !== null && expected < 1000) expected = null;
     assert.equal(getVariantPrice(product, { price: raw }), expected, `Parity for ${String(raw)}`);
   }
 });
