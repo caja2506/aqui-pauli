@@ -1,0 +1,241 @@
+name: Activate Tilopay live once
+
+on:
+  push:
+    branches:
+      - ops/enable-tilopay-live-20261106
+    paths:
+      - .github/workflows/activate-tilopay-live-once.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: activate-tilopay-live-aqui-pauli
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    if: >-
+      github.repository == 'caja2506/aqui-pauli' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/ops/enable-tilopay-live-20261106' &&
+      github.event.deleted == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the operation revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Install the locked Admin SDK before loading credentials
+        run: npm ci --prefix functions --ignore-scripts --no-audit --no-fund
+
+      - name: Prepare the existing CI application default credentials
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_AQUI_PAULI }}
+        run: |
+          node <<'NODE'
+          const { chmodSync, writeFileSync } = require('node:fs');
+          const { join } = require('node:path');
+
+          try {
+            const account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || 'null');
+            if (account?.type !== 'service_account' || account.project_id !== 'aqui-pauli'
+                || typeof account.client_email !== 'string' || !account.client_email.trim()
+                || typeof account.private_key !== 'string' || !account.private_key.trim()
+                || !process.env.RUNNER_TEMP) {
+              throw new Error('Invalid credential configuration');
+            }
+            const path = join(process.env.RUNNER_TEMP, 'aqui-pauli-tilopay-live-op.json');
+            writeFileSync(path, JSON.stringify(account), { mode: 0o600, flag: 'wx' });
+            chmodSync(path, 0o600);
+            console.log('Autenticación del CI preparada para aqui-pauli.');
+          } catch {
+            console.error('::error::No se pudo preparar la credencial existente del CI para aqui-pauli. No se modificó Firestore.');
+            process.exitCode = 1;
+          }
+          NODE
+
+      - name: Activate only the public live flags and verify without a payment
+        working-directory: functions
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/aqui-pauli-tilopay-live-op.json
+        run: |
+          node <<'NODE'
+          const { initializeApp, applicationDefault, deleteApp } = require('firebase-admin/app');
+          const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+
+          const PROJECT = 'aqui-pauli';
+          const MERCHANT = '88802749';
+          const PREFIX = 'PFC031932';
+          const CONFIG_URL = 'https://us-central1-aqui-pauli.cloudfunctions.net/tilopayGetConfig';
+          const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+          const isMap = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+          const isLivePublic = value => isMap(value) && value.enabled === true && value.mode === 'live'
+            && value.merchantId === MERCHANT && value.orderPrefix === PREFIX && !has(value, 'access');
+
+          class SafeError extends Error {}
+
+          function validate(snapshot) {
+            if (!snapshot.exists || !snapshot.updateTime) {
+              throw new SafeError('Falta config/payments o su versión. No se creó ningún documento.');
+            }
+            const settings = snapshot.data()?.tilopay;
+            if (!isMap(settings) || typeof settings.enabled !== 'boolean'
+                || !['test', 'live'].includes(settings.mode)) {
+              throw new SafeError('La configuración actual de Tilopay tiene un tipo o modo inesperado.');
+            }
+            if (settings.merchantId !== MERCHANT || settings.orderPrefix !== PREFIX) {
+              throw new SafeError('La identidad del comercio no coincide exactamente con la autorizada.');
+            }
+            if (has(settings, 'access') && (settings.access !== 'private-pilot' || settings.mode !== 'live')) {
+              throw new SafeError('El acceso actual de Tilopay es inesperado. No se modificó.');
+            }
+            return settings;
+          }
+
+          function summary(settings) {
+            return {
+              enabled: settings.enabled,
+              mode: settings.mode,
+              merchantId: settings.merchantId,
+              orderPrefix: settings.orderPrefix,
+              access: has(settings, 'access') ? settings.access : 'absent',
+            };
+          }
+
+          function safeFailure(error) {
+            if (error instanceof SafeError) return error.message;
+            if (error?.code === 7 || error?.code === 'permission-denied') {
+              return 'La cuenta del CI no tiene los permisos necesarios de Firestore. No se cambiaron permisos IAM.';
+            }
+            if (error?.code === 9 || error?.code === 'failed-precondition') {
+              return 'Cambió la versión del documento o no se cumplió una precondición. No se sobrescribió ese estado.';
+            }
+            return 'La operación no pudo completarse. Se omitieron los detalles técnicos para proteger las credenciales.';
+          }
+
+          async function verifyPublicConfig() {
+            for (let attempt = 1; attempt <= 3; attempt += 1) {
+              try {
+                const response = await fetch(CONFIG_URL, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ data: {} }),
+                  redirect: 'error',
+                  signal: AbortSignal.timeout(10000),
+                });
+                if (response.ok) {
+                  const payload = await response.json();
+                  if (payload?.result?.enabled === true && payload.result.mode === 'live') {
+                    console.log('Configuración pública verificada: ' + JSON.stringify({ enabled: true, mode: 'live' }));
+                    return;
+                  }
+                } else {
+                  await response.body?.cancel();
+                }
+              } catch {
+                // Never print an external response, credential, token, or error object.
+              }
+              console.log(`Verificación pública pendiente (${attempt}/3).`);
+              if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            }
+            throw new SafeError('La función pública no confirmó enabled=true y mode=live sin sesión ni invitación.');
+          }
+
+          async function main() {
+            let app;
+            let db;
+            let ref;
+            let beforeFlags;
+            let writeTime;
+
+            try {
+              if (process.env.FIRESTORE_EMULATOR_HOST || process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+                throw new SafeError('Se detectó configuración de emulador. Operación cancelada.');
+              }
+              app = initializeApp({ projectId: PROJECT, credential: applicationDefault() });
+              db = getFirestore(app);
+              ref = db.doc('config/payments');
+
+              const before = await ref.get();
+              const current = validate(before);
+              beforeFlags = {
+                enabled: current.enabled,
+                mode: current.mode,
+                hasAccess: has(current, 'access'),
+                access: current.access,
+              };
+              console.log('Configuración previa: ' + JSON.stringify(summary(current)));
+
+              if (isLivePublic(current)) {
+                console.log('Tilopay ya está público en live. No se escribió en Firestore.');
+              } else {
+                // Optimistic transaction: the update succeeds only for the version validated above.
+                // WriteResult.writeTime identifies our exact write for a conditional rollback.
+                const result = await ref.update({
+                  'tilopay.enabled': true,
+                  'tilopay.mode': 'live',
+                  'tilopay.access': FieldValue.delete(),
+                }, { lastUpdateTime: before.updateTime });
+                writeTime = result.writeTime;
+                console.log('Actualizados únicamente enabled, mode y access; identidad y demás campos conservados.');
+              }
+
+              const after = validate(await ref.get());
+              if (!isLivePublic(after)) {
+                throw new SafeError('La lectura posterior no confirma la configuración pública esperada.');
+              }
+              console.log('Configuración posterior: ' + JSON.stringify(summary(after)));
+              await verifyPublicConfig();
+
+              const final = validate(await ref.get());
+              if (!isLivePublic(final)) {
+                throw new SafeError('La configuración cambió durante la verificación pública.');
+              }
+              console.log('Activación confirmada. No se desplegó código ni se crearon pedidos o pagos.');
+            } catch (error) {
+              console.error('::error::' + safeFailure(error));
+              if (writeTime && ref && beforeFlags) {
+                try {
+                  const latest = await ref.get();
+                  if (latest.exists && latest.updateTime?.isEqual(writeTime)
+                      && isLivePublic(latest.data()?.tilopay)) {
+                    await ref.update({
+                      'tilopay.enabled': beforeFlags.enabled,
+                      'tilopay.mode': beforeFlags.mode,
+                      'tilopay.access': beforeFlags.hasAccess ? beforeFlags.access : FieldValue.delete(),
+                    }, { lastUpdateTime: writeTime });
+                    console.log('Revertidos únicamente los flags de esta operación a su estado anterior.');
+                  } else {
+                    console.warn('::warning::No se revirtió: otro proceso cambió el documento. Revisar los flags actuales antes de continuar.');
+                  }
+                } catch {
+                  console.warn('::warning::No se pudo confirmar la reversión. Revisar config/payments; no se forzó ninguna escritura.');
+                }
+              } else {
+                console.log('Esta ejecución no confirmó una escritura propia; no se intentó una reversión.');
+              }
+              process.exitCode = 1;
+            } finally {
+              if (db) await db.terminate().catch(() => {});
+              if (app) await deleteApp(app).catch(() => {});
+            }
+          }
+
+          main().catch(() => {
+            console.error('::error::Error inesperado al finalizar la operación. Revisar config/payments.');
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Remove the temporary credentials
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/aqui-pauli-tilopay-live-op.json"
