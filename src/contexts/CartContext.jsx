@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { getCatalogId } from '../../functions/lib/catalogId.mjs';
 import { isSaleDecant } from '../../functions/lib/decantSale.mjs';
+import { availableQuantity, maximumProductQuantity } from '../../functions/lib/catalogSafety.mjs';
 import { pilotStorageKey } from '../services/payments/tilopayPilot';
 
 const CartContext = createContext(null);
@@ -51,7 +52,13 @@ export function CartProvider({ children }) {
   }, []);
 
   const addItem = useCallback((product, variant, quantity = 1) => {
+    const available = availableQuantity(product, variant);
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || available < 1) return;
     setItems(prev => {
+      const elsewhere = prev.filter(i => i.productId === product.id && i.variantId !== variant.id)
+        .reduce((sum, i) => sum + i.quantity, 0);
+      const maxQuantity = Math.min(available, maximumProductQuantity(product) - elsewhere);
+      if (maxQuantity < 1) return prev;
       const existingIndex = prev.findIndex(
         i => i.productId === product.id && i.variantId === variant.id
       );
@@ -61,7 +68,8 @@ export function CartProvider({ children }) {
         updated[existingIndex] = {
           ...updated[existingIndex],
           catalogId: getCatalogId(product.id, variant),
-          quantity: updated[existingIndex].quantity + quantity,
+          quantity: Math.min(maxQuantity, updated[existingIndex].quantity + quantity),
+          maxQuantity,
         };
         return updated;
       }
@@ -75,7 +83,8 @@ export function CartProvider({ children }) {
         variantName: variant.name,
         imageUrl: variant.imageUrl || (product.images && product.images[0]) || '',
         price: variant.price,
-        quantity,
+        quantity: Math.min(quantity, maxQuantity),
+        maxQuantity,
         supplyType: variant.supplyType || 'stock_propio',
         commercialStatus: variant.commercialStatus || 'disponible',
         addedAt: new Date().toISOString(),
@@ -90,13 +99,14 @@ export function CartProvider({ children }) {
   }, []);
 
   const updateQuantity = useCallback((productId, variantId, quantity) => {
+    if (!Number.isSafeInteger(quantity)) return;
     if (quantity <= 0) {
       removeItem(productId, variantId);
       return;
     }
     setItems(prev => prev.map(i =>
       i.productId === productId && i.variantId === variantId
-        ? { ...i, quantity }
+        ? { ...i, quantity: Math.min(quantity, i.maxQuantity ?? 99) }
         : i
     ));
   }, [removeItem]);

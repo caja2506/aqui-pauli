@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { doc, onSnapshot, collection, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { ShoppingCart, ArrowLeft, Check, MessageCircle, Package, Truck } from 'lucide-react';
 import { formatCRC } from '../../utils/formatters';
@@ -43,7 +43,7 @@ function ProductDetails({ productId }) {
       if (active) setProduct(snap.exists() ? { id: snap.id, ...snap.data() } : null);
     });
 
-    getDocs(collection(db, 'products', productId, 'variants')).then((snap) => {
+    const unsubVariants = onSnapshot(collection(db, 'products', productId, 'variants'), (snap) => {
       if (!active) return;
       const vars = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
@@ -51,16 +51,16 @@ function ProductDetails({ productId }) {
         .sort((a, b) => (a.order || 0) - (b.order || 0));
       setVariants(vars);
       // Si solo hay 1 variante, auto-seleccionar; si hay más, el usuario debe elegir
-      if (vars.length === 1) setSelectedVariant(vars[0]);
+      setSelectedVariant(current => vars.find(v => v.id === current?.id) || (vars.length === 1 ? vars[0] : null));
       setLoading(false);
-    }).catch((err) => {
+    }, (err) => {
       if (!active) return;
       console.warn('No se pudieron cargar las variantes:', err);
       setVariantError(true);
       setLoading(false);
     });
 
-    return () => { active = false; unsub(); };
+    return () => { active = false; unsub(); unsubVariants(); };
   }, [productId]);
 
   const viewed = useRef(false);
@@ -213,13 +213,17 @@ function ProductDetails({ productId }) {
           {/* Status Info */}
           {selectedVariant && (
             <div className="flex items-center gap-3">
-              <StatusBadge status={selectedVariant.commercialStatus} type="commercial" />
+              <StatusBadge status={isPurchasableVariant(selectedVariant, product) ? selectedVariant.commercialStatus : 'agotado'} type="commercial" />
               {selectedVariant.supplyType === 'bajo_pedido' && (
                 <span className="text-xs text-amber-600 font-bold flex items-center gap-1">
                   <Package className="w-3.5 h-3.5" /> Se aparta con el {BACKORDER_DEPOSIT_LABEL} de este producto
                 </span>
               )}
             </div>
+          )}
+
+          {!variantError && variants.length > 0 && !hasPurchasableOption && (
+            <p role="status" className="rounded-xl bg-slate-100 p-4 text-sm font-bold text-slate-600">Agotado por el momento</p>
           )}
 
           {/* Un solo control de compra: fijo abajo en móvil y dentro de la ficha en escritorio. */}

@@ -5,7 +5,7 @@ import { formatCRC } from '../../utils/formatters';
 import { normalizeCommercialStatus } from '../../utils/constants';
 import { getVariantPrice, getProductPriceSummary, isActiveVariant, isPurchasableVariant } from '../../utils/productPrice';
 import StatusBadge from '../ui/StatusBadge';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 // Fotos locales publicadas junto con el catálogo inicial de decants. El admin
@@ -34,7 +34,7 @@ function ProductCardDetails({ product }) {
 
   useEffect(() => {
     let active = true;
-    getDocs(collection(db, 'products', product.id, 'variants')).then((snap) => {
+    const unsubscribe = onSnapshot(collection(db, 'products', product.id, 'variants'), (snap) => {
       if (!active) return;
       const vars = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
@@ -42,12 +42,12 @@ function ProductCardDetails({ product }) {
         .sort((a, b) => (a.order || 0) - (b.order || 0));
       setVariants(vars);
       setLoadingVariant(false);
-    }).catch(() => {
+    }, () => {
       if (!active) return;
       setVariantError(true);
       setLoadingVariant(false);
     });
-    return () => { active = false; };
+    return () => { active = false; unsubscribe(); };
   }, [product.id]);
 
   const { price, isFrom, mainVariant } = getProductPriceSummary(product, variants);
@@ -60,7 +60,7 @@ function ProductCardDetails({ product }) {
     .find(url => url && !failedImages.includes(url));
   const purchasableVariant = variants.find(variant => isPurchasableVariant(variant, product)
     && getVariantPrice(product, variant) !== null);
-  const commercialStatus = normalizeCommercialStatus((purchasableVariant || mainVariant || variants[0])?.commercialStatus);
+  const commercialStatus = purchasableVariant ? normalizeCommercialStatus(purchasableVariant.commercialStatus) : 'agotado';
   const canBuy = Boolean(purchasableVariant) && !variantError;
 
   const handleViewOptions = (e) => {

@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import React from 'react';
 import * as catalogIds from '../functions/lib/catalogId.mjs';
+import * as catalogSafety from '../functions/lib/catalogSafety.mjs';
 import * as decantSale from '../functions/lib/decantSale.mjs';
 import * as pilot from '../src/services/payments/tilopayPilot.js';
 import { transformWithEsbuild } from 'vite';
@@ -37,7 +38,7 @@ function mount(initial = [line]) {
   const window = { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) };
   const module = { exports: {} };
   new Function('require', 'module', 'exports', 'localStorage', 'window', code)(
-    name => name === 'react' ? react : name.endsWith('/tilopayPilot') ? pilot : name.endsWith('/decantSale.mjs') ? decantSale : name.endsWith('/catalogId.mjs') ? catalogIds : require(name), module, module.exports, localStorage, window);
+    name => name === 'react' ? react : name.endsWith('/tilopayPilot') ? pilot : name.endsWith('/catalogSafety.mjs') ? catalogSafety : name.endsWith('/decantSale.mjs') ? decantSale : name.endsWith('/catalogId.mjs') ? catalogIds : require(name), module, module.exports, localStorage, window);
   const render = () => {
     cursor = 0; effects = [];
     const value = module.exports.CartProvider({ children: null }).props.value;
@@ -55,7 +56,7 @@ function mount(initial = [line]) {
 
 test('contador y líneas del mismo carrito cambian juntos al agregar, editar y quitar', () => {
   const app = mount(); let cart = app.render();
-  cart.addItem({ id: line.productId }, { id: line.variantId }, 2);
+  cart.addItem({ id: line.productId }, { id: line.variantId, stock: 10 }, 2);
   cart = app.render();
   assert.equal(cart.items.length, 1); assert.equal(cart.items[0].quantity, 3);
   assert.equal(cart.itemCount, 3); assert.equal(cart.subtotal, 3000);

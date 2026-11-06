@@ -48,7 +48,7 @@ export default function CartPage() {
                     <div className="flex items-center rounded-xl border border-slate-200">
                       <button type="button" aria-label={`Reducir cantidad de ${item.productName}, ${item.variantName}`} onClick={() => updateQuantity(item.productId, item.variantId, item.quantity - 1)} className="w-11 h-11 flex items-center justify-center hover:bg-slate-50 rounded-l-xl"><Minus className="w-4 h-4" /></button>
                       <span className="w-9 text-center font-bold text-slate-700" aria-label={`Cantidad de ${item.productName}`}>{item.quantity}</span>
-                      <button type="button" aria-label={`Aumentar cantidad de ${item.productName}, ${item.variantName}`} onClick={() => updateQuantity(item.productId, item.variantId, item.quantity + 1)} className="w-11 h-11 flex items-center justify-center hover:bg-slate-50 rounded-r-xl"><Plus className="w-4 h-4" /></button>
+                      <button type="button" aria-label={`Aumentar cantidad de ${item.productName}, ${item.variantName}`} disabled={item.quantity >= (item.maxQuantity ?? 99)} onClick={() => updateQuantity(item.productId, item.variantId, item.quantity + 1)} className="w-11 h-11 flex items-center justify-center hover:bg-slate-50 rounded-r-xl"><Plus className="w-4 h-4" /></button>
                     </div>
                     <p className="font-black text-rose-600" aria-label={`Total de ${item.productName}`}>{formatCRC(item.price * item.quantity)}</p>
                     <button type="button" aria-label={`Quitar ${item.productName}, ${item.variantName} del carrito`} onClick={() => removeItem(item.productId, item.variantId)} className="inline-flex items-center gap-1 min-h-11 px-2 text-sm font-bold text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /> Quitar</button>
@@ -70,7 +70,8 @@ export default function CartPage() {
               </dl>
               {summary.hasBackorder && <p className="text-xs text-slate-600 leading-relaxed mt-4">Pagás el {BACKORDER_DEPOSIT_LABEL} de las líneas Bajo pedido y el importe completo de los productos en stock. El saldo se paga cuando el pedido esté listo para entregarse.</p>}
               <DecantDeliveryNotice delivery={delivery} />
-              {!delivery.belowMinimum && <Link to="/checkout" className="mt-6 w-full inline-flex items-center justify-center gap-2 py-4 px-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl text-sm transition-all">Continuar al checkout <ArrowRight className="w-4 h-4" /></Link>}
+              {delivery.error && <p role="alert" className="mt-3 text-sm font-bold text-red-600">{delivery.error}</p>}
+              {!delivery.belowMinimum && !delivery.error && <Link to="/checkout" className="mt-6 w-full inline-flex items-center justify-center gap-2 py-4 px-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl text-sm transition-all">Continuar al checkout <ArrowRight className="w-4 h-4" /></Link>}
               <p className="text-xs text-slate-500 mt-3">En el siguiente paso completás el envío y elegís cómo pagar.</p>
             </section>
           </div>

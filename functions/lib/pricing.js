@@ -3,6 +3,7 @@
 const { parseMinorCRC, minorToCRC } = require("./paymentMoney");
 const { normalizeInventoryStock } = require("./inventoryStock");
 const { isSaleDecant, decantDelivery, MINIMUM_MESSAGE } = require("./decantSale.mjs");
+const { minimumCatalogPrice, maximumProductQuantity, isFullPerfume, availableQuantity } = require("./catalogSafety.mjs");
 
 const GAM_CANTONES = [
   "San José", "Escazú", "Desamparados", "Goicoechea", "Alajuelita",
@@ -71,6 +72,7 @@ async function computeTotalsCRC(db, items, ship, { transaction, previewDelivery 
   }
 
   const lines = [];
+  const productQuantities = new Map();
   let subtotalMinor = 0;
   let onlyDecants = true;
   for (const [lineIndex, item] of items.entries()) {
@@ -86,9 +88,20 @@ async function computeTotalsCRC(db, items, ship, { transaction, previewDelivery 
     }
 
     const decant = isSaleDecant(product);
+    const productQuantity = (productQuantities.get(item.productId) || 0) + item.quantity;
+    productQuantities.set(item.productId, productQuantity);
+    if (productQuantity > maximumProductQuantity(product)) {
+      throw new PricingError("CATALOG_QUANTITY_LIMIT", "Por el momento solo podés comprar una unidad de cada colonia.", lineIndex);
+    }
     if (!decant) onlyDecants = false;
     const supplyType = variant.supplyType ?? product.supplyType ?? "stock_propio";
     if (!["stock_propio", "bajo_pedido"].includes(supplyType)) throw new PricingError("CATALOG_SUPPLY_INVALID", "Abastecimiento del catálogo inválido", lineIndex);
+    if (isFullPerfume(product) && supplyType !== "stock_propio") {
+      throw new PricingError("CATALOG_UNAVAILABLE", "Esta colonia no está disponible. No se aceptan pedidos sin existencias.", lineIndex);
+    }
+    if (!["disponible", "bajo_pedido"].includes(variant.commercialStatus ?? "disponible")) {
+      throw new PricingError("CATALOG_UNAVAILABLE", "Este producto no está disponible.", lineIndex);
+    }
     if (decant && (supplyType !== "stock_propio" || (variant.commercialStatus ?? "disponible") !== "disponible")) {
       throw new PricingError("CATALOG_UNAVAILABLE", "Este tamaño de decant no está disponible para entrega inmediata.", lineIndex);
     }
@@ -107,6 +120,12 @@ async function computeTotalsCRC(db, items, ship, { transaction, previewDelivery 
     let unitPriceMinor;
     try { unitPriceMinor = parseMinorCRC(rawPrice); }
     catch { throw new PricingError("CATALOG_PRICE_INVALID", `Producto sin precio válido: ${catalogText(product.name) || item.productId}`, lineIndex); }
+    if (unitPriceMinor < minimumCatalogPrice(product) * 100) {
+      throw new PricingError("CATALOG_PRICE_INVALID", `Precio pendiente de revisión: ${catalogText(product.name) || item.productId}`, lineIndex);
+    }
+    if (previewDelivery && availableQuantity(product, variant) < item.quantity) {
+      throw new PricingError("CATALOG_UNAVAILABLE", `Sin existencias suficientes: ${catalogText(product.name) || item.productId}`, lineIndex);
+    }
     const lineTotalMinor = safeInteger(unitPriceMinor * item.quantity, "Total de línea");
     subtotalMinor = safeInteger(subtotalMinor + lineTotalMinor, "Subtotal");
     const productName = catalogText(product.name);
@@ -119,6 +138,7 @@ async function computeTotalsCRC(db, items, ship, { transaction, previewDelivery 
       name: productName, productName, variantName, imageUrl, supplyType,
       unitPrice: minorToCRC(unitPriceMinor), lineTotal: minorToCRC(lineTotalMinor),
       unitPriceMinor, lineTotalMinor,
+      ...(previewDelivery && { maxQuantity: availableQuantity(product, variant) }),
     });
   }
 

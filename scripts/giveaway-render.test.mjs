@@ -28,11 +28,13 @@ const CONFIG = 'functions/lib/giveawayConfig.json';
 const POLICY = 'functions/lib/giveawayCatalog.mjs';
 const PHONE_POLICY = 'functions/lib/giveawayPhone.mjs';
 const PAGE_TITLE = 'src/hooks/usePageTitle.js';
+const CATALOG_SAFETY = 'functions/lib/catalogSafety.mjs';
+const DECANT_SALE = 'functions/lib/decantSale.mjs';
 const CATALOG_PRICE = 'functions/lib/catalogPrice.mjs';
 const files = [
   'src/utils/pixel.js', 'functions/lib/catalogId.mjs',
   SERVICE, HOOK, BANNER, PAGE, BASES, LOGIN, HOME, CATALOG, ADMIN, APP, SIDEBAR,
-  POLICY, PHONE_POLICY, CATALOG_PRICE, 'src/utils/storeCategories.js', 'src/utils/giveawayExport.js', 'src/utils/formatters.js',
+  POLICY, PHONE_POLICY, CATALOG_PRICE, CATALOG_SAFETY, DECANT_SALE, 'src/utils/storeCategories.js', 'src/utils/giveawayExport.js', 'src/utils/formatters.js',
   'src/components/legal/LegalLayout.jsx', 'src/components/auth/FacebookIcon.jsx', PAGE_TITLE];
 const config = JSON.parse(await readFile(path.join(root, CONFIG), 'utf8'));
 const compiled = new Map(await Promise.all(files.map(async (relative) => {

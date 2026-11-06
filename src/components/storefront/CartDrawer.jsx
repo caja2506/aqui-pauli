@@ -118,7 +118,7 @@ export default function CartDrawer() {
                     <button
                       type="button"
                       aria-label={`Aumentar cantidad de ${item.productName}, ${item.variantName}`}
-                      onClick={() => updateQuantity(item.productId, item.variantId, item.quantity + 1)}
+                      disabled={item.quantity >= (item.maxQuantity ?? 99)} onClick={() => updateQuantity(item.productId, item.variantId, item.quantity + 1)}
                       className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center hover:bg-slate-100 transition-all"
                     >
                       <Plus className="w-3 h-3" />
@@ -145,6 +145,7 @@ export default function CartDrawer() {
             </div>
             <p className="text-sm text-slate-600">{delivery.shippingCost ? `Envío: ${formatCRC(delivery.shippingCost)} · Total: ${formatCRC(subtotal + delivery.shippingCost)}` : 'Envío incluido a todo el país'}</p>
             <DecantDeliveryNotice delivery={delivery} />
+              {delivery.error && <p role="alert" className="mt-3 text-sm font-bold text-red-600">{delivery.error}</p>}
             <Link
               to="/carrito"
               onClick={() => setIsCartOpen(false)}
@@ -152,7 +153,7 @@ export default function CartDrawer() {
             >
               Ver carrito completo
             </Link>
-            {!delivery.belowMinimum && <Link
+            {!delivery.belowMinimum && !delivery.error && <Link
               to="/checkout"
               onClick={() => setIsCartOpen(false)}
               className="w-full flex items-center justify-center gap-2 py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 text-sm"
