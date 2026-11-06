@@ -15,6 +15,7 @@ import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import { getVariantPrice, getProductPriceSummary, isActiveVariant, isPurchasableVariant } from '../../utils/productPrice';
 import { track, productEvent } from '../../utils/pixel';
 import usePageTitle from '../../hooks/usePageTitle';
+import { isFullPerfume } from '../../../functions/lib/catalogSafety.mjs';
 
 export default function ProductPage() {
   const { productId } = useParams();
@@ -108,13 +109,13 @@ function ProductDetails({ productId }) {
   const productLink = `https://${CONTACT.site}/producto/${encodeURIComponent(productId)}`;
   const description = [product.name, selectedVariant?.name, currentPrice === null ? 'precio por confirmar' : formatCRC(currentPrice)]
     .filter(Boolean).join(' - ');
-  const message = `Hola, quiero comprar: ${description}. ${productLink}`;
+  const message = `Hola, quiero ${hasPurchasableOption ? 'comprar' : 'consultar disponibilidad de'}: ${description}. ${productLink}`;
   const whatsAppButton = (
     <a href={`${CONTACT.whatsappUrl}?text=${encodeURIComponent(message)}`}
       target="_blank" rel="noopener noreferrer"
       className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#25D366] px-4 py-3 text-sm font-black text-slate-950 hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-800">
       <MessageCircle className="h-5 w-5" aria-hidden="true" />
-      Comprar por WhatsApp
+      {hasPurchasableOption ? 'Comprar por WhatsApp' : 'Consultar disponibilidad'}
     </a>
   );
   const chooseVariant = () => {
@@ -160,7 +161,9 @@ function ProductDetails({ productId }) {
           <div>
             <h1 className="text-[22px] max-md:leading-tight md:text-3xl font-black text-slate-900 tracking-tight">{product.name}</h1>
             {product.description && (
-              <p className="text-sm text-slate-500 mt-3 leading-relaxed">{cleanShippingPromise(product.description)}</p>
+              <p className="text-sm text-slate-500 mt-3 leading-relaxed">{isFullPerfume(product) && /bajo pedido/i.test(product.description)
+                  ? 'Disponible únicamente con existencias. No se aceptan pedidos de colonias agotadas.'
+                  : cleanShippingPromise(product.description)}</p>
             )}
           </div>
 

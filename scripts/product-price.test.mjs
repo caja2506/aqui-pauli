@@ -331,9 +331,9 @@ test('los controles de cantidad tienen etiquetas y no permiten bajar de una unid
   assert.equal(page.stateUpdates.at(-1).value, 2);
 });
 
-function whatsAppPurchaseUrl(html) {
+function whatsAppPurchaseUrl(html, label = 'Comprar por WhatsApp') {
   const links = [...html.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)]
-    .map(([tag]) => tag).filter(tag => tag.includes('Comprar por WhatsApp'));
+    .map(([tag]) => tag).filter(tag => tag.includes(label));
   assert.equal(links.length, 1);
   return new URL(links[0].match(/href="([^"]+)"/)[1]);
 }
@@ -354,7 +354,7 @@ test('WhatsApp usa el precio de la ficha, la variante elegida y el enlace públi
   assert.doesNotMatch(render(PAGE, { variants: [backorder], selected: backorder }).text, /coordinar el pago contra entrega/);
   assert.match(render(PAGE, { variants: sizes, selected: sizes[1] }).text, /coordinar el pago contra entrega/);
   const noPrice = render(PAGE, { variants: [], error: true });
-  assert.match(whatsAppPurchaseUrl(noPrice.html).searchParams.get('text'), / - precio por confirmar\. /);
+  assert.match(whatsAppPurchaseUrl(noPrice.html, 'Consultar disponibilidad').searchParams.get('text'), / - precio por confirmar\. /);
 });
 
 test('la barra no habilita compra para una consulta fallida o sin variantes comprables', () => {
@@ -395,4 +395,14 @@ test('destacados y catálogo usan las fotos configuradas y recuperan una imagen 
     assert.ok(render(CARD, { item: decant, failedImages }).html.includes('src="' + expected + '"'));
   }
   assert.ok(render(CARD, { item: { ...decant, images: [] } }).html.includes('src="' + backup + '"'));
+});
+
+
+test('colonia agotada no ofrece compra por WhatsApp ni promesas antiguas Bajo pedido', () => {
+  const item = { ...product, productKind: 'perfume', description: 'Bajo pedido · Se aparta con 50% de adelanto' };
+  const sold = variant('100 ml', 47000, { stock: 0 });
+  const page = render(PAGE, { item, variants: [sold], selected: sold });
+  assert.match(page.text, /Agotado por el momento/);
+  assert.doesNotMatch(page.text, /Comprar por WhatsApp|Bajo pedido|50%/);
+  assert.match(whatsAppPurchaseUrl(page.html, 'Consultar disponibilidad').searchParams.get('text'), /consultar disponibilidad de/);
 });
