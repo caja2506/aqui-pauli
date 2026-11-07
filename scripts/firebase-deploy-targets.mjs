@@ -37,7 +37,7 @@ function withoutGiveawayExport(source) {
 export function firebaseDeployTargets(changedPaths, indexBefore = '', indexAfter = '') {
   const catalogFiles = ['functions/lib/catalogId.mjs', 'functions/lib/metaFeed.js', 'functions/test/metaFeed.test.js'];
   const backendPaths = changedPaths.filter(path => path.startsWith('functions/') || path === 'firestore.rules');
-  const pricingFiles = ['functions/adminPricing.js', 'functions/lib/supplierPricing.js', 'functions/test/supplierPricing.test.js'];
+  const pricingFiles = ['functions/adminPricing.js', 'functions/lib/supplierPricing.js', 'functions/lib/externalPriceReferences.json', 'functions/test/supplierPricing.test.js'];
   const withoutPricingExport = source => source.replace(/^  \.\.\.require\("\.\/adminPricing"\),\r?\n/gm, '');
   const isolatedPricingIndex = !changedPaths.includes('functions/index.js')
     || (indexBefore && indexAfter && withoutPricingExport(indexBefore) === withoutPricingExport(indexAfter));

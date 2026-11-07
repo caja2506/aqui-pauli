@@ -49,6 +49,15 @@ export function supplierPrice(product, payment) {
   return number(payment === 'card' ? product.cardCRC : product.cashCRC, 'el precio mayorista', { min: 0.01 });
 }
 
+// Accept a copied shop price or a decimal comma from a Spanish mobile keyboard.
+export function parsePurchaseAmount(value, currency) {
+  if (typeof value !== 'string' || !value.trim()) return value;
+  const amount = value.trim().replace(currency === 'USD' ? /^(?:US\$|USD\s*\$?|\$)\s*/i : /^(?:CRC|₡)\s*/i, '');
+  if (/^\d+(?:[.,]\d{1,2})?$/.test(amount)) return Number(amount.replace(',', '.'));
+  if (/^\d{1,3}(?:,\d{3})+\.\d{2}$/.test(amount)) return Number(amount.replaceAll(',', ''));
+  return NaN;
+}
+
 export function calculateSellingPrice(input, settings) {
   const { markupPercent, roundingStep } = validatePricingSettings(settings);
   if (!['CRC', 'USD'].includes(input.currency)) throw new Error('Seleccioná colones o dólares.');

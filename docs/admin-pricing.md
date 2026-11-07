@@ -22,7 +22,7 @@ Los archivos del proveedor y sus precios no se incluyen en el repositorio públi
 
 ## Enlaces internacionales
 
-La consulta usa páginas HTTPS públicas de Jomashop, FragranceNet y FragranceX. Lee únicamente precios exactos de ofertas de productos en JSON-LD, conserva moneda y presentación, y exige seleccionar el precio antes de usarlo. No convierte un rango ni una cuota en precio final. No inicia sesiones ni intenta eludir bloqueos; ante un error o falta de datos se ingresa el precio manualmente.
+La consulta usa páginas HTTPS públicas de Jomashop, FragranceNet y FragranceX. Lee ofertas exactas en JSON-LD. Para FragranceNet también lee el precio regular y el precio con cupón de cada presentación disponible. El administrador elige cuál aplicar. No convierte un rango ni una cuota en precio final. No inicia sesiones ni intenta eludir bloqueos; si FragranceNet rechaza temporalmente la consulta, se puede elegir una referencia fechada para el mismo enlace durante las 24 horas posteriores a su lectura. El campo de compra también acepta precios copiados como $104.51 o 104,51.
 
 Amazon acepta enlace y precio manual. No hay una integración de Amazon configurada ni se simula una consulta automática. Cualquier otra tienda permite abrir el enlace e ingresar el precio. Los importes externos deben revisarse por cambios, impuestos, descuentos o gastos no incluidos por la tienda.
 

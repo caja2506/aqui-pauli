@@ -98,3 +98,43 @@ test('tipo de cambio de importación usa venta, no compra ni valores inventados'
   assert.equal((await handlers.getPricingExchangeRate(req)).rate, 520);
   await assert.rejects(createPricingHandlers({ db, fetchFn: async () => Response.json({ venta: { valor: 0 } }) }).getPricingExchangeRate(req));
 });
+
+const fragranceUrl = 'https://www.fragrancenet.com/cologne/example/product/eau-de-parfum';
+function fragrancePage(items, acceptsCoupon = true) {
+  const pageData = { currency: 'USD', acceptsCoupon, skuList: [{ SIZE: items }] };
+  return pageResponse('<script id="__NEXT_DATA__" type="application/json">' +
+    JSON.stringify({ props: { pageProps: { pageData } } }) + '</script>');
+}
+const fragranceItem = { sku: '22', name: 'Perfume 100 ml', isOutOfStock: false, ourPrice: 155.99, discountPrice: 104.51 };
+
+test('FragranceNet conserva SKU, precio regular y cupón solo para presentaciones disponibles', async () => {
+  const lookup = async (items, coupon) => (await lookupPrice(fragranceUrl, async () => fragrancePage(items, coupon))).offers;
+  const offers = await lookup([fragranceItem, { ...fragranceItem, sku: '23', isOutOfStock: true }], true);
+  assert.deepEqual(offers.map(row => [row.id, row.amount]), [['22-regular', 155.99], ['22-coupon', 104.51]]);
+  assert.match(offers[1].title, /100 ml.*Con cupón/);
+  assert.equal((await lookup([fragranceItem], false)).length, 1);
+  assert.equal((await lookup([{ ...fragranceItem, noDiscounts: true }], true)).length, 1);
+});
+
+test('rechazo temporal ofrece la observación del mismo producto con su fecha y caduca a las 24 horas', async () => {
+  const { db } = database();
+  let now = Date.UTC(2027, 0, 10);
+  let status = 200;
+  const handlers = createPricingHandlers({ db, now: () => now,
+    fetchFn: async () => status === 200 ? fragrancePage([fragranceItem]) : new Response('', { status }) });
+  const lookup = url => handlers.lookupExternalPrice({ auth: { uid: 'admin' }, data: { url } });
+  assert.equal((await lookup(fragranceUrl)).status, 'found');
+  const originalDate = new Date(now).toISOString();
+  status = 403; now += 12000;
+  const fallback = await lookup(fragranceUrl);
+  assert.equal(fallback.status, 'reference');
+  assert.equal(fallback.checkedAt, originalDate);
+  assert.equal(fallback.offers[1].amount, 104.51);
+  now += 12000;
+  assert.equal((await lookup(fragranceUrl + '-other')).offers.length, 0);
+  now = Date.parse(originalDate) + 86400000;
+  assert.equal((await lookup(fragranceUrl)).offers.length, 0);
+  now += 12000; status = 200; await lookup(fragranceUrl);
+  now += 12000; status = 404; assert.equal((await lookup(fragranceUrl)).offers.length, 0);
+  now += 12000; status = 403; assert.equal((await lookup(fragranceUrl)).offers.length, 0);
+});
