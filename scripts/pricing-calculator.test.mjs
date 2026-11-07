@@ -155,3 +155,15 @@ test('servicio guarda solo estándares privados validados y carga los valores so
   writeError = new Error('unavailable');
   await assert.rejects(service.savePricingSettings(defaults), /unavailable/);
 });
+
+test('precio copiado en Android calcula la cotización en colones y rechaza moneda o precios ambiguos', () => {
+  for (const value of ['$104.51', '104,51', 'US$ 104,51', 'USD $104.51']) {
+    const baseCost = calculator.parsePurchaseAmount(value, 'USD');
+    const result = calculator.calculateSellingPrice({ currency: 'USD', baseCost, exchangeRate: 452.13, inboundShipping: 7000 }, defaults);
+    assert.equal(result.suggestedPrice, 65200);
+    assert.equal(result.totalCost, 54252.11);
+  }
+  for (const value of ['€104.51', '₡104,51', '4 x $39.00', '$155.99 $104.51']) {
+    assert.ok(Number.isNaN(calculator.parsePurchaseAmount(value, 'USD')));
+  }
+});

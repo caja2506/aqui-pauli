@@ -1,5 +1,9 @@
 "use strict";
 
+const { createHash } = require('node:crypto');
+const verifiedReferences = require('./externalPriceReferences.json');
+const referenceMaxAge = 24 * 60 * 60 * 1000;
+
 class PricingAdminError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
@@ -90,6 +94,33 @@ function extractProductOffers(html) {
   return offers.slice(0, 20).map(({ key, ...offer }, index) => ({ id: String(index), ...offer }));
 }
 
+// FragranceNet includes the regular and conditional coupon prices under each size/SKU.
+function extractFragranceNetOffers(html) {
+  const script = html.match(/<script\b[^>]*\bid=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script\s*>/i);
+  if (!script) return null;
+  let data;
+  try { data = JSON.parse(script[1]).props?.pageProps?.pageData; } catch { return null; }
+  if (!Array.isArray(data?.skuList) || data.currency !== 'USD') return null;
+  const offers = new Map();
+  const validPrice = amount => Number.isFinite(amount) && amount > 0 && amount <= 1e9;
+  for (const group of data.skuList) {
+    if (!Array.isArray(group?.SIZE)) continue;
+    for (const item of group.SIZE) {
+      if (!item || item.isOutOfStock !== false || !item.sku || !item.name || !validPrice(item.ourPrice)) continue;
+      const add = (kind, label, amount) => {
+        const id = `${item.sku}-${kind}`;
+        offers.set(id, { id, title: `${decodeText(item.name)} · ${label}`, amount, currency: 'USD' });
+      };
+      add('regular', 'Precio regular', item.ourPrice);
+      if (data.acceptsCoupon === true && !item.noDiscounts && validPrice(item.discountPrice) && item.discountPrice < item.ourPrice) {
+        add('coupon', 'Con cupón', item.discountPrice);
+      }
+      if (offers.size >= 20) return [...offers.values()].slice(0, 20);
+    }
+  }
+  return [...offers.values()];
+}
+
 async function readBoundedHtml(response) {
   if (!(response.headers.get('content-type') || '').includes('text/html')) throw new PricingAdminError('unavailable', 'La tienda no entregó una página de producto legible.');
   const maxBytes = 2 * 1024 * 1024;
@@ -115,7 +146,7 @@ async function lookupPrice(value, fetchFn = fetch) {
   const originalStore = STORES[url.hostname];
   const signal = AbortSignal.timeout(12000);
   for (let redirects = 0; redirects <= 3; redirects++) {
-    const response = await fetchFn(url.href, { redirect: 'manual', signal, headers: { Accept: 'text/html', 'User-Agent': 'AquiPauli-PriceLookup/1.0' } });
+    const response = await fetchFn(url.href, { redirect: 'manual', signal, headers: { Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9', 'User-Agent': 'AquiPauli-PriceLookup/1.0' } });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       await response.body?.cancel();
       if (redirects === 3 || !response.headers.get('location')) break;
@@ -125,17 +156,47 @@ async function lookupPrice(value, fetchFn = fetch) {
     }
     if (!response.ok) {
       await response.body?.cancel();
-      return { status: 'manual_required', url: url.href, store: originalStore, offers: [], message: 'La tienda no permitió consultar el precio. Abrí el enlace e ingresalo manualmente.' };
+      return { status: 'manual_required', temporaryFailure: ![404, 410].includes(response.status), url: url.href, store: originalStore, offers: [], message: 'La tienda no permitió consultar el precio. Abrí el enlace e ingresalo manualmente.' };
     }
     const html = await readBoundedHtml(response);
-    if (/verify you are human|captcha|checking your browser|access denied|unusual traffic/i.test(html)) {
-      return { status: 'manual_required', url: url.href, store: originalStore, offers: [], message: 'La tienda requiere verificación en su página. Ingresá el precio manualmente.' };
+    const offers = (originalStore === 'FragranceNet' ? extractFragranceNetOffers(html) : null) ?? extractProductOffers(html);
+    if (!offers.length && /verify you are human|captcha|checking your browser|access denied|unusual traffic/i.test(html)) {
+      return { status: 'manual_required', url: url.href, store: originalStore, offers: [], temporaryFailure: true, message: 'La tienda requiere verificación en su página. Ingresá el precio manualmente.' };
     }
-    const offers = extractProductOffers(html);
     return { status: offers.length ? 'found' : 'manual_required', url: url.href, store: originalStore, offers,
       checkedAt: new Date().toISOString(), message: offers.length ? 'Revisá presentación, moneda y precio antes de usarlo.' : 'La página no publicó un precio exacto que podamos leer. Ingresalo manualmente.' };
   }
   throw new PricingAdminError('unavailable', 'No pudimos llegar a la página del producto. Podés ingresar el precio manualmente.');
+}
+
+// A refused request can reuse a recent observation for this exact product only.
+async function lookupWithReference(url, db, fetchFn, now) {
+  if (STORES[url.hostname] !== 'FragranceNet') return lookupPrice(url.href, fetchFn);
+  const canonical = new URL(url);
+  canonical.hostname = 'www.fragrancenet.com';
+  canonical.pathname = canonical.pathname.replace(/\/+$/, '');
+  const key = createHash('sha256').update(canonical.href).digest('hex');
+  const ref = db.collection('admin_external_price_cache').doc(key);
+  let result;
+  try {
+    result = await lookupPrice(url.href, fetchFn);
+  } catch (error) {
+    if (!(error instanceof TypeError || ['TimeoutError', 'AbortError'].includes(error.name))) throw error;
+    result = { status: 'manual_required', store: 'FragranceNet', url: url.href, offers: [], temporaryFailure: true,
+      message: 'FragranceNet no respondió. Podés ingresar el costo de compra.' };
+  }
+  if (!result.temporaryFailure) {
+    // An observed empty or removed listing supersedes older offers too.
+    await ref.set({ checkedAt: new Date(now()).toISOString(), offers: result.offers }).catch(() => {});
+    return result;
+  }
+  const saved = (await ref.get().catch(() => null))?.data();
+  const seed = verifiedReferences[canonical.href];
+  const latest = [saved, seed].filter(Boolean).sort((a, b) => Date.parse(b.checkedAt) - Date.parse(a.checkedAt))[0];
+  const age = now() - Date.parse(latest?.checkedAt);
+  if (!latest?.offers?.length || !(age >= 0 && age < referenceMaxAge)) return result;
+  return { status: 'reference', store: 'FragranceNet', url: url.href, offers: latest.offers, checkedAt: latest.checkedAt,
+    message: 'FragranceNet no respondió con un precio en vivo. Esta referencia tiene menos de 24 horas. Confirmá el precio y el cupón en la tienda.' };
 }
 
 function createPricingHandlers({ db, fetchFn = fetch, now = () => Date.now() }) {
@@ -161,7 +222,7 @@ function createPricingHandlers({ db, fetchFn = fetch, now = () => Date.now() }) 
         if (last && now() - last < 10000) throw new PricingAdminError('resource-exhausted', 'Esperá 10 segundos entre consultas.');
         tx.set(ref, { lastAtMs: now() });
       });
-      return lookupPrice(url.href, fetchFn);
+      return lookupWithReference(url, db, fetchFn, now);
     },
     getPricingExchangeRate: async req => {
       await requireAdmin(req);

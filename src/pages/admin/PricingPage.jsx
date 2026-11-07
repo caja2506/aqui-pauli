@@ -3,7 +3,7 @@ import { Calculator, Search, Upload, X, ArrowRight, Globe, Settings2, Loader2, S
 import CopyButton from '../../components/ui/CopyButton';
 import usePageTitle from '../../hooks/usePageTitle';
 import { getPricingSettings, savePricingSettings, getSupplierCatalog, importSupplierCatalog, lookupExternalPrice, getPricingExchangeRate } from '../../services/pricingCalculatorService';
-import { calculateSellingPrice, DEFAULT_PRICING_SETTINGS, PRICE_ROUNDING_STEPS, validateWorkbenchSettings, filterSupplierProducts, supplierPrice } from '../../utils/pricingCalculator';
+import { calculateSellingPrice, parsePurchaseAmount, DEFAULT_PRICING_SETTINGS, PRICE_ROUNDING_STEPS, validateWorkbenchSettings, filterSupplierProducts, supplierPrice } from '../../utils/pricingCalculator';
 import { formatCRC } from '../../utils/formatters';
 
 const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 outline-none focus:ring-2 focus:ring-rose-400 disabled:bg-slate-100';
@@ -11,9 +11,9 @@ const buttonClass = 'inline-flex items-center justify-center gap-2 rounded-xl px
 const money = value => new Intl.NumberFormat('es-CR', { style: 'currency', currency: 'CRC', maximumFractionDigits: 2 }).format(value);
 const percent = value => value.toLocaleString('es-CR', { maximumFractionDigits: 1 });
 
-function Field({ id, label, value, onChange, hint, min = 0, max = 1e9, readOnly = false }) {
+function Field({ id, label, value, onChange, hint, type = 'number', min = 0, max = 1e9, readOnly = false }) {
   return <div><label htmlFor={id} className="block text-sm font-bold text-slate-700 mb-1.5">{label}</label>
-    <input id={id} type="number" inputMode="decimal" min={min} max={max} step="any" value={value} readOnly={readOnly}
+    <input id={id} type={type} inputMode="decimal" min={min} max={max} step="any" value={value} readOnly={readOnly}
       onChange={event => onChange?.(event.target.value)} className={inputClass} aria-describedby={hint ? `${id}-hint` : undefined} />
     {hint && <p id={`${id}-hint`} className="text-xs text-slate-500 mt-1.5 leading-relaxed">{hint}</p>}</div>;
 }
@@ -78,7 +78,7 @@ export function PricingCalculator({ product = null, mode = 'supplier', payment =
     return () => { active = false; requestId.current += 1; };
   }, [international, fetchExchangeRate]);
   let result = null; let error = '';
-  try { result = calculateSellingPrice(costs, { ...settings, markupPercent: markup }); } catch (failure) { error = failure.message; }
+  try { result = calculateSellingPrice(international ? { ...costs, baseCost: parsePurchaseAmount(costs.baseCost, costs.currency) } : costs, { ...settings, markupPercent: markup }); } catch (failure) { error = failure.message; }
   const change = (key, value) => setCosts(previous => ({ ...previous, [key]: value }));
   const changeUrl = value => { requestId.current += 1; setUrl(value); if (lookup?.selectedId) setName(''); setLookup(null); setQuerying(false); change('baseCost', ''); };
   const consult = async () => {
@@ -119,10 +119,10 @@ export function PricingCalculator({ product = null, mode = 'supplier', payment =
           {lookup && <div role="status" className="text-sm text-slate-700 space-y-2"><p>{lookup.message}</p>
             {lookup.offers?.map(offer => <button key={offer.id} type="button" onClick={() => applyOffer(offer)} className={`w-full text-left p-3 rounded-xl border ${lookup.selectedId === offer.id ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200'}`}>
               <span className="block text-xs">{offer.title}</span><strong>{offer.currency} {offer.amount.toLocaleString('es-CR')} · {lookup.selectedId === offer.id ? 'Seleccionado' : 'Usar este precio'}</strong></button>)}
-            {lookup.checkedAt && <p className="text-xs">Consultado: {new Date(lookup.checkedAt).toLocaleString('es-CR')}</p>}</div>}
+            {lookup.checkedAt && <p className="text-xs">{lookup.status === 'reference' ? 'Referencia verificada' : 'Consultado'}: {new Date(lookup.checkedAt).toLocaleString('es-CR')}</p>}</div>}
         </div>}
         {!product && <div><label htmlFor="purchase-currency" className="block text-sm font-bold mb-1.5">Moneda de compra</label><select id="purchase-currency" value={costs.currency} onChange={event => change('currency', event.target.value)} className={inputClass}><option value="CRC">Colones (CRC)</option><option value="USD">Dólares (USD)</option></select></div>}
-        <Field id="base-cost" label={`Costo ${product ? 'mayorista' : 'de compra'} (${costs.currency})`} value={costs.baseCost} onChange={value => change('baseCost', value)} min={0.01} readOnly={!!product} />
+        <Field id="base-cost" type={international ? 'text' : 'number'} hint={international && lookup && !lookup.offers?.length ? 'Pegá aquí el precio de la presentación que vas a comprar. El resumen se actualiza al ingresarlo.' : undefined} label={`Costo ${product ? 'mayorista' : 'de compra'} (${costs.currency})`} value={costs.baseCost} onChange={value => { change('baseCost', value); if (lookup?.selectedId) setLookup(previous => ({ ...previous, selectedId: null })); }} min={0.01} readOnly={!!product} />
         {costs.currency === 'USD' && <Field id="exchange-rate" label="Tipo de cambio (₡ por US$1)" value={costs.exchangeRate} min={0.01} max={100000}
           onChange={value => { fxEdited.current = true; change('exchangeRate', value); }} hint={fx.loading ? 'Consultando referencia de venta…' : fx.message || 'Ingresá el tipo de cambio que te cobra tu banco.'} />}
         <Field id="inbound-shipping" label={international ? 'Traslado internacional completo (₡)' : 'Envío del proveedor (₡)'} value={costs.inboundShipping} onChange={value => change('inboundShipping', value)}
